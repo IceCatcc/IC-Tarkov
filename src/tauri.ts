@@ -9,6 +9,7 @@ import type {
   QuestGraph,
   QuestDetail,
   AppSettings,
+  PlayerProfile,
 } from './types'
 
 export async function initTauri(): Promise<UnlistenFn> {
@@ -63,8 +64,12 @@ export async function getSettings(): Promise<AppSettings> {
   return await invoke<AppSettings>('get_settings')
 }
 
-export async function saveSettings(logDir: string, screenshotDir: string): Promise<AppSettings> {
-  return await invoke<AppSettings>('save_settings', { logDir, screenshotDir })
+export async function saveSettings(
+  logDir: string,
+  screenshotDir: string,
+  profile?: PlayerProfile,
+): Promise<AppSettings> {
+  return await invoke<AppSettings>('save_settings', { logDir, screenshotDir, profile })
 }
 
 export async function openUrl(url: string): Promise<void> {

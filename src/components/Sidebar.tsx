@@ -3,9 +3,10 @@ import { useStore } from '../store'
 export function Sidebar() {
   const page = useStore((s) => s.page)
   const setPage = useStore((s) => s.setPage)
-  const items: { k: 'monitor' | 'graph' | 'map'; label: string; badge?: string }[] = [
+  const items: { k: 'monitor' | 'graph' | 'profile' | 'map'; label: string; badge?: string }[] = [
     { k: 'monitor', label: '监控' },
     { k: 'graph', label: '任务图谱' },
+    { k: 'profile', label: '角色' },
     { k: 'map', label: '地图', badge: '待开发' },
   ]
 

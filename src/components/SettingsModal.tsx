@@ -79,6 +79,7 @@ export default function SettingsModal() {
     setSaving(true)
     setError(null)
     try {
+      // 不传 profile：后端按现有设置合并，避免覆盖「角色管理」页的数据
       const st = await saveSettings(logDir.trim(), shotDir.trim())
       setSettings(st)
       // 用新目录重启监控并重新加载数据

@@ -158,23 +158,22 @@ fn process_file(
                 if !seen.lock().unwrap().insert(key) {
                     continue;
                 }
-                let (name, _tid, trader_name, objectives, rewards, wiki, _ml) =
-                    data::resolve_accept(&quest_id);
+                let info = data::resolve_accept(&quest_id);
                 {
                     let binding = app.state::<AppState>();
                     let mut st = binding.store.lock().unwrap();
-                    st.apply_accept(&quest_id, &name, &timestamp);
+                    st.apply_accept(&quest_id, &info.name, &timestamp);
                 }
                 if emit {
                     crate::emit_accept(
                         app,
                         &quest_id,
-                        &name,
+                        &info.name,
                         &trader_id,
-                        &trader_name,
-                        &objectives,
-                        &rewards,
-                        &wiki,
+                        &info.trader_name,
+                        &info.objectives,
+                        &info.wiki,
+                        info.min_level,
                         &timestamp,
                         &source,
                     );

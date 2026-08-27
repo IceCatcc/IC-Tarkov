@@ -14,11 +14,31 @@ pub struct AppState {
 
 // ---------------- 应用设置（持久化） ----------------
 
+/// 角色档案（日志无法提供好感度，由用户手动填写）
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PlayerProfile {
+    /// 玩家等级
+    pub level: u32,
+    /// 商人忠诚等级表：trader_id -> LL（1..4），未填写按 1 处理
+    pub loyalty: std::collections::HashMap<String, u32>,
+}
+
+impl Default for PlayerProfile {
+    fn default() -> Self {
+        Self {
+            level: 1,
+            loyalty: std::collections::HashMap::new(),
+        }
+    }
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub log_dir: String,
     pub screenshot_dir: String,
+    pub profile: PlayerProfile,
 }
 
 impl Default for AppSettings {
@@ -29,6 +49,7 @@ impl Default for AppSettings {
         Self {
             log_dir: "E:\\Tarkov\\Logs".to_string(),
             screenshot_dir: screenshots,
+            profile: PlayerProfile::default(),
         }
     }
 }
@@ -58,14 +79,18 @@ fn save_settings(
     app: tauri::AppHandle,
     log_dir: String,
     screenshot_dir: String,
+    profile: Option<PlayerProfile>,
 ) -> Result<AppSettings, String> {
     if !Path::new(&log_dir).is_dir() {
         return Err(format!("日志目录不存在：{log_dir}"));
     }
-    let s = AppSettings {
-        log_dir,
-        screenshot_dir,
-    };
+    // 以现有设置为基底合并，未传字段保持原值
+    let mut s = read_settings(&app);
+    s.log_dir = log_dir;
+    s.screenshot_dir = screenshot_dir;
+    if let Some(p) = profile {
+        s.profile = p;
+    }
     let p = settings_path(&app)?;
     if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -100,9 +125,9 @@ pub enum QuestEvent {
         name: String,
         trader_id: String,
         trader_name: String,
-        objectives: Vec<String>,
-        rewards: Vec<RewardPayload>,
+        objectives: Vec<data::ObjectivePayload>,
         wiki: String,
+        min_level: Option<u32>,
         timestamp: String,
         source: String,
     },
@@ -136,6 +161,12 @@ fn start_watching(app: tauri::AppHandle, dir: Option<String>) -> Result<(), Stri
         if let Some(h) = w.take() {
             h.stop();
         }
+    }
+    // 开始读取日志前先清空旧数据（防止热重载/重复读取残留）。
+    // 注意：必须在 watcher::start 之前——initial_scan 是同步执行的，start 后再清会抹掉刚扫出的历史。
+    {
+        let binding = app.state::<AppState>();
+        binding.store.lock().unwrap().clear();
     }
     let handle = watcher::start(&app, &path).map_err(|e| e.to_string())?;
     {
@@ -190,7 +221,7 @@ fn get_player_quests(app: tauri::AppHandle) -> Vec<store::PlayerQuest> {
     let st = binding.store.lock().unwrap();
     let mut out: Vec<store::PlayerQuest> = Vec::new();
     for (qid, entry) in &st.quests {
-        let (name, trader_id, trader_name, _obj, _rew, wiki, min_level) = data::resolve_accept(qid);
+        let info = data::resolve_accept(qid);
         let status = if entry.completed_at.is_some() {
             "completed"
         } else {
@@ -198,14 +229,14 @@ fn get_player_quests(app: tauri::AppHandle) -> Vec<store::PlayerQuest> {
         };
         out.push(store::PlayerQuest {
             quest_id: qid.clone(),
-            name,
-            trader_id,
-            trader_name,
+            name: info.name,
+            trader_id: info.trader_id,
+            trader_name: info.trader_name,
             accepted_at: entry.accepted_at.clone(),
             completed_at: entry.completed_at.clone(),
             status: status.to_string(),
-            wiki,
-            min_level,
+            wiki: info.wiki,
+            min_level: info.min_level,
         });
     }
     out.sort_by(|a, b| {
@@ -267,15 +298,16 @@ pub(crate) fn emit_state(app: &tauri::AppHandle) {
     let _ = app.emit("watcher-state", payload);
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_accept(
     app: &tauri::AppHandle,
     quest_id: &str,
     name: &str,
     trader_id: &str,
     trader_name: &str,
-    objectives: &[String],
-    rewards: &[(String, i64)],
+    objectives: &[data::ObjectivePayload],
     wiki: &str,
+    min_level: Option<u32>,
     timestamp: &str,
     source: &str,
 ) {
@@ -285,14 +317,8 @@ pub(crate) fn emit_accept(
         trader_id: trader_id.to_string(),
         trader_name: trader_name.to_string(),
         objectives: objectives.to_vec(),
-        rewards: rewards
-            .iter()
-            .map(|(n, c)| RewardPayload {
-                name: n.clone(),
-                count: *c,
-            })
-            .collect(),
         wiki: wiki.to_string(),
+        min_level,
         timestamp: timestamp.to_string(),
         source: source.to_string(),
     };

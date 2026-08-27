@@ -1,14 +1,23 @@
 import type { PlayerQuest } from '../types'
 import { openUrl } from '../tauri'
+import { traderImage } from '../traderImages'
 
 export function QuestCard({ quest }: { quest: PlayerQuest }) {
   const completed = quest.status === 'completed'
+  const avatar = traderImage(quest.traderId)
 
   return (
     <div className="bg-ink-800 border border-line rounded-xl p-4">
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
+            {avatar && (
+              <img
+                src={avatar}
+                alt={quest.traderName}
+                className="w-6 h-6 rounded-full object-cover border border-line shrink-0"
+              />
+            )}
             <span className="text-[14px] font-medium truncate">{quest.name}</span>
             {quest.traderName && (
               <span className="px-2 py-0.5 rounded text-[11px] border border-amber text-amber bg-amber-soft">

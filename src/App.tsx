@@ -12,8 +12,10 @@ import { TopBar } from './components/TopBar'
 import { Sidebar } from './components/Sidebar'
 import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
+import { ProfilePage } from './pages/ProfilePage'
 import { MapPage } from './pages/MapPage'
 import SettingsModal from './components/SettingsModal'
+import { WikiDrawer } from './components/WikiDrawer'
 
 export default function App() {
   const page = useStore((s) => s.page)
@@ -60,10 +62,12 @@ export default function App() {
         <main className="flex-1 min-w-0 overflow-hidden">
           {page === 'monitor' && <MonitorPage />}
           {page === 'graph' && <QuestGraphPage />}
+          {page === 'profile' && <ProfilePage />}
           {page === 'map' && <MapPage />}
         </main>
       </div>
       {showSettings && <SettingsModal />}
+      <WikiDrawer />
     </div>
   )
 }

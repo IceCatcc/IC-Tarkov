@@ -57,10 +57,22 @@ impl QuestStore {
     }
 
     fn push_activity(&mut self, row: ActivityRow) {
+        // 确定性 id 天然去重：开发热重载反复读取日志时，同一事件只记录一次
+        if self.activity.iter().any(|a| a.id == row.id) {
+            return;
+        }
         self.activity.insert(0, row);
         if self.activity.len() > ACTIVITY_CAP {
             self.activity.truncate(ACTIVITY_CAP);
         }
+    }
+
+    /// 开始监控前清空旧数据（避免热重载/换目录后的残留与重复）
+    pub fn clear(&mut self) {
+        self.quests.clear();
+        self.activity.clear();
+        self.last_scan = None;
+        self.error = None;
     }
 
     pub fn apply_accept(&mut self, quest_id: &str, name: &str, ts: &str) {
