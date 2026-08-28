@@ -74,10 +74,6 @@ export function TopBar() {
             {watcher.error}
           </span>
         )}
-        <div className="flex items-center gap-3 text-[11px] text-muted ml-auto pr-1">
-          {watcher.sessions > 0 && <span>会话 {watcher.sessions}</span>}
-          {watcher.lastScan && <span>扫描 {watcher.lastScan}</span>}
-        </div>
       </div>
 
       {/* 右侧：控制按钮（不可拖动区域） */}

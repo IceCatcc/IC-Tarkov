@@ -234,6 +234,9 @@ export function QuestGraphPage() {
   const focusMode = useStore((s) => s.focusGraph)
   const setFocusMode = useStore((s) => s.setFocusGraph)
   const setTraderGraph = useStore((s) => s.setTraderGraph)
+  // 侧边栏折叠时，顶部工具栏为左上角浮动按钮预留空位
+  // 注意：hook 必须位于所有 early return 之前，否则触发 "Rendered more hooks" 崩溃
+  const topPad = useTopPad()
 
   const [view, setView] = useState({ x: 30, y: 30, scale: 0.65 })
   const dragRef = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(
@@ -1359,8 +1362,6 @@ export function QuestGraphPage() {
     (!hideLegacy ? 1 : 0)
   // 商人下拉：已隐藏（未勾选显示）的商人数量
   const hiddenTraders = Object.values(disabledTraders).filter(Boolean).length
-  // 侧边栏折叠时，顶部工具栏为左上角浮动按钮预留空位
-  const topPad = useTopPad()
 
   return (
     <div className="h-full flex flex-col relative">

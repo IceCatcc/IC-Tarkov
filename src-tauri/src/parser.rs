@@ -27,19 +27,16 @@ pub enum RawEvent {
         trader_id: String,
         event_id: String,
         timestamp: String,
-        source: String,
     },
     CompleteNotif {
         quest_id: String,
         event_id: String,
         timestamp: String,
-        source: String,
     },
     Progress {
         endpoint: String,
         key: String,
         timestamp: String,
-        source: String,
     },
     Location {
         location_id: String,
@@ -114,14 +111,12 @@ pub fn parse_chunk(text: &str, st: &mut ParseState) -> Vec<RawEvent> {
                     endpoint: "client/quest/complete (提交完成)".to_string(),
                     key,
                     timestamp: st.cur_ts.clone(),
-                    source: String::new(),
                 });
             } else if RE_QUEST_LIST.is_match(url) {
                 out.push(RawEvent::Progress {
                     endpoint: "client/quest/list (同步任务列表)".to_string(),
                     key,
                     timestamp: st.cur_ts.clone(),
-                    source: String::new(),
                 });
             }
         } else if line.contains("RaidId") {
@@ -162,8 +157,6 @@ fn parse_notif(json: &str, ts: &str) -> Option<RawEvent> {
     struct NotifMsg {
         #[serde(rename = "templateId", default)]
         template_id: String,
-        #[serde(default)]
-        text: String,
     }
 
     let cleaned = RE_TRAIL_COMMA.replace_all(json, "$1");
@@ -171,7 +164,6 @@ fn parse_notif(json: &str, ts: &str) -> Option<RawEvent> {
     let cap = RE_TEMPLATE.captures(&n.message.template_id)?;
     let quest_id = cap.get(1).unwrap().as_str().to_string();
     let suffix = cap.get(2).unwrap().as_str();
-    let source = String::new();
 
     match suffix {
         "description" => Some(RawEvent::Accept {
@@ -179,13 +171,11 @@ fn parse_notif(json: &str, ts: &str) -> Option<RawEvent> {
             trader_id: n.dialog_id,
             event_id: n.event_id,
             timestamp: ts.to_string(),
-            source,
         }),
         "successMessageText" => Some(RawEvent::CompleteNotif {
             quest_id,
             event_id: n.event_id,
             timestamp: ts.to_string(),
-            source,
         }),
         _ => None,
     }

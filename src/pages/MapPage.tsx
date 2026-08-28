@@ -943,11 +943,6 @@ export function MapPage() {
           ))}
         </div>
         <div className="flex-1" />
-        {currentMapId && (
-          <span className="text-[10.5px] text-muted" title={`游戏 location id：${currentMapId}`}>
-            当前地图：{markers.nameIdFallback?.[currentMapId] ?? markers.nameIds?.[currentMapId] ?? currentMapId}
-          </span>
-        )}
       </div>
 
       {/* 地图区 */}

@@ -5,6 +5,15 @@ import { traderImage } from '../traderImages'
 import { TRADERS } from '../traderMeta'
 import type { PlayerProfile, MapInfo } from '../types'
 
+// 地图解锁里需要合并显示/统一切换的变体组（同组任一勾选即视为已解锁）
+// 工厂：白天工厂 + 夜间工厂；实验室：实验室 + 实验室 (Dark)；中心区：中心区 + 中心区 21+
+const MAP_GROUPS: { label: string; ids: string[] }[] = [
+  { label: '工厂', ids: ['55f2d3fd4bdc2d5f408b4567', '59fc81d786f774390775787e'] },
+  { label: '实验室', ids: ['5b0fc42d86f7744a585f9105', '6a294a5b5eb5f9a1700417b7'] },
+  { label: '中心区', ids: ['653e6760052c01c1c805532f', '65b8d6f5cdde2479cb2a3125'] },
+]
+const GROUPED_IDS = new Set(MAP_GROUPS.flatMap((g) => g.ids))
+
 export function ProfilePage() {
   const settings = useStore((s) => s.settings)
   const setSettings = useStore((s) => s.setSettings)
@@ -62,17 +71,20 @@ export function ProfilePage() {
     const next = locked ? [...new Set([...cur, id])] : cur.filter((m) => m !== id)
     applyLockedMaps(next)
   }
+  // 变体组整体切换：勾选=全部解锁，取消=全部锁定
+  const toggleMapGroup = (ids: string[], locked: boolean) => {
+    const cur = profile.lockedMaps ?? []
+    const next = locked
+      ? [...new Set([...cur, ...ids])]
+      : cur.filter((m) => !ids.includes(m))
+    applyLockedMaps(next)
+  }
 
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-[1100px] mx-auto px-6 py-6">
         <div className="text-[15px] font-medium mb-1" style={{ paddingLeft: topPad }}>
           角色管理
-        </div>
-        <div className="text-[12px] text-muted mb-5 leading-relaxed">
-          日志中不含好感度信息，需在此维护；点击商人右侧按钮即可切换忠诚等级 / 解锁状态，改动自动保存。
-          任务图谱默认只显示「好感达标」的任务。标为「未解锁」的商人，其全部任务会被隐藏
-          （如 Jaeger 需完成机械师「介绍」任务后解锁）。商人对应任务在图谱中还会排在解锁任务右侧。
         </div>
 
         <label className="text-[12px] text-muted block mb-1.5">玩家等级</label>
@@ -162,23 +174,50 @@ export function ProfilePage() {
             <div className="text-[12px] text-muted">加载地图列表…</div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-              {maps.map((m) => {
-                const locked = (profile.lockedMaps ?? []).includes(m.id)
+              {/* 合并后的变体组（工厂 / 实验室 / 中心区），统一切换 */}
+              {MAP_GROUPS.map((g) => {
+                const lockedList = profile.lockedMaps ?? []
+                // 组内任一未锁定即视为已解锁
+                const unlocked = g.ids.some((id) => !lockedList.includes(id))
+                const variants = maps
+                  .filter((m) => g.ids.includes(m.id))
+                  .map((m) => m.name)
                 return (
                   <label
-                    key={m.id}
+                    key={g.label}
+                    title={`包含：${variants.join('、')}`}
                     className="flex items-center gap-2 text-[12px] text-[#e6edf3] bg-ink-800/60 border border-line rounded px-2 py-1.5 cursor-pointer select-none hover:border-amber/60"
                   >
                     <input
                       type="checkbox"
-                      checked={!locked}
-                      onChange={(e) => toggleMapLocked(m.id, !e.target.checked)}
+                      checked={unlocked}
+                      onChange={(e) => toggleMapGroup(g.ids, !e.target.checked)}
                       className="accent-[#ef9f27]"
                     />
-                    {m.name}
+                    {g.label}
                   </label>
                 )
               })}
+              {/* 其余地图（不含已合并的变体） */}
+              {maps
+                .filter((m) => !GROUPED_IDS.has(m.id))
+                .map((m) => {
+                  const locked = (profile.lockedMaps ?? []).includes(m.id)
+                  return (
+                    <label
+                      key={m.id}
+                      className="flex items-center gap-2 text-[12px] text-[#e6edf3] bg-ink-800/60 border border-line rounded px-2 py-1.5 cursor-pointer select-none hover:border-amber/60"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!locked}
+                        onChange={(e) => toggleMapLocked(m.id, !e.target.checked)}
+                        className="accent-[#ef9f27]"
+                      />
+                      {m.name}
+                    </label>
+                  )
+                })}
             </div>
           )}
         </div>
