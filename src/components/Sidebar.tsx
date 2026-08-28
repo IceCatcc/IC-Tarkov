@@ -37,7 +37,7 @@ export function Sidebar() {
             <button
               key={it.k}
               onClick={() => setPage(it.k)}
-              className={`w-full text-left px-4 py-2 text-[13px] ${
+              className={`w-full text-left px-4 py-2 text-[15px] ${
                 page === it.k
                   ? 'text-[#e6edf3] border-l-2 border-amber bg-ink-700/40'
                   : 'text-muted hover:text-[#e6edf3]'
@@ -61,7 +61,7 @@ export function Sidebar() {
           title={open ? '收起侧边栏' : '展开侧边栏（悬停显示快捷切换）'}
           className="w-7 h-7 grid place-items-center rounded border border-line bg-ink-800 text-muted transition-colors hover:text-[#e6edf3] hover:bg-ink-700 shadow-md"
         >
-          <span className="text-[13px] leading-none">{open ? '‹' : '›'}</span>
+          <span className="text-[15px] leading-none">{open ? '‹' : '›'}</span>
         </button>
 
         {/* 悬浮快捷菜单：折叠时可直接切换界面 */}
@@ -74,13 +74,13 @@ export function Sidebar() {
                   setPage(it.k)
                   setFlyout(false)
                 }}
-                className={`w-full text-left px-3 py-1.5 text-[12.5px] flex items-center gap-2 ${
+                className={`w-full text-left px-3 py-1.5 text-[14.5px] flex items-center gap-2 ${
                   page === it.k
                     ? 'text-[#e6edf3] bg-ink-700/60'
                     : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/40'
                 }`}
               >
-                <span className="text-[11px] opacity-70 w-3 text-center">{it.icon}</span>
+                <span className="text-[13px] opacity-70 w-3 text-center">{it.icon}</span>
                 {it.label}
               </button>
             ))}

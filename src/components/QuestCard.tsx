@@ -30,20 +30,20 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
             className="w-6 h-6 rounded-full object-cover border border-line shrink-0"
           />
         )}
-        <span className="text-[14px] font-medium truncate">{quest.name}</span>
+        <span className="text-[16px] font-medium truncate">{quest.name}</span>
         {quest.traderName && (
-          <span className="px-2 py-0.5 rounded text-[11px] border border-amber text-amber bg-amber-soft shrink-0">
+          <span className="px-2 py-0.5 rounded text-[13px] border border-amber text-amber bg-amber-soft shrink-0">
             {quest.traderName.toUpperCase()}
           </span>
         )}
         <div className="ml-auto flex items-center gap-2 shrink-0">
-          <div className="text-[10px] text-muted/60 leading-tight whitespace-nowrap">
+          <div className="text-[12px] text-muted/60 leading-tight whitespace-nowrap">
             {quest.acceptedAt && <span>接取 {quest.acceptedAt}</span>}
             {quest.completedAt && <span> · 完成 {quest.completedAt}</span>}
             {quest.minLevel != null && <span> · 最低 Lv{quest.minLevel}</span>}
           </div>
           <span
-            className={`px-2 py-0.5 rounded-full text-[11px] border shrink-0 ${
+            className={`px-2 py-0.5 rounded-full text-[13px] border shrink-0 ${
               completed
                 ? 'bg-[#1b1f24] border-done text-muted'
                 : 'bg-blue-soft border-blue text-blue'
@@ -57,7 +57,7 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
       {/* 任务目标 */}
       {detail?.objectives?.length ? (
         <div className="mt-3 pt-3 border-t border-line">
-          <ul className="space-y-1 text-[12px] text-[#c9d1d9]">
+          <ul className="space-y-1 text-[14px] text-[#c9d1d9]">
             {detail.objectives.map((o, i) => (
               <li key={i} className="leading-snug">
                 - {o.description}
@@ -86,7 +86,7 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
                   loading="lazy"
                   className="w-3.5 h-3.5 object-contain"
                 />
-                <span className="truncate max-w-[110px] text-[12px]">
+                <span className="truncate max-w-[110px] text-[14px]">
                   {it.name}
                 </span>
                 {it.count != null && it.count > 0 && (
@@ -95,7 +95,7 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
               </span>
             ))}
             {items.length > 12 && (
-              <span className="text-[12px] text-muted self-center">
+              <span className="text-[14px] text-muted self-center">
                 +{items.length - 12}
               </span>
             )}
@@ -106,7 +106,7 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
       {/* 奖励 */}
       {detail?.rewards?.length ? (
         <div className="mt-3 pt-3 border-t border-line">
-          <div className="text-[12px] text-[#c9d1d9]">
+          <div className="text-[14px] text-[#c9d1d9]">
             {detail.rewards.map((r, i) => (
               <span key={i}>
                 {r.name} ×{r.count}

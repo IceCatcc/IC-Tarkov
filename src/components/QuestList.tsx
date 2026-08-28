@@ -16,7 +16,7 @@ export function QuestList() {
 
   if (filtered.length === 0) {
     return (
-      <div className="text-[12px] text-muted py-10 text-center">
+      <div className="text-[14px] text-muted py-10 text-center">
         暂无任务记录。开始监控后将自动识别接取 / 完成事件。
       </div>
     )

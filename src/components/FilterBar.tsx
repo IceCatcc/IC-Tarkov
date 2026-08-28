@@ -21,7 +21,7 @@ export function FilterBar() {
         <button
           key={c.k}
           onClick={() => setFilter(c.k)}
-          className={`px-3 py-1 rounded-full text-[12px] border ${
+          className={`px-3 py-1 rounded-full text-[14px] border ${
             filter === c.k
               ? 'bg-amber-soft border-amber text-amber'
               : 'bg-ink-800 border-line text-muted'
@@ -33,7 +33,7 @@ export function FilterBar() {
       <select
         value={traderFilter ?? ''}
         onChange={(e) => setTraderFilter(e.target.value || null)}
-        className="ml-auto bg-ink-800 border border-line text-[12px] rounded px-2 py-1 text-muted"
+        className="ml-auto bg-ink-800 border border-line text-[14px] rounded px-2 py-1 text-muted"
       >
         <option value="">全部商人</option>
         {traders.map((t) => (

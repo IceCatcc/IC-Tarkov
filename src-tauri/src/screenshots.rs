@@ -128,7 +128,7 @@ impl ScreenshotHandle {
     }
 }
 
-/// 每 1.5s 扫描一次截图目录；文件变化时解析并 emit `player-position`。
+/// 每 0.5s 扫描一次截图目录；文件变化时解析并 emit `player-position`。
 /// `delete_after` 为 true 时读取坐标后删除该截图（避免重复消费），false 时保留。
 pub fn start(app: &AppHandle, dir: &str, delete_after: bool) -> ScreenshotHandle {
     let _ = started_at(); // 记录启动时刻
@@ -144,13 +144,13 @@ pub fn start(app: &AppHandle, dir: &str, delete_after: bool) -> ScreenshotHandle
                 break;
             }
             if !dir.is_dir() {
-                std::thread::sleep(std::time::Duration::from_millis(1500));
+                std::thread::sleep(std::time::Duration::from_millis(500));
                 continue;
             }
             if let Some((path, mtime)) = scan_latest(&dir) {
                 // 启动之前就存在的截图不用于定位
                 if mtime <= started_at() {
-                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    std::thread::sleep(std::time::Duration::from_millis(500));
                     continue;
                 }
                 let key = format!(
@@ -175,7 +175,7 @@ pub fn start(app: &AppHandle, dir: &str, delete_after: bool) -> ScreenshotHandle
                     }
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(1500));
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
     });
     ScreenshotHandle { stop }

@@ -467,6 +467,43 @@ export function MapPage() {
     const floorHandles = new Map<number, FloorHandle>()
     let defaultHandle: FloorHandle | null = null
 
+    // SVG 楼层组状态（异步加载 SVG 后填充）
+    interface SvgGroup {
+      id: string
+      isBase: boolean
+      keepWith: string[]
+      el: SVGGElement
+    }
+    let svgRoot: SVGSVGElement | null = null
+    let svgGroups: SvgGroup[] = []
+
+    /**
+     * 统一切换 SVG 组显隐。
+     * @param layerName 目标楼层组 id；null = 主层
+     * @param dim 切到其它楼层时压暗 base（off-level）
+     * @param hideBase base 也隐藏（tile 楼层：瓦片为底图，SVG 主层不能盖住它）
+     */
+    const applySvgLayer = (
+      layerName: string | null,
+      dim: boolean,
+      hideBase: boolean,
+    ) => {
+      if (!svgRoot) return
+      svgRoot.style.display = ''
+      svgRoot.classList.toggle('off-level', dim)
+      for (const gr of svgGroups) {
+        if (gr.isBase) {
+          gr.el.classList.toggle('hidden-layer', hideBase)
+          continue
+        }
+        const match =
+          layerName != null &&
+          (gr.id === layerName || gr.keepWith.includes(layerName))
+        gr.el.classList.toggle('hidden-layer', !match)
+      }
+    }
+    const showSvgMain = () => applySvgLayer(imap.svgLayer ?? null, false, false)
+
     const applyFloor = (idx: number) => {
       defaultHandle?.[idx === -1 ? 'show' : 'hide']()
       for (const [i, h] of floorHandles) h[i === idx ? 'show' : 'hide']()
@@ -509,7 +546,7 @@ export function MapPage() {
             outer.setAttribute('viewBox', inner.getAttribute('viewBox') as string)
           }
           // 收集带 id 的顶层 g 作为可切换楼层组（官方机制）
-          const groups: { id: string; isBase: boolean; keepWith: string[]; el: SVGGElement }[] = []
+          const groups: SvgGroup[] = []
           for (const child of Array.from(inner.children)) {
             if (child.nodeName !== 'g') continue
             const gEl = child as SVGGElement
@@ -517,50 +554,38 @@ export function MapPage() {
             const keepWith = ((gEl.dataset['keepWithGroup'] as string) ?? '')
               .split(',')
               .filter(Boolean)
-            const isBase = gEl.id === imap.svgLayer || keepWith.includes(imap.svgLayer ?? '\u0000')
+            // base 仅为主层组本身；「跟随主层的附属组」（keepWith 含主层名）不算 base——
+            // 否则它们永不隐藏，切楼层时旧层图形叠在新层上，切换看起来无效
+            const isBase = gEl.id === imap.svgLayer
             groups.push({ id: gEl.id, isBase, keepWith, el: gEl })
             gEl.classList.add(isBase ? 'base-layer' : 'hidden-layer', ...(isBase ? [] : ['overlay-layer']))
           }
-          // SVG 楼层显隐（官方机制）：选中楼层时根 svg 加 off-level 压暗 base，
-          // 非该楼层的 overlay-layer 组加 hidden-layer 隐藏
-          const showSvgFloor = (layerName: string) => {
-            outer.classList.add('off-level')
-            for (const gr of groups) {
-              if (gr.isBase) continue // base 保留可见（被压暗）
-              const match = gr.id === layerName || gr.keepWith.includes(layerName)
-              gr.el.classList.toggle('hidden-layer', !match)
-            }
-          }
-          ;(imap.layers ?? []).forEach((lyr, i) => {
-            if (lyr.tilePath) return // tile 楼层在下方统一处理
-            const name = lyr.svgLayer ?? lyr.name
-            floorHandles.set(i, { show: () => showSvgFloor(name), hide: () => {} })
-          })
-          const svgDefault: FloorHandle = {
-            show: () => {
-              outer.classList.remove('off-level')
-              for (const gr of groups) {
-                if (!gr.isBase) gr.el.classList.add('hidden-layer')
-              }
-            },
+          svgRoot = outer
+          svgGroups = groups
+          defaultHandle = {
+            show: () => showSvgMain(),
             hide: () => {},
           }
-          defaultHandle = svgDefault
-          svgDefault.show()
+          showSvgMain()
           // 必须 addTo：Layer 构造后元素才会真正插入 overlay-pane
           L.svgOverlay(outer, rawBounds, { interactive: false }).addTo(container)
         })
         .catch((err) => console.error('svg load failed', err))
     }
 
-    // tile 楼层
+    // tile 楼层（可能同时带 svgLayer：瓦片作底图 + SVG 该层结构线稿叠加）
     ;(imap.layers ?? []).forEach((lyr, i) => {
       if (!lyr.tilePath) return
       const tl = L.tileLayer(lyr.tilePath, tileOpts)
       floorHandles.set(i, {
         show: () => {
           if (!container.hasLayer(tl)) tl.addTo(container)
-          defaultHandle?.hide()
+          if (lyr.svgLayer) {
+            // 显示该层 SVG 结构组并隐藏 SVG 主层（否则主层图形盖住 tile 楼层）
+            applySvgLayer(lyr.svgLayer, true, true)
+          } else if (svgRoot) {
+            svgRoot.style.display = 'none' // 无对应 SVG 组：隐藏整个线稿
+          }
         },
         hide: () => {
           if (container.hasLayer(tl)) container.removeLayer(tl)
@@ -809,23 +834,24 @@ export function MapPage() {
         zIndexOffset: 10000,
         interactive: false,
       }).addTo(map)
-      // 首次出现：缩放 + 平移聚焦到玩家；后续截图保持当前缩放、平移跟随
-      const targetZoom = Math.max(
-        imap.minZoom ?? 1,
-        Math.min(imap.maxZoom ?? 6, 4),
-      )
-      if (!panOnceRef.current) {
-        panOnceRef.current = true
-        map.setView(ll, targetZoom, { animate: true })
-      } else {
-        map.setView(ll, map.getZoom(), { animate: true })
-      }
     } else {
       playerMarkerRef.current.setLatLng(ll)
       const img = playerMarkerRef.current
         .getElement()
         ?.querySelector<HTMLImageElement>('img')
       if (img) img.style.transform = `rotate(${deg.toFixed(1)}deg)`
+    }
+    // 每次截图都平移跟随玩家：首次（换图后第一帧）聚焦缩放，之后保持用户当前缩放。
+    // animate:false——无平移动画，截图一到立即到位
+    if (!panOnceRef.current) {
+      panOnceRef.current = true
+      const targetZoom = Math.max(
+        imap.minZoom ?? 1,
+        Math.min(imap.maxZoom ?? 6, 4),
+      )
+      map.setView(ll, targetZoom, { animate: false })
+    } else {
+      map.setView(ll, map.getZoom(), { animate: false })
     }
   }, [shotPos, imap])
 
@@ -889,14 +915,14 @@ export function MapPage() {
 
   if (loadErr) {
     return (
-      <div className="h-full flex items-center justify-center text-red-400 text-[13px]">
+      <div className="h-full flex items-center justify-center text-red-400 text-[15px]">
         地图数据加载失败：{loadErr}
       </div>
     )
   }
   if (!skeleton || !markers) {
     return (
-      <div className="h-full flex items-center justify-center text-muted text-[13px]">
+      <div className="h-full flex items-center justify-center text-muted text-[15px]">
         正在加载地图数据…
       </div>
     )
@@ -917,7 +943,7 @@ export function MapPage() {
             setSelected(e.target.value)
             setFloorSel(-1)
           }}
-          className="bg-ink-700 border border-line rounded px-2 py-[4px] text-[12px] text-[#e6edf3] outline-none cursor-pointer"
+          className="bg-ink-700 border border-line rounded px-2 py-[4px] text-[14px] text-[#e6edf3] outline-none cursor-pointer"
         >
           {skeleton.groups
             .filter((g) => g.maps.some((m) => m.projection === 'interactive'))
@@ -932,7 +958,7 @@ export function MapPage() {
             <button
               key={c.key}
               onClick={() => setChips((p) => ({ ...p, [c.key]: !p[c.key] }))}
-              className={`px-2 py-[3px] rounded text-[11px] border ${
+              className={`px-2 py-[3px] rounded text-[13px] border ${
                 chips[c.key]
                   ? 'border-amber text-[#d4a174] bg-amber/10'
                   : 'border-line text-muted hover:text-[#e6edf3]'
@@ -954,7 +980,7 @@ export function MapPage() {
             <button
               onClick={() => setFloorOpen((o) => !o)}
               title="切换地图层级"
-              className="min-w-[86px] flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/95 shadow-lg text-[12px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+              className="min-w-[86px] flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/95 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path
@@ -973,7 +999,7 @@ export function MapPage() {
               </svg>
               {floorSel === -1 ? '主层' : floors[floorSel]?.name || '主层'}
               <span
-                className="text-[9px] opacity-70 transition-transform"
+                className="text-[11px] opacity-70 transition-transform"
                 style={{ transform: floorOpen ? 'rotate(180deg)' : 'none' }}
               >
                 ▼
@@ -987,7 +1013,7 @@ export function MapPage() {
                     setFloorSel(-1)
                     setFloorOpen(false)
                   }}
-                  className={`w-full text-left px-2.5 py-1.5 text-[12px] ${
+                  className={`w-full text-left px-2.5 py-1.5 text-[14px] ${
                     floorSel === -1
                       ? 'text-[#d4a174] bg-amber/10'
                       : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
@@ -1002,7 +1028,7 @@ export function MapPage() {
                       setFloorSel(i)
                       setFloorOpen(false)
                     }}
-                    className={`w-full text-left px-2.5 py-1.5 text-[12px] ${
+                    className={`w-full text-left px-2.5 py-1.5 text-[14px] ${
                       floorSel === i
                         ? 'text-[#d4a174] bg-amber/10'
                         : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
@@ -1016,14 +1042,16 @@ export function MapPage() {
           </div>
         )}
 
-        <div className="absolute left-2 bottom-2 z-[500] px-2 py-1 rounded bg-black/60 text-[10.5px] text-[#8b949e] pointer-events-none">
+        <div className="absolute left-2 bottom-2 z-[500] px-2 py-1 rounded bg-black/60 text-[12.5px] text-[#8b949e] pointer-events-none">
           {cursorCoord ? `X ${cursorCoord.x.toFixed(1)} · Z ${cursorCoord.z.toFixed(1)}` : ''}
-          {'　'}
-          {shotPos
-            ? `玩家 ${shotPos.position.x.toFixed(1)}, ${shotPos.position.z.toFixed(1)} · 航向 ${Math.round(
+          {shotPos && (
+            <>
+              {'　'}
+              {`玩家 ${shotPos.position.x.toFixed(1)}, ${shotPos.position.z.toFixed(1)} · 航向 ${Math.round(
                 iconRotationDeg(shotPos.rotation, 0),
-              )}° · ${shotPos.timestamp}`
-            : '等待截图坐标…（进入 raid 后按 F12 截图即可定位）'}
+              )}° · ${shotPos.timestamp}`}
+            </>
+          )}
         </div>
       </div>
     </div>

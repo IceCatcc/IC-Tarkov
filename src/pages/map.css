@@ -5,8 +5,8 @@
     font-family: inherit;
 }
 
-/* SVG 楼层组显隐（选择器与 the-hideout/tarkov-dev 官方一致） */
-.leaflet-pane.leaflet-overlay-pane svg .overlay-layer.hidden-layer {
+/* SVG 楼层组显隐（选择器与 the-hideout/tarkov-dev 官方一致；tile 楼层时 base 组也加 hidden-layer 隐藏） */
+.leaflet-pane.leaflet-overlay-pane svg .hidden-layer {
     display: none;
 }
 /* 切到其它楼层时压暗底图层 */
@@ -38,7 +38,7 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     pointer-events: none;
 }
 
-/* 标记弹窗暗色化 */
+/* 标记弹窗暗色化 + 放大 1.5 倍 */
 .leaflet-popup-content-wrapper,
 .leaflet-popup-tip {
     background: #161b22;
@@ -49,16 +49,25 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
 .leaflet-popup-content-wrapper {
     border-radius: 8px;
 }
+.leaflet-popup-content {
+    margin: 15px 24px;
+    font-size: 16.5px;
+    line-height: 1.5;
+    max-width: 460px;
+    min-width: 210px;
+}
 .leaflet-popup-close-button {
     color: #8b949e !important;
+    font-size: 30px !important;
+    padding: 8px 10px 0 0 !important;
 }
 .map-popup-title {
-    font-size: 13px;
+    font-size: 19.5px;
     font-weight: 700;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
 }
 .map-popup-meta {
-    font-size: 11px;
+    font-size: 16.5px;
     color: #8b949e;
     line-height: 1.5;
 }
@@ -67,13 +76,13 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
 .req-item {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
 }
 .req-item-img {
-    width: 18px;
-    height: 18px;
+    width: 27px;
+    height: 27px;
     object-fit: contain;
-    border-radius: 3px;
+    border-radius: 4px;
     background: #1b2027;
     flex: 0 0 auto;
 }
@@ -103,8 +112,8 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     display: none; /* 去掉小箭头 */
 }
 .extract-name {
-    display: inline-block;
-    font-size: 11px;
+    display: block; /* 撤离要求换行显示在名称下方 */
+    font-size: 19px;
     font-weight: 600;
     white-space: nowrap;
     text-shadow:
@@ -117,12 +126,12 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
 }
 .extract-req {
     display: inline-block;
-    margin: 2px 3px 0 0;
-    padding: 0 4px;
-    font-size: 9.5px;
+    margin: 3px 4px 0 0;
+    padding: 0 6px;
+    font-size: 16px;
     font-weight: 600;
-    line-height: 14px;
-    border-radius: 4px;
+    line-height: 22px;
+    border-radius: 5px;
     white-space: nowrap;
     user-select: none;
     pointer-events: none;
@@ -164,5 +173,4 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     filter:
         drop-shadow(0 0 2px rgba(0, 0, 0, 0.9))
         drop-shadow(0 0 4px rgba(0, 0, 0, 0.6));
-    transition: transform 0.4s ease-out;
 }

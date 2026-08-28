@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 
 rem ==== EFT Spy release build script ====
 
@@ -17,18 +17,32 @@ where cargo >nul 2>nul || set "PATH=C:\Users\lsscf\.cargo\bin;%PATH%"
 
 cd /d "%~dp0"
 
-echo [EFT Spy] building release bundle ...
+rem -- read version from tauri.conf.json (single source of truth) --
+set "APPVER="
+for /f "usebackq delims=" %%v in (`powershell -NoProfile -Command "(Get-Content -Raw 'src-tauri\tauri.conf.json' | ConvertFrom-Json).version"`) do set "APPVER=%%v"
+if "!APPVER!"=="" set "APPVER=unknown"
+
+echo [EFT Spy] building release bundle (v!APPVER!) ...
 call npm run tauri build %*
 set EXITCODE=%ERRORLEVEL%
 
-if "%EXITCODE%"=="0" (
-    echo.
-    echo [EFT Spy] build OK. Outputs:
-    echo   app exe : src-tauri\target\release\EFT Spy.exe
-    echo   nsis    : src-tauri\target\release\bundle\nsis\
-    echo   msi     : src-tauri\target\release\bundle\msi\
+if "!EXITCODE!"=="0" (
+    rem -- copy exe with version in filename --
+    set "SRC_EXE=src-tauri\target\release\EFT Spy.exe"
+    set "DST_EXE=src-tauri\target\release\EFT-Spy-!APPVER!.exe"
+    if exist "!SRC_EXE!" (
+        copy /y "!SRC_EXE!" "!DST_EXE!" >nul
+        echo.
+        echo [EFT Spy] build OK. Outputs:
+        echo   app exe : !SRC_EXE!
+        echo   named   : !DST_EXE!
+        echo   nsis    : src-tauri\target\release\bundle\nsis\
+        echo   msi     : src-tauri\target\release\bundle\msi\
+    ) else (
+        echo [EFT Spy] build OK but exe not found: !SRC_EXE!
+    )
 ) else (
-    echo [EFT Spy] build FAILED with exit code %EXITCODE%
+    echo [EFT Spy] build FAILED with exit code !EXITCODE!
 )
 
-exit /b %EXITCODE%
+exit /b !EXITCODE!

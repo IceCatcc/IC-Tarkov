@@ -1,6 +1,6 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
-import { useStore } from './store'
+import { useStore, collectUiPrefs } from './store'
 import type {
   QuestEventPayload,
   WatcherStatePayload,
@@ -51,11 +51,44 @@ export async function initTauri(): Promise<UnlistenFn> {
     })
     .catch(() => {})
 
+  // —— UI 偏好统一持久化到后端 settings.json（localStorage 仅作首帧缓存）——
+  // 启动恢复在 App.tsx 拿到 getSettings 结果后调用 applyUiPrefs；
+  // 这里订阅偏好字段变化，防抖写回后端。
+  let prefTimer: number | undefined
+  let prevSnapshot = JSON.stringify({ sidebarOpen: useStore.getState().sidebarOpen })
+  const prefFields = [
+    'sidebarOpen',
+    'repMetGraph',
+    'lvlMetGraph',
+    'mapUnlockedGraph',
+    'showCompletedGraph',
+    'hideLegacyGraph',
+    'disabledTradersGraph',
+    'questMode',
+  ] as const
+  const offPrefs = useStore.subscribe((state) => {
+    const snap = JSON.stringify(Object.fromEntries(prefFields.map((k) => [k, state[k]])))
+    if (snap === prevSnapshot) return
+    prevSnapshot = snap
+    if (prefTimer) window.clearTimeout(prefTimer)
+    prefTimer = window.setTimeout(() => {
+      const s = useStore.getState()
+      saveSettings(
+        s.settings.logDir,
+        s.settings.screenshotDir,
+        s.settings.deleteScreenshots,
+        undefined,
+        collectUiPrefs(),
+      ).catch(() => {})
+    }, 400)
+  })
+
   return () => {
     offQuest()
     offState()
     offMap()
     offMode()
+    offPrefs?.()
   }
 }
 
@@ -127,12 +160,14 @@ export async function saveSettings(
   screenshotDir: string,
   deleteScreenshots?: boolean,
   profile?: PlayerProfile,
+  uiPrefs?: Record<string, unknown>,
 ): Promise<AppSettings> {
   return await invoke<AppSettings>('save_settings', {
     logDir,
     screenshotDir,
     deleteScreenshots,
     profile,
+    uiPrefs,
   })
 }
 

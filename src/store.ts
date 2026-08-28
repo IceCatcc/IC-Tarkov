@@ -97,13 +97,16 @@ interface AppState {
   /** 仅显示地图已解锁（未锁定）的任务 */
   mapUnlockedGraph: boolean
   setMapUnlockedGraph: (v: boolean) => void
-  focusGraph: boolean
-  setFocusGraph: (v: boolean) => void
+  /** 已完成任务的显示开关：勾选显示、不勾选排除（持久化，替代原专注模式） */
+  showCompletedGraph: boolean
+  setShowCompletedGraph: (v: boolean) => void
   /** 任务图谱模式过滤：'pvp' | 'pve'（localStorage 持久化；日志检测到会话模式时自动跟随） */
   questMode: 'pvp' | 'pve'
   setQuestMode: (v: 'pvp' | 'pve') => void
   /** 日志检测到会话模式时调用：自动切换 questMode 并持久化 */
   applyDetectedMode: (m: string) => void
+  /** 用后端 settings.json 的 uiPrefs 批量恢复 UI 偏好（仅启动时调用，不回写） */
+  applyUiPrefs: (p: Record<string, unknown>) => void
 }
 
 /** 侧边栏折叠时，页面顶部需为左上角浮动按钮预留的左侧空位（px） */
@@ -134,7 +137,7 @@ interface GraphPrefs {
   repMet: boolean
   lvlMet: boolean
   mapUnlocked: boolean
-  focus: boolean
+  showCompleted: boolean
   hideLegacy: boolean
   disabledTraders: Record<string, boolean>
   questMode: 'pvp' | 'pve'
@@ -145,7 +148,7 @@ function loadGraphPrefs(): GraphPrefs {
     repMet: true,
     lvlMet: false,
     mapUnlocked: false,
-    focus: false,
+    showCompleted: false, // 默认排除已完成任务（「已完成」勾选才显示）
     hideLegacy: true, // 默认隐藏旧任务（「旧任务」勾选才显示）
     disabledTraders: Object.fromEntries(DEFAULT_DISABLED_TRADERS.map((id) => [id, true])),
     questMode: 'pvp',
@@ -158,7 +161,7 @@ function loadGraphPrefs(): GraphPrefs {
       repMet: p.repMet ?? fallback.repMet,
       lvlMet: p.lvlMet ?? fallback.lvlMet,
       mapUnlocked: p.mapUnlocked ?? fallback.mapUnlocked,
-      focus: p.focus ?? fallback.focus,
+      showCompleted: p.showCompleted ?? fallback.showCompleted,
       hideLegacy: p.hideLegacy ?? fallback.hideLegacy,
       disabledTraders: { ...fallback.disabledTraders, ...(p.disabledTraders ?? {}) },
       questMode: p.questMode === 'pve' ? 'pve' : 'pvp',
@@ -174,7 +177,7 @@ function persistGraphPrefs() {
     repMet: s.repMetGraph,
     lvlMet: s.lvlMetGraph,
     mapUnlocked: s.mapUnlockedGraph,
-    focus: s.focusGraph,
+    showCompleted: s.showCompletedGraph,
     hideLegacy: s.hideLegacyGraph,
     disabledTraders: s.disabledTradersGraph,
     questMode: s.questMode,
@@ -184,6 +187,28 @@ function persistGraphPrefs() {
   } catch {
     /* 忽略写入失败（隐私模式等） */
   }
+}
+
+/** 供后端持久化：收集当前全部 UI 偏好（与 settings.json 的 uiPrefs 字段对应） */
+export function collectUiPrefs(): Record<string, unknown> {
+  const s = useStore.getState()
+  return {
+    sidebarOpen: s.sidebarOpen,
+    graphPrefs: {
+      repMet: s.repMetGraph,
+      lvlMet: s.lvlMetGraph,
+      mapUnlocked: s.mapUnlockedGraph,
+      showCompleted: s.showCompletedGraph,
+      hideLegacy: s.hideLegacyGraph,
+      disabledTraders: s.disabledTradersGraph,
+      questMode: s.questMode,
+    } satisfies GraphPrefs,
+  }
+}
+
+interface UiPrefsShape {
+  sidebarOpen?: boolean
+  graphPrefs?: Partial<GraphPrefs>
 }
 
 const prefs0 = loadGraphPrefs()
@@ -416,9 +441,9 @@ export const useStore = create<AppState>((set) => ({
     set({ mapUnlockedGraph: v })
     persistGraphPrefs()
   },
-  focusGraph: prefs0.focus,
-  setFocusGraph: (v) => {
-    set({ focusGraph: v })
+  showCompletedGraph: prefs0.showCompleted,
+  setShowCompletedGraph: (v) => {
+    set({ showCompletedGraph: v })
     persistGraphPrefs()
   },
   questMode: prefs0.questMode,
@@ -432,6 +457,30 @@ export const useStore = create<AppState>((set) => ({
     if (cur === mode) return
     set({ questMode: mode })
     persistGraphPrefs()
+  },
+  applyUiPrefs: (p) => {
+    const u = p as UiPrefsShape
+    const patch: Partial<AppState> = {}
+    if (typeof u.sidebarOpen === 'boolean') patch.sidebarOpen = u.sidebarOpen
+    const g = u.graphPrefs
+    if (g && typeof g === 'object') {
+      if (typeof g.repMet === 'boolean') patch.repMetGraph = g.repMet
+      if (typeof g.lvlMet === 'boolean') patch.lvlMetGraph = g.lvlMet
+      if (typeof g.mapUnlocked === 'boolean') patch.mapUnlockedGraph = g.mapUnlocked
+      if (typeof g.showCompleted === 'boolean') patch.showCompletedGraph = g.showCompleted
+      if (typeof g.hideLegacy === 'boolean') patch.hideLegacyGraph = g.hideLegacy
+      if (g.questMode === 'pve' || g.questMode === 'pvp') patch.questMode = g.questMode
+      if (g.disabledTraders && typeof g.disabledTraders === 'object') {
+        patch.disabledTradersGraph = {
+          ...DEFAULT_DISABLED_TRADERS.reduce(
+            (acc, id) => ({ ...acc, [id]: true }),
+            {} as Record<string, boolean>,
+          ),
+          ...(g.disabledTraders as Record<string, boolean>),
+        }
+      }
+    }
+    if (Object.keys(patch).length > 0) set(patch)
   },
 }))
 

@@ -45,9 +45,9 @@ function DirField({
 
   return (
     <div>
-      <label className="text-[12px] text-muted block mb-1">{label}</label>
+      <label className="text-[14px] text-muted block mb-1">{label}</label>
       <div className="flex items-center gap-2">
-        <div className="flex-1 min-w-0 bg-ink-700 border border-line rounded px-3 py-2 text-[12px] text-[#e6edf3] font-mono truncate">
+        <div className="flex-1 min-w-0 bg-ink-700 border border-line rounded px-3 py-2 text-[14px] text-[#e6edf3] font-mono truncate">
           {value ? (
             value
           ) : (
@@ -57,7 +57,7 @@ function DirField({
         <button
           onClick={onPick}
           disabled={picking}
-          className="px-3 py-2 rounded border border-line text-[12px] text-[#e6edf3] hover:bg-ink-600 shrink-0 disabled:opacity-50"
+          className="px-3 py-2 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-600 shrink-0 disabled:opacity-50"
         >
           {picking ? '打开中…' : '选择目录…'}
         </button>
@@ -171,10 +171,10 @@ export default function SettingsModal() {
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60">
       <div className="w-[560px] bg-ink-800 border border-line rounded-xl p-5 shadow-2xl">
         <div className="flex items-center mb-4">
-          <span className="text-[15px] font-medium">设置</span>
+          <span className="text-[17px] font-medium">设置</span>
           <button
             onClick={closeSettings}
-            className="ml-auto text-muted hover:text-[#e6edf3] text-[13px]"
+            className="ml-auto text-muted hover:text-[#e6edf3] text-[15px]"
           >
             ✕
           </button>
@@ -195,66 +195,66 @@ export default function SettingsModal() {
               onChange={(e) => setDeleteShots(e.target.checked)}
               className="w-4 h-4 accent-amber"
             />
-            <span className="text-[13px] text-[#e6edf3]">
+            <span className="text-[15px] text-[#e6edf3]">
               读取坐标后删除截图
-              <span className="block text-[11px] text-muted">
+              <span className="block text-[13px] text-muted">
                 关闭后截图会保留在目录中（可能重复定位到同一张）
               </span>
             </span>
           </label>
 
           {error && (
-            <div className="text-[12px] text-red-400 border border-red-400/40 rounded px-3 py-2">
+            <div className="text-[14px] text-red-400 border border-red-400/40 rounded px-3 py-2">
               {error}
             </div>
           )}
 
           {/* 数据管理 */}
           <div className="border-t border-line pt-4">
-            <div className="text-[12px] text-muted mb-2">数据管理</div>
+            <div className="text-[14px] text-muted mb-2">数据管理</div>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={onRescan}
                 disabled={busy !== null}
-                className="px-3 py-1.5 rounded border border-line text-[12px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
+                className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
               >
                 {busy === 'rescan' ? '读取中…' : '重新读取日志'}
               </button>
               <button
                 onClick={onExport}
                 disabled={busy !== null}
-                className="px-3 py-1.5 rounded border border-line text-[12px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
+                className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
               >
                 {busy === 'export' ? '导出中…' : '导出数据'}
               </button>
               <button
                 onClick={onImport}
                 disabled={busy !== null}
-                className="px-3 py-1.5 rounded border border-line text-[12px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
+                className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
               >
                 {busy === 'import' ? '导入中…' : '导入数据'}
               </button>
             </div>
-            <div className="text-[11px] text-muted mt-2">
+            <div className="text-[13px] text-muted mt-2">
               重新读取日志：清空任务持久化文件，从零全量扫描日志重新生成。
               导出 / 导入：备份或恢复任务进度与扫描记录（quest_state.json）。
             </div>
             {feedback && (
-              <div className="text-[12px] text-ok mt-2">{feedback}</div>
+              <div className="text-[14px] text-ok mt-2">{feedback}</div>
             )}
           </div>
 
           <div className="flex justify-end gap-2 pt-1">
             <button
               onClick={closeSettings}
-              className="px-4 py-1.5 rounded border border-line text-[12px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+              className="px-4 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
             >
               取消
             </button>
             <button
               onClick={onSave}
               disabled={saving}
-              className="px-4 py-1.5 rounded bg-amber text-black text-[12px] font-medium hover:opacity-90 disabled:opacity-50"
+              className="px-4 py-1.5 rounded bg-amber text-black text-[14px] font-medium hover:opacity-90 disabled:opacity-50"
             >
               {saving ? '保存中…' : '保存'}
             </button>

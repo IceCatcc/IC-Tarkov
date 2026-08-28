@@ -19,8 +19,8 @@ export function SummaryCards() {
           key={c.label}
           className={`bg-ink-800 border ${c.ring} rounded-lg p-3`}
         >
-          <div className="text-[12px] text-muted">{c.label}</div>
-          <div className={`text-[26px] font-medium ${c.accent}`}>{c.value}</div>
+          <div className="text-[14px] text-muted">{c.label}</div>
+          <div className={`text-[28px] font-medium ${c.accent}`}>{c.value}</div>
         </div>
       ))}
     </div>

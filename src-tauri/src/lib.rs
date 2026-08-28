@@ -53,18 +53,26 @@ pub struct AppSettings {
     pub profile: PlayerProfile,
     /// 读取坐标后是否删除截图（默认 true，保留原有行为）
     pub delete_screenshots: bool,
+    /// UI 偏好（图谱筛选/模式切换/侧边栏等），宽松 schema：前端自行定义键值
+    #[serde(default)]
+    pub ui_prefs: std::collections::HashMap<String, serde_json::Value>,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
+        // 截图目录默认尝试 Windows「文档」下的游戏截图目录，仅在该目录真实存在时填入；
+        // 否则留空，等用户在设置里自行选择。日志目录默认留空（等用户选择）。
         let screenshots = std::env::var("USERPROFILE")
+            .ok()
             .map(|home| format!("{home}\\Documents\\Escape from Tarkov\\Screenshots"))
+            .filter(|p| Path::new(p).is_dir())
             .unwrap_or_default();
         Self {
-            log_dir: "E:\\Tarkov\\Logs".to_string(),
+            log_dir: String::new(),
             screenshot_dir: screenshots,
             profile: PlayerProfile::default(),
             delete_screenshots: true,
+            ui_prefs: std::collections::HashMap::new(),
         }
     }
 }
@@ -96,19 +104,29 @@ fn save_settings(
     screenshot_dir: String,
     delete_screenshots: Option<bool>,
     profile: Option<PlayerProfile>,
+    ui_prefs: Option<std::collections::HashMap<String, serde_json::Value>>,
 ) -> Result<AppSettings, String> {
-    if !Path::new(&log_dir).is_dir() {
-        return Err(format!("日志目录不存在：{log_dir}"));
-    }
     // 以现有设置为基底合并，未传字段保持原值
     let mut s = read_settings(&app);
-    s.log_dir = log_dir;
-    s.screenshot_dir = screenshot_dir;
+    // 目录字段语义：空 = 不修改原值（仅改角色/UI 偏好时不破坏目录配置）；
+    // 非空 = 必须是存在的目录。这样好感度/UI 偏好的保存永远不会因目录问题失败。
+    if !log_dir.is_empty() {
+        if !Path::new(&log_dir).is_dir() {
+            return Err(format!("日志目录不存在：{log_dir}"));
+        }
+        s.log_dir = log_dir;
+    }
+    if !screenshot_dir.is_empty() {
+        s.screenshot_dir = screenshot_dir;
+    }
     if let Some(d) = delete_screenshots {
         s.delete_screenshots = d;
     }
     if let Some(p) = profile {
         s.profile = p;
+    }
+    if let Some(u) = ui_prefs {
+        s.ui_prefs = u;
     }
     let p = settings_path(&app)?;
     if let Some(parent) = p.parent() {
@@ -137,8 +155,11 @@ pub struct StatsPayload {
 }
 
 #[derive(Clone, serde::Serialize)]
+// 注意：enum 级 rename_all 只作用于变体名；变体字段需逐个标注 rename_all，
+// 否则 trader_name/quest_id 等以 snake_case 下发，前端读到 undefined。
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum QuestEvent {
+    #[serde(rename_all = "camelCase")]
     Accept {
         quest_id: String,
         name: String,
@@ -150,6 +171,7 @@ pub enum QuestEvent {
         timestamp: String,
         source: String,
     },
+    #[serde(rename_all = "camelCase")]
     Complete {
         quest_id: String,
         name: String,
@@ -157,6 +179,7 @@ pub enum QuestEvent {
         via: String,
         source: String,
     },
+    #[serde(rename_all = "camelCase")]
     Progress {
         timestamp: String,
         endpoint: String,
@@ -173,7 +196,24 @@ pub struct RewardPayload {
 
 #[tauri::command]
 fn start_watching(app: tauri::AppHandle, dir: Option<String>) -> Result<(), String> {
-    let path = dir.unwrap_or_else(|| "E:\\Tarkov\\Logs".to_string());
+    // 未选择日志目录时：不硬编码默认路径，保持空闲等待用户在设置里选择
+    let path = match dir {
+        Some(d) if !d.trim().is_empty() => d,
+        _ => {
+            {
+                let binding = app.state::<AppState>();
+                let mut w = binding.watcher.lock().unwrap();
+                if let Some(h) = w.take() {
+                    h.stop();
+                }
+                let mut s = binding.screenshot.lock().unwrap();
+                if let Some(old) = s.take() {
+                    old.stop();
+                }
+            }
+            return Ok(());
+        }
+    };
     {
         let binding = app.state::<AppState>();
         let mut w = binding.watcher.lock().unwrap();

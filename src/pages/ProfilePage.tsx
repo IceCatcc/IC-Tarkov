@@ -20,9 +20,9 @@ export function ProfilePage() {
   // 侧边栏折叠时，顶部标题为左上角浮动按钮预留空位
   const topPad = useTopPad()
 
-  const [profile, setProfile] = useState<PlayerProfile>(
-    settings.profile ?? { level: 1, loyalty: {}, lockedMaps: [] },
-  )
+  // profile 直接派生自 store（settings.profile），不再用本地 useState——
+  // 本地 useState 只在首次挂载取值，若保存失败或设置晚于挂载加载，切页重挂载会回退默认值。
+  const profile: PlayerProfile = settings.profile ?? { level: 1, loyalty: {}, lockedMaps: [] }
   const [maps, setMaps] = useState<MapInfo[]>([])
   const [flash, setFlash] = useState(false)
   const flashTimer = useRef<number | undefined>(undefined)
@@ -38,10 +38,10 @@ export function ProfilePage() {
     }
   }, [])
 
-  // 任意改动后自动保存（无需点「保存」按钮）
+  // 任意改动后自动保存（无需点「保存」按钮）：先同步 store（页面切换不丢），再异步落盘
   const persist = useCallback(
     (next: PlayerProfile) => {
-      setProfile(next)
+      setSettings({ ...settings, profile: next })
       setFlash(true)
       if (flashTimer.current) window.clearTimeout(flashTimer.current)
       flashTimer.current = window.setTimeout(() => setFlash(false), 1500)
@@ -51,10 +51,10 @@ export function ProfilePage() {
         settings.deleteScreenshots,
         next,
       )
-        .then(setSettings)
+        .then((st) => setSettings(st))
         .catch((e) => console.error('保存角色失败', e))
     },
-    [settings.logDir, settings.screenshotDir, settings.deleteScreenshots, setSettings],
+    [settings, setSettings],
   )
 
   const applyLoyalty = (traderId: string, ll: number) => {
@@ -82,12 +82,12 @@ export function ProfilePage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-[1100px] mx-auto px-6 py-6">
-        <div className="text-[15px] font-medium mb-1" style={{ paddingLeft: topPad }}>
+      <div className="max-w-[1400px] mx-auto px-6 py-6">
+        <div className="text-[17px] font-medium mb-1" style={{ paddingLeft: topPad }}>
           角色管理
         </div>
 
-        <label className="text-[12px] text-muted block mb-1.5">玩家等级</label>
+        <label className="text-[14px] text-muted block mb-1.5">玩家等级</label>
         <input
           type="number"
           min={1}
@@ -96,7 +96,7 @@ export function ProfilePage() {
           onChange={(e) => {
             applyLevel(Math.max(1, Math.min(80, Number(e.target.value) || 1)))
           }}
-          className="w-28 bg-ink-700 border border-line rounded px-2 py-1.5 text-[13px] text-[#e6edf3]"
+          className="w-28 bg-ink-700 border border-line rounded px-2 py-1.5 text-[15px] text-[#e6edf3]"
         />
 
         {/* 商人好感：卡片网格，从左向右排列、排不下自动换行 */}
@@ -125,7 +125,7 @@ export function ProfilePage() {
                     <span className="w-10 h-10" />
                   )}
                   <span
-                    className={`text-[13px] truncate flex-1 min-w-0 ${
+                    className={`text-[15px] truncate flex-1 min-w-0 ${
                       cur === 0
                         ? 'text-muted line-through decoration-red-400/60'
                         : 'text-[#e6edf3]'
@@ -135,21 +135,22 @@ export function ProfilePage() {
                     {t.zh}
                   </span>
                   {cur === 0 && (
-                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/40">
+                    <span className="shrink-0 text-[12px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/40">
                       未解锁
                     </span>
                   )}
                 </div>
 
                 {/* 下：忠诚等级按钮组 */}
-                <div className="flex items-center gap-1">
+                {/* 下：忠诚等级按钮组（宽度由文字撑开，不换行；放不下自动换行排列） */}
+                <div className="flex items-center gap-1 flex-wrap">
                   {[0, 1, 2, 3, 4].map((ll) => (
                     <button
                       key={ll}
                       type="button"
                       onClick={() => applyLoyalty(t.id, ll)}
                       title={`${t.name} 忠诚等级 / 解锁状态`}
-                      className={`flex-1 px-1 py-1 rounded text-[11px] border transition-colors ${
+                      className={`whitespace-nowrap px-1.5 py-1 rounded text-[13px] leading-none border transition-colors ${
                         cur === ll
                           ? 'bg-amber text-black border-amber'
                           : 'bg-ink-700 border-line text-muted hover:text-[#e6edf3]'
@@ -166,14 +167,14 @@ export function ProfilePage() {
 
         {/* 地图解锁管理：未勾选 = 该地图已锁定，相关任务在「专注模式」与「地图解锁」筛选下不显示 */}
         <div className="mt-7">
-          <label className="text-[12px] text-muted block mb-1.5">地图解锁</label>
-          <div className="text-[11px] text-muted mb-2 leading-relaxed">
+          <label className="text-[14px] text-muted block mb-1.5">地图解锁</label>
+          <div className="text-[13px] text-muted mb-2 leading-relaxed">
             勾选表示该地图已解锁；未勾选的地图会视为「已锁定」，其任务在开启「专注模式」或「地图解锁」筛选时被隐藏。
           </div>
           {maps.length === 0 ? (
-            <div className="text-[12px] text-muted">加载地图列表…</div>
+            <div className="text-[14px] text-muted">加载地图列表…</div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
               {/* 合并后的变体组（工厂 / 实验室 / 中心区），统一切换 */}
               {MAP_GROUPS.map((g) => {
                 const lockedList = profile.lockedMaps ?? []
@@ -186,7 +187,7 @@ export function ProfilePage() {
                   <label
                     key={g.label}
                     title={`包含：${variants.join('、')}`}
-                    className="flex items-center gap-2 text-[12px] text-[#e6edf3] bg-ink-800/60 border border-line rounded px-2 py-1.5 cursor-pointer select-none hover:border-amber/60"
+                    className="flex items-center gap-2 text-[14px] text-[#e6edf3] bg-ink-800/60 border border-line rounded px-2 py-1.5 cursor-pointer select-none hover:border-amber/60"
                   >
                     <input
                       type="checkbox"
@@ -206,7 +207,7 @@ export function ProfilePage() {
                   return (
                     <label
                       key={m.id}
-                      className="flex items-center gap-2 text-[12px] text-[#e6edf3] bg-ink-800/60 border border-line rounded px-2 py-1.5 cursor-pointer select-none hover:border-amber/60"
+                      className="flex items-center gap-2 text-[14px] text-[#e6edf3] bg-ink-800/60 border border-line rounded px-2 py-1.5 cursor-pointer select-none hover:border-amber/60"
                     >
                       <input
                         type="checkbox"
@@ -223,8 +224,8 @@ export function ProfilePage() {
         </div>
 
         <div className="flex items-center gap-3 mt-6 mb-4">
-          <span className="text-[12px] text-muted">改动自动保存</span>
-          {flash && <span className="text-[12px] text-ok">✓ 已保存</span>}
+          <span className="text-[14px] text-muted">改动自动保存</span>
+          {flash && <span className="text-[14px] text-ok">✓ 已保存</span>}
         </div>
       </div>
     </div>

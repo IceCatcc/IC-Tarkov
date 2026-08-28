@@ -25,13 +25,13 @@ export function ActivityFeed() {
 
   return (
     <aside className="w-[220px] shrink-0 bg-ink-800 border-l border-line p-3 overflow-y-auto">
-      <div className="text-[13px] font-medium mb-3">实时活动</div>
+      <div className="text-[15px] font-medium mb-3">实时活动</div>
       <div className="space-y-2">
         {activities.length === 0 && !historicalLoaded && (
-          <div className="text-[11px] text-muted">等待事件…</div>
+          <div className="text-[13px] text-muted">等待事件…</div>
         )}
         {activities.map((a) => (
-          <div key={a.id} className="text-[11px] leading-relaxed break-words">
+          <div key={a.id} className="text-[13px] leading-relaxed break-words">
             <span className="text-muted">{a.ts} </span>
             <span className={color(a.kind)}>{a.text}</span>
           </div>
@@ -41,18 +41,18 @@ export function ActivityFeed() {
       {!historicalLoaded ? (
         <button
           onClick={onLoadMore}
-          className="mt-3 w-full text-[11px] text-amber hover:underline"
+          className="mt-3 w-full text-[13px] text-amber hover:underline"
         >
           加载更多
         </button>
       ) : histShown.length > 0 ? (
         <>
-          <div className="mt-4 mb-2 text-[11px] text-muted border-t border-line pt-3">
+          <div className="mt-4 mb-2 text-[13px] text-muted border-t border-line pt-3">
             历史活动
           </div>
           <div className="space-y-2">
             {histShown.map((a) => (
-              <div key={a.id} className="text-[11px] leading-relaxed break-words">
+              <div key={a.id} className="text-[13px] leading-relaxed break-words">
                 <span className="text-muted">{a.ts} </span>
                 <span className={color(a.kind)}>{a.text}</span>
               </div>

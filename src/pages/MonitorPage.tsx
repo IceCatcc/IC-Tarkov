@@ -12,8 +12,8 @@ export function MonitorPage() {
     <div className="h-full flex">
       <div className="flex-1 min-w-0 overflow-y-auto p-4 space-y-4">
         <div className="flex items-center gap-2" style={{ paddingLeft: topPad }}>
-          <h1 className="text-[15px] font-medium">监控</h1>
-          <span className={`text-[11px] ${live ? 'text-ok' : 'text-muted'}`}>
+          <h1 className="text-[17px] font-medium">监控</h1>
+          <span className={`text-[13px] ${live ? 'text-ok' : 'text-muted'}`}>
             {live ? '实时识别中' : '未监控'}
           </span>
         </div>

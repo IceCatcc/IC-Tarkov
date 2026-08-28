@@ -59,6 +59,8 @@ export interface AppSettings {
   profile: PlayerProfile
   /** 读取坐标后是否删除截图 */
   deleteScreenshots: boolean
+  /** UI 偏好（图谱筛选/模式切换/侧边栏等），持久化于后端 settings.json */
+  uiPrefs?: Record<string, unknown>
 }
 
 export interface ItemRef {

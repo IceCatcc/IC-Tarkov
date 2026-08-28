@@ -132,7 +132,7 @@ function FilterCheck({
   return (
     <label
       className={
-        'flex items-center gap-2 text-[12px] text-muted cursor-pointer select-none whitespace-nowrap px-2 py-1 rounded hover:bg-ink-700 ' +
+        'flex items-center gap-2 text-[14px] text-muted cursor-pointer select-none whitespace-nowrap px-2 py-1 rounded hover:bg-ink-700 ' +
         (disabled ? 'opacity-40 cursor-not-allowed' : '')
       }
       title={title}
@@ -172,7 +172,7 @@ function DropdownTrigger({
       type="button"
       onClick={onClick}
       title={title}
-      className={`flex items-center gap-1.5 h-[26px] pl-2 pr-1.5 rounded-full border text-[12px] whitespace-nowrap transition-colors ${
+      className={`flex items-center gap-1.5 h-[26px] pl-2 pr-1.5 rounded-full border text-[14px] whitespace-nowrap transition-colors ${
         active
           ? 'border-amber/70 bg-amber/10 text-[#e6edf3]'
           : 'border-line bg-ink-700 text-muted hover:text-[#e6edf3] hover:border-[#4d5560]'
@@ -181,7 +181,7 @@ function DropdownTrigger({
       <span className={`flex items-center ${active ? 'text-amber' : 'opacity-70'}`}>{icon}</span>
       <span>{label}</span>
       {count > 0 && (
-        <span className="ml-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-amber text-black text-[10px] font-medium leading-none">
+        <span className="ml-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-amber text-black text-[12px] font-medium leading-none">
           {count}
         </span>
       )}
@@ -231,8 +231,9 @@ export function QuestGraphPage() {
   const mapUnlocked = useStore((s) => s.mapUnlockedGraph)
   const setMapUnlocked = useStore((s) => s.setMapUnlockedGraph)
   const profile = useStore((s) => s.settings.profile)
-  const focusMode = useStore((s) => s.focusGraph)
-  const setFocusMode = useStore((s) => s.setFocusGraph)
+  // 「已完成」显示开关：勾选显示已完成任务，不勾选排除（替代原专注模式）
+  const showCompleted = useStore((s) => s.showCompletedGraph)
+  const setShowCompleted = useStore((s) => s.setShowCompletedGraph)
   const setTraderGraph = useStore((s) => s.setTraderGraph)
   // 任务模式过滤（pvp/pve，localStorage 持久化；日志检测到会话模式时自动跟随）
   const questMode = useStore((s) => s.questMode)
@@ -422,9 +423,8 @@ export function QuestGraphPage() {
       return maps.some((m) => lockedMaps.includes(m))
     }
     // 专注于「需求过滤」（好感 / 等级 / 地图 / 商人 / 旧任务 / 地区），不含搜索。
-    // 专注模式下好感/等级为强制生效（focusMode || 原值）。
-    const effRepMet = focusMode || repMet
-    const effLvlMet = focusMode || lvlMet
+    const effRepMet = repMet
+    const effLvlMet = lvlMet
     const reqFails = (n: GraphNode): boolean => {
       if (hideLegacy && n.legacy) return true
       if (disabledTraders[n.traderId]) return true
@@ -453,12 +453,15 @@ export function QuestGraphPage() {
       if (mapSel === '__none__' && (n.map ?? '__none__') !== '__none__') continue
       // 地图可用过滤：涉及未解锁地图的任务不显示
       if (hasLockedMap(n.maps)) continue
+      // 「已完成」开关：不勾选时排除已完成任务（仅在显示层排除，不参与任务链传播——
+      // 已完成的前置不应隐藏其下游）
+      if (!showCompleted && statusMap[n.id] === 'completed') continue
       if (q && !n.name.toLowerCase().includes(q)) continue
       vis.add(n.id)
     }
 
-    // 按名称搜索时无视好感和等级、前置筛选（专注模式下由聚焦逻辑强制达标，此处跳过）
-    if (!q && !focusMode && (lvlMet || repMet)) {
+    // 按名称搜索时无视好感和等级、前置筛选
+    if (!q && (lvlMet || repMet)) {
       for (const n of graph.nodes) {
         if (!vis.has(n.id)) continue
         const ll = profile?.loyalty?.[n.traderId] ?? 1
@@ -481,9 +484,6 @@ export function QuestGraphPage() {
       }
     }
 
-    // 专注模式下记录「保留集」，供任务链过滤传播判断阻断点（进行中 / 可接取 的下游是合法"下一步"）
-    let focusKeep = new Set<string>()
-
     // 模式有效的边：pve 模式下，仅当 from ∈ to 的 pve 前置（或共有前置）时才视为该模式的边。
     // 后端边是 pvp/pve 两套前置的并集，模式专属边的一端会被隐藏，但传播/布局仍需按模式剔除。
     const edgeValid = (e: GraphEdge): boolean => {
@@ -492,70 +492,17 @@ export function QuestGraphPage() {
       return prereqsOf(v).includes(e.from)
     }
 
-    // 专注模式（原「只看可达」）：进行中 + 好感&等级达标的「可接取」+ 其下游一级；不含已完成。
-    // 启用时「好感达标 / 等级达标」勾选框被禁用，达标条件在此强制应用。
-    if (!q && focusMode) {
-      const lvl = Math.max(1, profile?.level ?? 1)
-      const keep = new Set<string>()
-      for (const n of graph.nodes) {
-        if (!vis.has(n.id)) continue
-        const st = statusMap[n.id]
-        if (st === 'in_progress') {
-          keep.add(n.id) // 进行中：始终显示
-          continue
-        }
-        if (st === 'completed') continue // 已完成：专注模式不显示
-        // 可接取：前置全完成 / 已解锁，且好感与等级达标（专注模式强制达标）
-        const pr = prereqsOf(n)
-        const prereqOk =
-          pr.length === 0 || pr.every((p) => completedSet.has(p) || unlockedSet.has(p))
-        if (!prereqOk) continue
-        if ((profile?.loyalty?.[n.traderId] ?? 1) === 0) continue // 商人未解锁
-        if ((n.minLevel ?? 1) > lvl) continue // 玩家等级不足
-        let repOk = true
-        for (const r of n.traderReqs ?? []) {
-          if (r.reqType === 'level' && (profile?.loyalty?.[r.traderId] ?? 1) < r.value) {
-            repOk = false
-            break
-          }
-        }
-        if (!repOk) continue
-        keep.add(n.id)
-      }
-      focusKeep = keep
-      vis.clear()
-      for (const id of keep) vis.add(id)
-
-      // 下游一级：进行中 / 可接取 的后续一个任务（任务链）
-      const succ = new Map<string, string[]>()
-      for (const e of graph.edges) {
-        if (!keep.has(e.from)) continue
-        if (!edgeValid(e)) continue
-        ;(succ.get(e.from) ?? succ.set(e.from, []).get(e.from)!).push(e.to)
-      }
-      for (const a of keep) {
-        for (const t of succ.get(a) ?? []) {
-          // 未解锁地图的后续任务也不显示（专注模式同样受地图可用约束）
-          if (!vis.has(t) && !hasLockedMap(nodeMap[t]?.maps)) vis.add(t)
-        }
-      }
-    }
-
     // —— 任务链过滤传播 ——
     // 被「需求过滤」（好感 / 等级 / 地图 / 商人 / 旧任务 / 地区）隐藏的前置任务，
     // 其下游整条任务链也应隐藏，哪怕下游任务自身满足要求。搜索(q)时不传播。
-    // 阻断点：专注模式下「进行中 / 可接取」节点是合法"下一步"，不再向下传播，也不被隐藏。
     if (!q) {
       const fwd = new Map<string, string[]>()
       for (const e of graph.edges) {
         if (!edgeValid(e)) continue
         ;(fwd.get(e.from) ?? fwd.set(e.from, []).get(e.from)!).push(e.to)
       }
-      const isBarrier = (id: string) =>
-        focusMode && (statusMap[id] === 'in_progress' || focusKeep.has(id))
       const seeds: string[] = []
       for (const n of graph.nodes) {
-        if (isBarrier(n.id)) continue
         if (reqFails(n)) seeds.push(n.id)
       }
       const chainHidden = new Set<string>()
@@ -565,12 +512,10 @@ export function QuestGraphPage() {
         if (chainHidden.has(u)) continue
         chainHidden.add(u)
         for (const v of fwd.get(u) ?? []) {
-          if (isBarrier(v)) continue
           if (!chainHidden.has(v)) stack.push(v)
         }
       }
       for (const id of chainHidden) {
-        if (focusMode && statusMap[id] === 'in_progress') continue
         vis.delete(id)
       }
     }
@@ -762,7 +707,7 @@ export function QuestGraphPage() {
       bands: bandsOut,
       zones,
     }
-  }, [graph, disabledTraders, mapSel, search, hideLegacy, focusMode, repMet, lvlMet, mapUnlocked, profile, statusMap, completedSet, unlockedSet, questMode])
+  }, [graph, disabledTraders, mapSel, search, hideLegacy, repMet, lvlMet, mapUnlocked, profile, statusMap, completedSet, unlockedSet, questMode, showCompleted])
 
   // 缩略图尺寸：按世界包围盒宽高比动态确定（最长边固定，含上下限）
   const MINI_LONG = 170
@@ -985,14 +930,14 @@ export function QuestGraphPage() {
   }
 
   if (!graph) {
-    return <div className="p-6 text-muted text-[13px]">加载任务图谱…</div>
+    return <div className="p-6 text-muted text-[15px]">加载任务图谱…</div>
   }
 
   const selectedNode = selectedId ? (graph.nodes.find((n) => n.id === selectedId) ?? null) : null
   const selAvatar = traderImage(selectedNode?.traderId)
 
   const chip =
-    'px-2.5 py-1 rounded-full text-[12px] border transition-colors whitespace-nowrap'
+    'px-2.5 py-1 rounded-full text-[14px] border transition-colors whitespace-nowrap'
   const chipOff = 'bg-ink-800 border-line text-muted hover:text-[#e6edf3]'
 
   // 悬浮 tooltip 数据
@@ -1136,7 +1081,7 @@ export function QuestGraphPage() {
         }
         const shown = Math.floor((NODE_W - 28) / 26)
         if (items.length > shown) {
-          ctx.font = '10px sans-serif'
+          ctx.font = '12px sans-serif'
           ctx.fillStyle = '#8b949e'
           ctx.fillText(`+${items.length - shown}`, ix - 2, iy + 13)
         }
@@ -1176,7 +1121,7 @@ export function QuestGraphPage() {
         ctx.fillStyle = SPECIAL_BORDER
         ctx.fill()
         ctx.fillStyle = '#000'
-        ctx.font = `bold ${Math.max(7, Math.round(9 * TS))}px sans-serif`
+        ctx.font = `bold ${Math.max(8, Math.round(11 * TS))}px sans-serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText('✦', cx, cy + 0.5)
@@ -1186,7 +1131,7 @@ export function QuestGraphPage() {
 
       // 等级（右上角，不挤占元信息行）
       const lv = n.minLevel && n.minLevel > 1 ? n.minLevel : 1
-      ctx.font = `${Math.max(7, Math.round(10 * TS))}px "Segoe UI", system-ui, sans-serif`
+      ctx.font = `${Math.max(8, Math.round(12 * TS))}px "Segoe UI", system-ui, sans-serif`
       ctx.fillStyle = 'rgba(139,148,158,0.95)'
       ctx.textAlign = 'right'
       const lvText = `Lv${lv}+`
@@ -1196,7 +1141,7 @@ export function QuestGraphPage() {
       ctx.textAlign = 'left'
 
       // 标题（为右上角 Lv/✦ 预留宽度）
-      ctx.font = `600 ${Math.max(8, Math.round(12.5 * TS))}px "Segoe UI", system-ui, sans-serif`
+      ctx.font = `600 ${Math.max(9, Math.round(14.5 * TS))}px "Segoe UI", system-ui, sans-serif`
       ctx.fillStyle = stl.text
       const glyph = st === 'completed' ? '✓ ' : st === 'available' ? '● ' : st === 'in_progress' ? '▶ ' : ''
       const rightReserve = (n.special ? 19 * TS : 6 * TS) + lvW + 6 * TS
@@ -1207,7 +1152,7 @@ export function QuestGraphPage() {
       // 元信息 chips（贸易条件 / 旧 / 仅PvP / 未解锁）
       let bx = sx + 12 * TS
       const by = sy + 34 * TS
-      ctx.font = `${Math.max(7, Math.round(10 * TS))}px "Segoe UI", system-ui, sans-serif`
+      ctx.font = `${Math.max(8, Math.round(12 * TS))}px "Segoe UI", system-ui, sans-serif`
       ctx.textBaseline = 'middle'
       const drawChip = (label: string, fg: string, borderColor: string, bgColor: string) => {
         const tw = ctx.measureText(label).width + 8 * TS
@@ -1267,7 +1212,7 @@ export function QuestGraphPage() {
           ctx.stroke()
         }
       }
-      ctx.font = '600 13px "Segoe UI", system-ui, sans-serif'
+      ctx.font = '600 15px "Segoe UI", system-ui, sans-serif'
       ctx.fillStyle = 'rgba(239,159,39,0.95)'
       ctx.textAlign = 'center'
       const nm = traderDisplayName(b.id, b.name)
@@ -1305,7 +1250,7 @@ export function QuestGraphPage() {
     ctx.moveTo(0, GRID_TOP + 0.5)
     ctx.lineTo(CW, GRID_TOP + 0.5)
     ctx.stroke()
-    ctx.font = '700 15px "Segoe UI", system-ui, sans-serif'
+    ctx.font = '700 17px "Segoe UI", system-ui, sans-serif'
     ctx.fillStyle = '#6fb3ff'
     ctx.textAlign = 'center'
     for (const z of zones) {
@@ -1385,15 +1330,16 @@ export function QuestGraphPage() {
     }
   }
 
-  // 筛选下拉已选条件数量（含专注模式强制项）
+  // 筛选下拉已选条件数量
   const filterCount =
-    (repMet || focusMode ? 1 : 0) +
-    (lvlMet || focusMode ? 1 : 0) +
-    (mapUnlocked || focusMode ? 1 : 0) +
-    (focusMode ? 1 : 0) +
+    (repMet ? 1 : 0) +
+    (lvlMet ? 1 : 0) +
+    (mapUnlocked ? 1 : 0) +
+    (showCompleted ? 1 : 0) +
     (!hideLegacy ? 1 : 0)
-  // 商人下拉：已隐藏（未勾选显示）的商人数量
+  // 商人下拉：当前勾选显示的商人数量（隐藏数 = 总数 - 已选数）
   const hiddenTraders = Object.values(disabledTraders).filter(Boolean).length
+  const shownTraders = TRADERS.length - hiddenTraders
 
   return (
     <div className="h-full flex flex-col relative">
@@ -1411,7 +1357,7 @@ export function QuestGraphPage() {
             <button
               key={m}
               onClick={() => setQuestMode(m)}
-              className={`px-2.5 h-[22px] rounded-full text-[11px] leading-none transition-colors ${
+              className={`px-2.5 h-[22px] rounded-full text-[13px] leading-none transition-colors ${
                 questMode === m
                   ? 'bg-amber text-black font-medium'
                   : 'text-muted hover:text-[#e6edf3]'
@@ -1442,48 +1388,33 @@ export function QuestGraphPage() {
             active={filterCount > 0}
             open={filterOpen}
             onClick={() => setFilterOpen((o) => !o)}
-            title="筛选条件：好感达标 / 等级达标 / 地图解锁 / 专注模式 / 旧任务（点击展开勾选）"
+            title="筛选条件：好感达标 / 等级达标 / 地图解锁 / 已完成 / 旧任务（点击展开勾选）"
           />
           {filterOpen && (
             <div className="absolute left-0 top-full mt-1.5 z-50 bg-ink-800 border border-line rounded-lg shadow-xl p-1.5 space-y-0.5 min-w-[180px] max-w-[260px] max-h-[70vh] overflow-y-auto">
               <FilterCheck
                 label="好感达标"
-                checked={focusMode || repMet}
-                disabled={focusMode}
+                checked={repMet}
                 onChange={setRepMet}
-                title={
-                  focusMode
-                    ? '专注模式已强制应用：仅显示好感达标的任务'
-                    : '仅显示商人忠诚等级达标的任务（在侧边栏「角色」页填写；搜索任务名时忽略此项）'
-                }
+                title="仅显示商人忠诚等级达标的任务（在侧边栏「角色」页填写；搜索任务名时忽略此项）"
               />
               <FilterCheck
                 label="等级达标"
-                checked={focusMode || lvlMet}
-                disabled={focusMode}
+                checked={lvlMet}
                 onChange={setLvlMet}
-                title={
-                  focusMode
-                    ? '专注模式已强制应用：仅显示玩家等级达标的任务'
-                    : '仅显示玩家等级足够的任务（搜索任务名时忽略此项）'
-                }
+                title="仅显示玩家等级足够的任务（搜索任务名时忽略此项）"
               />
               <FilterCheck
                 label="地图解锁"
-                checked={focusMode || mapUnlocked}
-                disabled={focusMode}
+                checked={mapUnlocked}
                 onChange={setMapUnlocked}
-                title={
-                  focusMode
-                    ? '专注模式已强制应用：仅显示已解锁地图的任务'
-                    : '仅显示已解锁（未锁定）地图的任务'
-                }
+                title="仅显示已解锁（未锁定）地图的任务"
               />
               <FilterCheck
-                label="专注模式"
-                checked={focusMode}
-                onChange={setFocusMode}
-                title="专注模式：仅显示进行中任务、好感与等级均已达标的「可接取」任务，以及它们的后续一个任务（任务链）；同时禁用「好感达标 / 等级达标 / 地图解锁」勾选，达标条件在此强制应用。搜索任务名时忽略此项。"
+                label="已完成"
+                checked={showCompleted}
+                onChange={setShowCompleted}
+                title="勾选时显示已完成的任务；不勾选则排除已完成任务"
               />
               <FilterCheck
                 label="旧任务"
@@ -1518,7 +1449,7 @@ export function QuestGraphPage() {
               </svg>
             }
             label="商人"
-            count={hiddenTraders}
+            count={shownTraders}
             active={hiddenTraders > 0}
             open={traderOpen}
             onClick={() => setTraderOpen((o) => !o)}
@@ -1543,7 +1474,7 @@ export function QuestGraphPage() {
           value={mapSel}
           onChange={(e) => setMapSel(e.target.value)}
           title="按地图/地区筛选任务"
-          className="shrink-0 bg-ink-700 border border-line text-[12px] rounded px-2 py-1 text-[#e6edf3]"
+          className="shrink-0 bg-ink-700 border border-line text-[14px] rounded px-2 py-1 text-[#e6edf3]"
         >
           <option value="">全部地区</option>
           {mapOptions.map((o) => (
@@ -1557,7 +1488,7 @@ export function QuestGraphPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="搜索任务名…"
-          className="shrink-0 bg-ink-700 border border-line text-[12px] rounded px-2 py-1 text-[#e6edf3] w-44 placeholder:text-muted"
+          className="shrink-0 bg-ink-700 border border-line text-[14px] rounded px-2 py-1 text-[#e6edf3] w-44 placeholder:text-muted"
         />
 
         {/* 重置视图：右对齐 */}
@@ -1582,7 +1513,7 @@ export function QuestGraphPage() {
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
 
         {/* 图例：左下角浮动显示 */}
-        <div className="absolute bottom-3 left-3 z-40 flex flex-col gap-1 px-2.5 py-2 rounded-md bg-ink-800/85 border border-line shadow-lg backdrop-blur-sm text-[11px] text-muted pointer-events-none">
+        <div className="absolute bottom-3 left-3 z-40 flex flex-col gap-1 px-2.5 py-2 rounded-md bg-ink-800/85 border border-line shadow-lg backdrop-blur-sm text-[13px] text-muted pointer-events-none">
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#14261b] border border-[#2ea043]" />已完成</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#0e2438] border border-[#58a6ff]" />进行中</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#231b0d] border border-[#c08a2a]" />待接取</span>
@@ -1593,14 +1524,14 @@ export function QuestGraphPage() {
         {/* 物品悬浮 tooltip（仅在物品图标上触发） */}
         {hoverTip && tipXY && (
           <div
-            className="pointer-events-none absolute z-50 w-max max-w-[190px] px-2 py-1 rounded-md bg-ink-700 border border-line shadow-xl text-[11px] text-[#c9d1d9] leading-snug"
+            className="pointer-events-none absolute z-50 w-max max-w-[190px] px-2 py-1 rounded-md bg-ink-700 border border-line shadow-xl text-[13px] text-[#c9d1d9] leading-snug"
             style={{ left: Math.min(tipXY.x + 14, csize.w - 200), top: Math.max(tipXY.y - 14, 4) }}
           >
             <span className="font-medium">{hoverTip.name}</span>
             {hoverTip.count != null && hoverTip.count > 0 && (
               <span className="text-amber">需要 ×{hoverTip.count}</span>
             )}
-            <div className="text-muted font-mono text-[9px]">{hoverTip.id}</div>
+            <div className="text-muted font-mono text-[11px]">{hoverTip.id}</div>
           </div>
         )}
 
@@ -1610,21 +1541,69 @@ export function QuestGraphPage() {
             onMouseDown={(e) => e.stopPropagation()}
             onWheel={(e) => e.stopPropagation()}
             style={{ maxHeight: `min(88%, calc(100% - ${miniDim.h + 36}px))` }}
-            className="absolute right-3 top-3 w-[720px] max-w-[calc(100%-24px)] overflow-y-auto bg-ink-800 border border-line rounded-xl p-4 shadow-xl z-50 cursor-default"
+            className="absolute right-3 top-3 w-[560px] min-w-[380px] max-w-[calc(100%-24px)] overflow-y-auto bg-ink-800 border border-line rounded-xl p-4 shadow-xl z-50 cursor-default"
           >
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (detail) openWiki(detail.wiki)
+              }}
+              className="absolute right-9 top-2.5 text-amber hover:underline text-[13px]"
+              title="在浏览器打开 Wiki 资料"
+            >
+              Wiki ↗
+            </button>
             <button
               onClick={(e) => {
                 e.stopPropagation()
                 setSelected(null, null)
               }}
-              className="absolute right-3 top-3 text-muted hover:text-[#e6edf3] text-[12px]"
+              className="absolute right-3 top-3 text-muted hover:text-[#e6edf3] text-[14px]"
             >
               ✕
             </button>
             {detail ? (
               <>
-                <div className="text-[15px] font-medium pr-6">{detail.name}</div>
-                <div className="text-[11px] text-muted mt-1.5 flex items-center gap-1.5 flex-wrap">
+                <div className="flex items-start gap-2 pr-6 flex-wrap">
+                  <span className="text-[19px] font-medium leading-snug">{detail.name}</span>
+                  {selStatus === 'available' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onSetStatus(detail.id, 'accept')
+                      }}
+                      className="text-[12px] text-[#58a6ff] hover:underline mt-1.5 shrink-0"
+                      title="手动标记该任务为已接取"
+                    >
+                      手动接取
+                    </button>
+                  )}
+                  {selStatus === 'in_progress' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onSetStatus(detail.id, 'complete')
+                      }}
+                      className="text-[12px] text-[#2ea043] hover:underline mt-1.5 shrink-0"
+                      title="手动标记该任务为已完成"
+                    >
+                      手动完成
+                    </button>
+                  )}
+                  {selStatus === 'locked' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onSetStatus(detail.id, 'unlock')
+                      }}
+                      className="text-[12px] text-muted hover:text-[#e6edf3] hover:underline mt-1.5 shrink-0"
+                      title="手动解锁该任务（连同其前置）"
+                    >
+                      手动解锁
+                    </button>
+                  )}
+                </div>
+                <div className="text-[13px] text-muted mt-1.5 flex items-center gap-1.5 flex-wrap">
                   {selAvatar && (
                     <img
                       src={selAvatar}
@@ -1646,17 +1625,17 @@ export function QuestGraphPage() {
                     }`}
                   </span>
                   {detail.legacy && (
-                    <span className="px-1.5 rounded border border-line text-[10px] text-muted">
+                    <span className="px-1.5 rounded border border-line text-[12px] text-muted">
                       旧任务
                     </span>
                   )}
                   {detail.legacy && (
-                    <span className="px-1.5 rounded border border-red-500/40 bg-red-500/15 text-red-300 text-[10px]">
+                    <span className="px-1.5 rounded border border-red-500/40 bg-red-500/15 text-red-300 text-[12px]">
                       仅 PvP
                     </span>
                   )}
                   {detail.special && (
-                    <span className="px-1.5 rounded border border-dashed border-[#a371f7] text-[#a371f7] text-[10px]">
+                    <span className="px-1.5 rounded border border-dashed border-[#a371f7] text-[#a371f7] text-[12px]">
                       特殊 ✦
                     </span>
                   )}
@@ -1664,8 +1643,8 @@ export function QuestGraphPage() {
 
                 {detail.traderReqs?.length > 0 && (
                   <div className="mt-3">
-                    <div className="text-[11px] text-muted mb-1">贸易条件</div>
-                    <div className="space-y-1 text-[12px]">
+                    <div className="text-[13px] text-muted mb-1">贸易条件</div>
+                    <div className="space-y-1 text-[14px]">
                       {detail.traderReqs.map((r) => {
                         const cur = profile?.loyalty?.[r.traderId] ?? 1
                         const met = cur >= r.value
@@ -1694,8 +1673,8 @@ export function QuestGraphPage() {
 
                 {detail.objectives?.length > 0 && (
                   <div className="mt-3">
-                    <div className="text-[11px] text-muted mb-1">目标</div>
-                    <ul className="space-y-1.5 text-[12px] text-[#c9d1d9]">
+                    <div className="text-[13px] text-muted mb-1">目标</div>
+                    <ul className="space-y-1.5 text-[14px] text-[#c9d1d9]">
                       {detail.objectives.map((o, i) => (
                         <li key={i} className="leading-snug">
                           - {o.description}
@@ -1710,7 +1689,7 @@ export function QuestGraphPage() {
 
                 {allDetailItems.length > 0 && (
                   <div className="mt-3">
-                    <div className="text-[11px] text-muted mb-1">
+                    <div className="text-[13px] text-muted mb-1">
                       所需物品{allDetailItems.length > 15 ? `（${allDetailItems.length}）` : ''}
                     </div>
                     <div className="flex flex-col gap-0.5">
@@ -1726,11 +1705,11 @@ export function QuestGraphPage() {
                             loading="lazy"
                             className="w-3 h-3 object-contain shrink-0"
                           />
-                          <span className="flex-1 truncate text-[11px] text-[#c9d1d9]">
+                          <span className="flex-1 truncate text-[13px] text-[#c9d1d9]">
                             {it.name}
                           </span>
                           {it.count != null && it.count > 0 && (
-                            <span className="text-amber text-[11px] shrink-0">×{it.count}</span>
+                            <span className="text-amber text-[13px] shrink-0">×{it.count}</span>
                           )}
                         </span>
                       ))}
@@ -1741,7 +1720,7 @@ export function QuestGraphPage() {
                           e.stopPropagation()
                           setItemListOpen(true)
                         }}
-                        className="mt-2 text-[12px] text-amber hover:underline"
+                        className="mt-2 text-[14px] text-amber hover:underline"
                       >
                         显示更多 {allDetailItems.length - 15} 项物品 →
                       </button>
@@ -1751,8 +1730,8 @@ export function QuestGraphPage() {
 
                 {detail.rewards?.length > 0 && (
                   <div className="mt-3">
-                    <div className="text-[11px] text-muted mb-1">奖励</div>
-                    <div className="text-[12px] text-[#c9d1d9]">
+                    <div className="text-[13px] text-muted mb-1">奖励</div>
+                    <div className="text-[14px] text-[#c9d1d9]">
                       {detail.rewards.map((r, i) => (
                         <span key={i}>
                           {r.name} ×{r.count}
@@ -1776,8 +1755,8 @@ export function QuestGraphPage() {
                   if (shown.length === 0) return null
                   return (
                     <div className="mt-3">
-                      <div className="text-[11px] text-muted mb-1">前置任务</div>
-                      <div className="text-[12px] text-[#c9d1d9] space-y-0.5">
+                      <div className="text-[13px] text-muted mb-1">前置任务</div>
+                      <div className="text-[14px] text-[#c9d1d9] space-y-0.5">
                         {shown.map((p) => (
                           <div key={p.id} className="truncate flex items-center gap-1">
                             <span className={completedSet.has(p.id) ? 'text-ok' : 'text-muted'}>
@@ -1790,54 +1769,9 @@ export function QuestGraphPage() {
                     </div>
                   )
                 })()}
-
-                <div className="mt-4 flex items-center gap-2">
-                  {selStatus === 'available' && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onSetStatus(detail.id, 'accept')
-                      }}
-                      className="flex-1 text-center text-[12px] text-black font-medium bg-[#58a6ff] rounded py-1.5 hover:opacity-90"
-                    >
-                      接取
-                    </button>
-                  )}
-                  {selStatus === 'in_progress' && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onSetStatus(detail.id, 'complete')
-                      }}
-                      className="flex-1 text-center text-[12px] text-black font-medium bg-[#2ea043] rounded py-1.5 hover:opacity-90"
-                    >
-                      完成
-                    </button>
-                  )}
-                  {selStatus === 'locked' && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onSetStatus(detail.id, 'unlock')
-                      }}
-                      className="flex-1 text-center text-[12px] text-[#e6edf3] bg-ink-700 border border-line rounded py-1.5 hover:bg-ink-600"
-                    >
-                      解锁
-                    </button>
-                  )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      openWiki(detail.wiki)
-                    }}
-                    className="flex-1 text-center text-[12px] text-amber border border-amber rounded py-1.5 hover:bg-amber-soft"
-                  >
-                    打开 Wiki ↗
-                  </button>
-                </div>
               </>
             ) : (
-              <div className="text-[12px] text-muted">加载中…</div>
+              <div className="text-[14px] text-muted">加载中…</div>
             )}
           </div>
         )}
@@ -1856,13 +1790,13 @@ export function QuestGraphPage() {
               onMouseDown={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-3">
-                <div className="text-[14px] font-medium">所需物品（{allDetailItems.length}）</div>
+                <div className="text-[16px] font-medium">所需物品（{allDetailItems.length}）</div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
                     setItemListOpen(false)
                   }}
-                  className="text-muted hover:text-[#e6edf3] text-[14px]"
+                  className="text-muted hover:text-[#e6edf3] text-[16px]"
                 >
                   ✕
                 </button>
@@ -1880,11 +1814,11 @@ export function QuestGraphPage() {
                       loading="lazy"
                       className="w-6 h-6 object-contain"
                     />
-                    <span className="text-[12px] text-[#c9d1d9] truncate max-w-[150px]">
+                    <span className="text-[14px] text-[#c9d1d9] truncate max-w-[150px]">
                       {it.name}
                     </span>
                     {it.count != null && it.count > 0 && (
-                      <span className="text-amber text-[12px]">×{it.count}</span>
+                      <span className="text-amber text-[14px]">×{it.count}</span>
                     )}
                   </span>
                 ))}

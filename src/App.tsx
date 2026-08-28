@@ -44,7 +44,16 @@ export default function App() {
       })
       .then((st) => {
         setSettings(st)
-        return startWatching(st.logDir || undefined)
+        // 后端 settings.json 为 UI 偏好的持久化源（覆盖 localStorage 首帧缓存）
+        if (st.uiPrefs && Object.keys(st.uiPrefs).length > 0) {
+          useStore.getState().applyUiPrefs(st.uiPrefs)
+        }
+        // 日志目录未配置：不启动监控，打开设置引导用户选择
+        if (!st.logDir) {
+          useStore.getState().openSettings()
+          return undefined
+        }
+        return startWatching(st.logDir)
       })
       .then(() => getState())
       .then((wst) => {
