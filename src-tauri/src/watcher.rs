@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use notify::{Event, RecursiveMode, Watcher};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::data;
 use crate::parser;
@@ -12,6 +14,7 @@ use crate::AppState;
 pub struct WatcherHandle {
     _watcher: notify::RecommendedWatcher,
     _paths: Arc<Mutex<HashMap<PathBuf, u64>>>,
+    _states: Arc<Mutex<HashMap<PathBuf, parser::ParseState>>>,
     _seen: Arc<Mutex<HashSet<String>>>,
 }
 
@@ -24,15 +27,18 @@ impl WatcherHandle {
 /// 启动对 log_dir 的递归监听，并立即做一次全量初始扫描。
 pub fn start(app: &AppHandle, dir: &str) -> Result<WatcherHandle, String> {
     let paths: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
+    let states: Arc<Mutex<HashMap<PathBuf, parser::ParseState>>> =
+        Arc::new(Mutex::new(HashMap::new()));
     let seen: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
     let app_c = app.clone();
     let paths_c = paths.clone();
+    let states_c = states.clone();
     let seen_c = seen.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         if let Ok(ev) = res {
             for p in ev.paths {
-                process_file(&app_c, &paths_c, &seen_c, &p, true);
+                process_file(&app_c, &paths_c, &states_c, &seen_c, &p, true);
             }
         }
     })
@@ -49,20 +55,38 @@ pub fn start(app: &AppHandle, dir: &str) -> Result<WatcherHandle, String> {
         st.last_scan = Some(now());
         st.error = None;
     }
-    initial_scan(app, dir, &paths, &seen);
+    scan_dir(app, dir, &paths, &states, &seen, false);
+
+    // 周期性 rescan 兜底：notify 的 RecursiveMode 在新 session 目录（游戏启动/重启时新建）
+    // 的 watch 注册存在时序竞态，可能漏掉新目录内文件的初始内容，导致整轮游戏不被识别。
+    // 每 3 秒遍历一次 log_dir 下所有 .log，复用 offset map 做增量读取，与 notify 互补。
+    let r_app = app.clone();
+    let r_dir = dir.to_string();
+    let r_paths = paths.clone();
+    let r_states = states.clone();
+    let r_seen = seen.clone();
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(3));
+        scan_dir(&r_app, &r_dir, &r_paths, &r_states, &r_seen, true);
+    });
 
     Ok(WatcherHandle {
         _watcher: watcher,
         _paths: paths,
+        _states: states,
         _seen: seen,
     })
 }
 
-fn initial_scan(
+/// 遍历 dir 下所有 .log 文件（含子目录，即游戏的 session 目录），对每个文件做增量读取。
+/// emit=false 用于初始扫描（不向前端报历史噪声），emit=true 用于实时/轮询（补报 notify 漏掉的新文件）。
+fn scan_dir(
     app: &AppHandle,
     dir: &str,
     paths: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+    states: &Arc<Mutex<HashMap<PathBuf, parser::ParseState>>>,
     seen: &Arc<Mutex<HashSet<String>>>,
+    emit: bool,
 ) {
     let root = Path::new(dir);
     let mut session_dirs: HashSet<String> = HashSet::new();
@@ -79,12 +103,12 @@ fn initial_scan(
                     for f in files.flatten() {
                         let fp = f.path();
                         if fp.extension().and_then(|x| x.to_str()) == Some("log") {
-                            process_file(app, paths, seen, &fp, false);
+                            process_file(app, paths, states, seen, &fp, emit);
                         }
                     }
                 }
             } else if p.extension().and_then(|x| x.to_str()) == Some("log") {
-                process_file(app, paths, seen, &p, false);
+                process_file(app, paths, states, seen, &p, emit);
             }
         }
     }
@@ -96,6 +120,7 @@ fn initial_scan(
 fn process_file(
     app: &AppHandle,
     paths: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+    states: &Arc<Mutex<HashMap<PathBuf, parser::ParseState>>>,
     seen: &Arc<Mutex<HashSet<String>>>,
     path: &Path,
     emit: bool,
@@ -108,15 +133,21 @@ fn process_file(
         Err(_) => return,
     };
     let size = meta.len();
+    let mut truncated = false;
     let offset = {
         let mut g = paths.lock().unwrap();
         let o = g.get(path).copied().unwrap_or(0);
         if o > size {
+            // 文件被截断/轮转（如游戏重建会话），offset 失效，从头读并重置解析状态
+            truncated = true;
             0
         } else {
             o
         }
     };
+    if truncated {
+        states.lock().unwrap().remove(path);
+    }
 
     use std::io::{Read, Seek, SeekFrom};
     let mut f = match std::fs::File::open(path) {
@@ -144,7 +175,11 @@ fn process_file(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let events = parser::parse_chunk(&text);
+    // 在锁内用持久化 ParseState 解析（未闭合的多行 JSON 会保留在 states 中，下次续解析）
+    let events = {
+        let mut g = states.lock().unwrap();
+        parser::parse_chunk(&text, g.entry(path.to_path_buf()).or_default())
+    };
     for ev in events {
         match ev {
             parser::RawEvent::Accept {
@@ -217,6 +252,23 @@ fn process_file(
                     st.apply_progress(&endpoint, &timestamp);
                 }
                 crate::emit_progress(app, &endpoint, &timestamp, &source);
+            }
+            parser::RawEvent::Location {
+                location_id,
+                timestamp,
+            } => {
+                // 无论初始扫描还是实时事件都要更新当前地图（并去重：地图未变不重复 emit）
+                let changed = {
+                    let binding = app.state::<AppState>();
+                    let mut st = binding.store.lock().unwrap();
+                    st.apply_location(&location_id)
+                };
+                if changed && emit {
+                    let _ = app.emit(
+                        "map-changed",
+                        serde_json::json!({ "locationId": location_id, "timestamp": timestamp }),
+                    );
+                }
             }
         }
     }

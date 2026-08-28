@@ -7,7 +7,7 @@ export function Sidebar() {
     { k: 'monitor', label: '监控' },
     { k: 'graph', label: '任务图谱' },
     { k: 'profile', label: '角色' },
-    { k: 'map', label: '地图', badge: '待开发' },
+    { k: 'map', label: '地图' },
   ]
 
   return (

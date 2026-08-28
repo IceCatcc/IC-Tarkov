@@ -110,7 +110,7 @@ export default function SettingsModal() {
         <div className="space-y-4">
           <DirField label="日志监控目录" value={logDir} onChange={setLogDir} />
           <DirField
-            label="截图监控目录（地图功能预留）"
+            label="截图监控目录（地图页玩家定位）"
             value={shotDir}
             onChange={setShotDir}
           />

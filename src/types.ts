@@ -153,3 +153,20 @@ export type QuestEventPayload =
       endpoint: string
       source: string
     }
+
+// ===== 玩家位置（截图文件名解析） =====
+
+export interface PlayerPositionPayload {
+  position: { x: number; y: number; z: number }
+  /** 面朝方向（度，0 = 游戏 +Z 北向，顺时针增加） */
+  rotation: number
+  /** 截图捕获时间（文件名日期时间） */
+  timestamp: string
+  file: string
+}
+
+// 'map-changed' 事件载荷：日志检测到进入新地图
+export interface MapChangedPayload {
+  locationId: string
+  timestamp: string
+}

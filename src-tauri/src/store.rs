@@ -40,6 +40,8 @@ pub struct QuestStore {
     pub sessions: usize,
     pub last_scan: Option<String>,
     pub error: Option<String>,
+    /// 当前所在地图（游戏内部 location id，如 Sandbox_start / factory4_day）
+    pub current_map_nameid: Option<String>,
 }
 
 const ACTIVITY_CAP: usize = 800;
@@ -53,6 +55,7 @@ impl QuestStore {
             sessions: 0,
             last_scan: None,
             error: None,
+            current_map_nameid: None,
         }
     }
 
@@ -113,6 +116,15 @@ impl QuestStore {
             text: endpoint.into(),
             wiki: None,
         });
+    }
+
+    /// 更新当前所在地图；返回是否发生变化（变化时前端需要 emit map-changed）
+    pub fn apply_location(&mut self, location_id: &str) -> bool {
+        let changed = self.current_map_nameid.as_deref() != Some(location_id);
+        if changed {
+            self.current_map_nameid = Some(location_id.to_string());
+        }
+        changed
     }
 
     pub fn stats(&self) -> (u32, u32) {

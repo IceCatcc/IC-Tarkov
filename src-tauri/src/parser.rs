@@ -16,6 +16,9 @@ static RE_QUEST_LIST: Lazy<Regex> = Lazy::new(|| {
 static RE_TEMPLATE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^([0-9a-fA-F]{24})\s+(\w+)$").unwrap());
 static RE_TRAIL_COMMA: Lazy<Regex> = Lazy::new(|| Regex::new(r",(\s*[}\]])").unwrap());
+/// 进入 raid 时 application 行：`[Transit] Flag:None, RaidId:..., Count:0, Locations:Sandbox_start -> `
+static RE_LOCATION: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"Locations:([A-Za-z0-9_]+)").unwrap());
 
 #[derive(Debug, Clone)]
 pub enum RawEvent {
@@ -38,6 +41,10 @@ pub enum RawEvent {
         timestamp: String,
         source: String,
     },
+    Location {
+        location_id: String,
+        timestamp: String,
+    },
 }
 
 fn full_ts(line: &str) -> Option<String> {
@@ -46,61 +53,82 @@ fn full_ts(line: &str) -> Option<String> {
         .map(|c| c.get(1).unwrap().as_str().to_string())
 }
 
+/// 解析状态：在多次增量读取之间保持，避免实时监听截断多行 JSON 时丢事件。
+#[derive(Default, Clone)]
+pub struct ParseState {
+    pub in_json: bool,
+    pub depth: i32,
+    pub json_buf: String,
+    pub cur_ts: String,
+}
+
 /// 解析一段日志文本，返回其中的接取 / 完成 / 进度事件。
 /// 兼容美化后的多行 JSON（含嵌套花括号、尾逗号）。
-pub fn parse_chunk(text: &str) -> Vec<RawEvent> {
+///
+/// `st` 跨多次 `process_file` 调用持久化：若本次读取在一条多行 JSON 中途结束，
+/// 未闭合的部分保留在 `st` 中，下次读取时续解析，避免实时增量读取截断丢事件。
+pub fn parse_chunk(text: &str, st: &mut ParseState) -> Vec<RawEvent> {
     let mut out = Vec::new();
     let lines: Vec<&str> = text.lines().collect();
     let mut i = 0;
-    let mut in_json = false;
-    let mut depth: i32 = 0;
-    let mut json_buf = String::new();
-    let mut cur_ts = String::new();
 
     while i < lines.len() {
         let line = lines[i];
         if let Some(ts) = full_ts(line) {
-            cur_ts = ts;
+            st.cur_ts = ts;
         }
 
-        if in_json {
+        if st.in_json {
+            // 安全护栏：单条 JSON 异常超大（之前某次截断后一直未闭合），重置避免永久阻塞后续事件
+            if st.json_buf.len() > 4_000_000 {
+                st.in_json = false;
+                st.depth = 0;
+                st.json_buf.clear();
+            }
             for ch in line.chars() {
                 match ch {
-                    '{' => depth += 1,
-                    '}' => depth -= 1,
+                    '{' => st.depth += 1,
+                    '}' => st.depth -= 1,
                     _ => {}
                 }
             }
-            json_buf.push_str(line);
-            json_buf.push('\n');
-            if depth <= 0 {
-                if let Some(ev) = parse_notif(&json_buf, &cur_ts) {
+            st.json_buf.push_str(line);
+            st.json_buf.push('\n');
+            if st.depth <= 0 {
+                if let Some(ev) = parse_notif(&st.json_buf, &st.cur_ts) {
                     out.push(ev);
                 }
-                in_json = false;
-                depth = 0;
-                json_buf.clear();
+                st.in_json = false;
+                st.depth = 0;
+                st.json_buf.clear();
             }
         } else if RE_CHAT.is_match(line) {
-            in_json = true;
-            depth = 0;
-            json_buf.clear();
+            st.in_json = true;
+            st.depth = 0;
+            st.json_buf.clear();
         } else if let Some(urlcap) = RE_URL.captures(line) {
             let url = urlcap.get(1).unwrap().as_str();
-            let key = make_progress_key(line, url, &cur_ts);
+            let key = make_progress_key(line, url, &st.cur_ts);
             if RE_QUEST_COMPLETE.is_match(url) {
                 out.push(RawEvent::Progress {
                     endpoint: "client/quest/complete (提交完成)".to_string(),
                     key,
-                    timestamp: cur_ts.clone(),
+                    timestamp: st.cur_ts.clone(),
                     source: String::new(),
                 });
             } else if RE_QUEST_LIST.is_match(url) {
                 out.push(RawEvent::Progress {
                     endpoint: "client/quest/list (同步任务列表)".to_string(),
                     key,
-                    timestamp: cur_ts.clone(),
+                    timestamp: st.cur_ts.clone(),
                     source: String::new(),
+                });
+            }
+        } else if line.contains("RaidId") {
+            if let Some(cap) = RE_LOCATION.captures(line) {
+                out.push(RawEvent::Location {
+                    location_id: cap.get(1).unwrap().as_str().to_string(),
+                    timestamp: st.cur_ts.clone(),
                 });
             }
         }

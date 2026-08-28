@@ -10,6 +10,7 @@ import type {
   QuestDetail,
   AppSettings,
   PlayerProfile,
+  PlayerPositionPayload,
 } from './types'
 
 export async function initTauri(): Promise<UnlistenFn> {
@@ -74,4 +75,12 @@ export async function saveSettings(
 
 export async function openUrl(url: string): Promise<void> {
   await invoke('open_url', { url })
+}
+
+export async function getPlayerPosition(): Promise<PlayerPositionPayload | null> {
+  return await invoke<PlayerPositionPayload | null>('get_player_position')
+}
+
+export async function getCurrentMap(): Promise<string | null> {
+  return await invoke<string | null>('get_current_map')
 }

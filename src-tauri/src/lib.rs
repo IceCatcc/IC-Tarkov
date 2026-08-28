@@ -1,5 +1,6 @@
 mod data;
 mod parser;
+mod screenshots;
 mod store;
 mod watcher;
 
@@ -10,6 +11,7 @@ use tauri::{Emitter, Manager};
 pub struct AppState {
     pub store: Mutex<store::QuestStore>,
     pub watcher: Mutex<Option<watcher::WatcherHandle>>,
+    pub screenshot: Mutex<Option<screenshots::ScreenshotHandle>>,
 }
 
 // ---------------- 应用设置（持久化） ----------------
@@ -174,20 +176,57 @@ fn start_watching(app: tauri::AppHandle, dir: Option<String>) -> Result<(), Stri
         let mut w = binding.watcher.lock().unwrap();
         w.replace(handle);
     }
+    // 截图监听（目录来自设置）
+    {
+        let binding = app.state::<AppState>();
+        let mut s = binding.screenshot.lock().unwrap();
+        if let Some(old) = s.take() {
+            old.stop();
+        }
+        let shot_dir = read_settings(&app).screenshot_dir;
+        if !shot_dir.is_empty() && Path::new(&shot_dir).is_dir() {
+            s.replace(screenshots::start(&app, &shot_dir));
+        }
+    }
     emit_state(&app);
     Ok(())
 }
 
 #[tauri::command]
 fn stop_watching(app: tauri::AppHandle) -> Result<(), String> {
-    let binding = app.state::<AppState>();
-    let mut w = binding.watcher.lock().unwrap();
-    if let Some(h) = w.take() {
-        h.stop();
+    {
+        let binding = app.state::<AppState>();
+        let mut w = binding.watcher.lock().unwrap();
+        if let Some(h) = w.take() {
+            h.stop();
+        }
     }
-    drop(w);
+    {
+        let binding = app.state::<AppState>();
+        let mut s = binding.screenshot.lock().unwrap();
+        if let Some(h) = s.take() {
+            h.stop();
+        }
+    }
     emit_state(&app);
     Ok(())
+}
+
+#[tauri::command]
+fn get_player_position(app: tauri::AppHandle) -> Option<screenshots::ShotPosition> {
+    let _ = &app;
+    let dir = read_settings(&app).screenshot_dir;
+    if dir.is_empty() || !Path::new(&dir).is_dir() {
+        return None;
+    }
+    // 启动之前就存在的截图不用于定位
+    match screenshots::scan_latest(Path::new(&dir)) {
+        Some((p, mtime)) if mtime > screenshots::started_at() => p
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .and_then(|n| screenshots::parse_filename(&n)),
+        _ => None,
+    }
 }
 
 #[tauri::command]
@@ -263,6 +302,13 @@ fn get_quest_graph(app: tauri::AppHandle) -> data::QuestGraph {
 #[tauri::command]
 fn get_quest_detail(quest_id: String) -> Option<data::QuestDetail> {
     data::get_detail(&quest_id)
+}
+
+#[tauri::command]
+fn get_current_map(app: tauri::AppHandle) -> Option<String> {
+    let st = app.state::<AppState>();
+    let s = st.store.lock().unwrap();
+    s.current_map_nameid.clone()
 }
 
 #[tauri::command]
@@ -359,6 +405,7 @@ pub fn run() {
             app.manage(AppState {
                 store: Mutex::new(store::QuestStore::new()),
                 watcher: Mutex::new(None),
+                screenshot: Mutex::new(None),
             });
             data::load();
             Ok(())
@@ -374,6 +421,8 @@ pub fn run() {
             get_quest_detail,
             get_settings,
             save_settings,
+            get_player_position,
+            get_current_map,
             open_url
         ])
         .run(tauri::generate_context!())

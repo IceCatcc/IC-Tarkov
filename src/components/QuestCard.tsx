@@ -1,10 +1,12 @@
 import type { PlayerQuest } from '../types'
 import { openUrl } from '../tauri'
+import { useStore } from '../store'
 import { traderImage } from '../traderImages'
 
 export function QuestCard({ quest }: { quest: PlayerQuest }) {
   const completed = quest.status === 'completed'
   const avatar = traderImage(quest.traderId)
+  const openWiki = useStore((s) => s.openWiki)
 
   return (
     <div className="bg-ink-800 border border-line rounded-xl p-4">
@@ -45,12 +47,21 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
       <div className="mt-2 flex items-center justify-between">
         <span className="text-[11px] text-muted truncate font-mono">{quest.questId}</span>
         {quest.wiki && (
-          <button
-            onClick={() => openUrl(quest.wiki)}
-            className="text-[11px] text-amber hover:underline shrink-0 ml-2"
-          >
-            打开 Wiki ↗
-          </button>
+          <>
+            <button
+              onClick={() => openWiki(quest.wiki)}
+              className="text-[11px] text-amber hover:underline shrink-0 ml-2"
+            >
+              查看资料
+            </button>
+            <button
+              onClick={() => openUrl(quest.wiki)}
+              className="text-[11px] text-muted hover:text-[#e6edf3] hover:underline shrink-0 ml-2"
+              title="在系统浏览器打开"
+            >
+              ↗
+            </button>
+          </>
         )}
       </div>
     </div>
