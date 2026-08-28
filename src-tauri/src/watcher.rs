@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -13,8 +13,7 @@ use crate::AppState;
 
 pub struct WatcherHandle {
     _watcher: notify::RecommendedWatcher,
-    _paths: Arc<Mutex<HashMap<PathBuf, u64>>>,
-    _states: Arc<Mutex<HashMap<PathBuf, parser::ParseState>>>,
+    _states: Arc<Mutex<HashMap<String, parser::ParseState>>>,
     _seen: Arc<Mutex<HashSet<String>>>,
 }
 
@@ -25,20 +24,20 @@ impl WatcherHandle {
 }
 
 /// 启动对 log_dir 的递归监听，并立即做一次全量初始扫描。
+/// 偏移量（每文件已读字节）来自 AppState.offsets（启动时已从数据库加载），
+/// 因此初始扫描只会读到上次之后的新增内容，不会重复处理历史日志。
 pub fn start(app: &AppHandle, dir: &str) -> Result<WatcherHandle, String> {
-    let paths: Arc<Mutex<HashMap<PathBuf, u64>>> = Arc::new(Mutex::new(HashMap::new()));
-    let states: Arc<Mutex<HashMap<PathBuf, parser::ParseState>>> =
+    let states: Arc<Mutex<HashMap<String, parser::ParseState>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let seen: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
     let app_c = app.clone();
-    let paths_c = paths.clone();
     let states_c = states.clone();
     let seen_c = seen.clone();
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
         if let Ok(ev) = res {
             for p in ev.paths {
-                process_file(&app_c, &paths_c, &states_c, &seen_c, &p, true);
+                process_file(&app_c, &states_c, &seen_c, &p, true);
             }
         }
     })
@@ -55,24 +54,24 @@ pub fn start(app: &AppHandle, dir: &str) -> Result<WatcherHandle, String> {
         st.last_scan = Some(now());
         st.error = None;
     }
-    scan_dir(app, dir, &paths, &states, &seen, false);
+    scan_dir(app, dir, &states, &seen, false);
+    crate::persist::save(app); // 落盘初始扫描结果 + 偏移
 
     // 周期性 rescan 兜底：notify 的 RecursiveMode 在新 session 目录（游戏启动/重启时新建）
     // 的 watch 注册存在时序竞态，可能漏掉新目录内文件的初始内容，导致整轮游戏不被识别。
-    // 每 3 秒遍历一次 log_dir 下所有 .log，复用 offset map 做增量读取，与 notify 互补。
+    // 每 3 秒遍历一次 log_dir 下所有 .log，复用 offset 做增量读取，与 notify 互补。
     let r_app = app.clone();
     let r_dir = dir.to_string();
-    let r_paths = paths.clone();
     let r_states = states.clone();
     let r_seen = seen.clone();
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(3));
-        scan_dir(&r_app, &r_dir, &r_paths, &r_states, &r_seen, true);
+        scan_dir(&r_app, &r_dir, &r_states, &r_seen, true);
+        crate::persist::save(&r_app); // 每次扫描后落盘（含新增任务与偏移）
     });
 
     Ok(WatcherHandle {
         _watcher: watcher,
-        _paths: paths,
         _states: states,
         _seen: seen,
     })
@@ -83,8 +82,7 @@ pub fn start(app: &AppHandle, dir: &str) -> Result<WatcherHandle, String> {
 fn scan_dir(
     app: &AppHandle,
     dir: &str,
-    paths: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    states: &Arc<Mutex<HashMap<PathBuf, parser::ParseState>>>,
+    states: &Arc<Mutex<HashMap<String, parser::ParseState>>>,
     seen: &Arc<Mutex<HashSet<String>>>,
     emit: bool,
 ) {
@@ -103,12 +101,12 @@ fn scan_dir(
                     for f in files.flatten() {
                         let fp = f.path();
                         if fp.extension().and_then(|x| x.to_str()) == Some("log") {
-                            process_file(app, paths, states, seen, &fp, emit);
+                            process_file(app, states, seen, &fp, emit);
                         }
                     }
                 }
             } else if p.extension().and_then(|x| x.to_str()) == Some("log") {
-                process_file(app, paths, states, seen, &p, emit);
+                process_file(app, states, seen, &p, emit);
             }
         }
     }
@@ -119,8 +117,7 @@ fn scan_dir(
 
 fn process_file(
     app: &AppHandle,
-    paths: &Arc<Mutex<HashMap<PathBuf, u64>>>,
-    states: &Arc<Mutex<HashMap<PathBuf, parser::ParseState>>>,
+    states: &Arc<Mutex<HashMap<String, parser::ParseState>>>,
     seen: &Arc<Mutex<HashSet<String>>>,
     path: &Path,
     emit: bool,
@@ -133,10 +130,12 @@ fn process_file(
         Err(_) => return,
     };
     let size = meta.len();
+    let key = path.display().to_string();
     let mut truncated = false;
     let offset = {
-        let mut g = paths.lock().unwrap();
-        let o = g.get(path).copied().unwrap_or(0);
+        let binding = app.state::<AppState>();
+        let g = binding.offsets.lock().unwrap();
+        let o = g.get(&key).copied().unwrap_or(0);
         if o > size {
             // 文件被截断/轮转（如游戏重建会话），offset 失效，从头读并重置解析状态
             truncated = true;
@@ -146,7 +145,7 @@ fn process_file(
         }
     };
     if truncated {
-        states.lock().unwrap().remove(path);
+        states.lock().unwrap().remove(&key);
     }
 
     use std::io::{Read, Seek, SeekFrom};
@@ -162,8 +161,9 @@ fn process_file(
         return;
     }
     {
-        let mut g = paths.lock().unwrap();
-        g.insert(path.to_path_buf(), size);
+        let binding = app.state::<AppState>();
+        let mut g = binding.offsets.lock().unwrap();
+        g.insert(key.clone(), size);
     }
     let text = String::from_utf8_lossy(&buf);
     if text.is_empty() {
@@ -178,7 +178,7 @@ fn process_file(
     // 在锁内用持久化 ParseState 解析（未闭合的多行 JSON 会保留在 states 中，下次续解析）
     let events = {
         let mut g = states.lock().unwrap();
-        parser::parse_chunk(&text, g.entry(path.to_path_buf()).or_default())
+        parser::parse_chunk(&text, g.entry(key.clone()).or_default())
     };
     for ev in events {
         match ev {
@@ -189,8 +189,8 @@ fn process_file(
                 timestamp,
                 ..
             } => {
-                let key = format!("acc|{event_id}");
-                if !seen.lock().unwrap().insert(key) {
+                let key2 = format!("acc|{event_id}");
+                if !seen.lock().unwrap().insert(key2) {
                     continue;
                 }
                 let info = data::resolve_accept(&quest_id);
@@ -220,8 +220,8 @@ fn process_file(
                 timestamp,
                 ..
             } => {
-                let key = format!("cmp|{event_id}");
-                if !seen.lock().unwrap().insert(key) {
+                let key2 = format!("cmp|{event_id}");
+                if !seen.lock().unwrap().insert(key2) {
                     continue;
                 }
                 let name = data::resolve_name(&quest_id);

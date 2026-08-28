@@ -13,6 +13,8 @@ struct RawNode {
     trader_reqs: Vec<RawTraderReq>,
     min_level: Option<u32>,
     map: Option<String>,
+    #[serde(default)]
+    maps: Vec<String>,
     wiki: String,
     objectives: Vec<RawObjective>,
     rewards: Vec<RawReward>,
@@ -91,6 +93,26 @@ pub fn map_display_name(map_id: &str) -> Option<String> {
     })
 }
 
+/// 供前端「角色」页管理地图解锁用的全部地图列表（id + 展示名）
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MapInfo {
+    pub id: String,
+    pub name: String,
+}
+
+pub fn get_maps() -> Vec<MapInfo> {
+    let mut v: Vec<MapInfo> = MAP_META
+        .iter()
+        .map(|(id, m)| MapInfo {
+            id: id.clone(),
+            name: if m.zh.is_empty() { m.nn.clone() } else { m.zh.clone() },
+        })
+        .collect();
+    v.sort_by(|a, b| a.name.cmp(&b.name));
+    v
+}
+
 /// trader_id -> trader_name（取索引中该商人的第一个任务的名字）
 static TRADER_NAMES: Lazy<HashMap<String, String>> = Lazy::new(|| {
     let mut m = HashMap::new();
@@ -164,6 +186,8 @@ pub struct GraphNode {
     pub map: Option<String>,
     /// 地图展示名（官方中文）
     pub map_name: Option<String>,
+    /// 任务涉及的所有地图 id（map 字段 + 目标/奖励文本提取）
+    pub maps: Vec<String>,
     /// 贸易条件（商人忠诚等级/好感）
     pub trader_reqs: Vec<TraderReqPayload>,
     pub special: bool,
@@ -299,6 +323,29 @@ pub fn resolve_name(quest_id: &str) -> String {
         .unwrap_or_else(|| quest_id.to_string())
 }
 
+/// 返回某任务的所有「传递性前置任务」（不含自身），已做环路保护。
+/// 用于手动「接取 / 解锁」时沿任务链递归处理前置。
+pub fn prereqs_closure(quest_id: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut stack: Vec<String> = INDEX
+        .get(quest_id)
+        .map(|n| n.prereqs.clone())
+        .unwrap_or_default();
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        out.push(id.clone());
+        if let Some(n) = INDEX.get(&id) {
+            for p in &n.prereqs {
+                stack.push(p.clone());
+            }
+        }
+    }
+    out
+}
+
 /// 全量任务图谱（不含玩家状态，前端按 id 合并）
 pub fn get_graph() -> QuestGraph {
     let mut nodes = Vec::with_capacity(INDEX.len());
@@ -313,6 +360,7 @@ pub fn get_graph() -> QuestGraph {
             min_level: n.min_level,
             map: n.map.clone(),
             map_name: n.map.as_deref().and_then(map_display_name),
+            maps: n.maps.clone(),
             trader_reqs: trader_reqs_payload(n),
             legacy: n.legacy,
             special: n.special,

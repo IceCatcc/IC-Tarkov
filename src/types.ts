@@ -43,12 +43,22 @@ export interface PlayerProfile {
   level: number
   /** traderId -> 忠诚等级 LL(1..4)，未填写视为 1 */
   loyalty: Record<string, number>
+  /** 已锁定的地图 id 列表（玩家尚未解锁的地图）；为空表示全部地图可用 */
+  lockedMaps: string[]
+}
+
+/** 地图列表项（角色页管理地图解锁用） */
+export interface MapInfo {
+  id: string
+  name: string
 }
 
 export interface AppSettings {
   logDir: string
   screenshotDir: string
   profile: PlayerProfile
+  /** 读取坐标后是否删除截图 */
+  deleteScreenshots: boolean
 }
 
 export interface ItemRef {
@@ -85,6 +95,8 @@ export interface GraphNode {
   map: string | null
   /** 地图展示名（官方中文，后端由缓存 map_meta.json 解析） */
   mapName: string | null
+  /** 任务涉及的所有地图 id（map 字段 + 目标/奖励文本提取） */
+  maps: string[]
   /** 贸易条件（商人忠诚等级/好感） */
   traderReqs: TraderReq[]
   /** 是否为旧任务（当前赛季已移除，多为旧 PvP 专属任务） */

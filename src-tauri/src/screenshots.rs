@@ -129,7 +129,8 @@ impl ScreenshotHandle {
 }
 
 /// 每 1.5s 扫描一次截图目录；文件变化时解析并 emit `player-position`。
-pub fn start(app: &AppHandle, dir: &str) -> ScreenshotHandle {
+/// `delete_after` 为 true 时读取坐标后删除该截图（避免重复消费），false 时保留。
+pub fn start(app: &AppHandle, dir: &str, delete_after: bool) -> ScreenshotHandle {
     let _ = started_at(); // 记录启动时刻
     let stop = Arc::new(AtomicBool::new(false));
     let stop_c = stop.clone();
@@ -166,6 +167,10 @@ pub fn start(app: &AppHandle, dir: &str) -> ScreenshotHandle {
                     if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
                         if let Some(shot) = parse_filename(name) {
                             let _ = app_c.emit("player-position", &shot);
+                            // 读取坐标后是否删除截图由设置决定
+                            if delete_after {
+                                let _ = std::fs::remove_file(&path);
+                            }
                         }
                     }
                 }

@@ -4,7 +4,7 @@ import {
   startWatching,
   getState,
   getPlayerQuests,
-  getActivity,
+  getUnlocked,
   getSettings,
 } from './tauri'
 import { useStore } from './store'
@@ -24,11 +24,16 @@ export default function App() {
   useEffect(() => {
     if (page === 'map') setMapAlive(true)
   }, [page])
+  // 任务图谱页 keepAlive：同上
+  const [questAlive, setQuestAlive] = useState(false)
+  useEffect(() => {
+    if (page === 'graph') setQuestAlive(true)
+  }, [page])
   const showSettings = useStore((s) => s.showSettings)
   const setWatcher = useStore((s) => s.setWatcher)
   const setSettings = useStore((s) => s.setSettings)
   const seedPlayerQuests = useStore((s) => s.seedPlayerQuests)
-  const seedActivity = useStore((s) => s.seedActivity)
+  const setUnlockedQuests = useStore((s) => s.setUnlockedQuests)
 
   useEffect(() => {
     let off: (() => void) | undefined
@@ -47,17 +52,34 @@ export default function App() {
         return getPlayerQuests()
       })
       .then((list) => {
+        // 仅加载玩家任务；历史活动默认不读取，由「加载更多」按需拉取
         seedPlayerQuests(list)
-        return getActivity()
+        return getUnlocked()
       })
-      .then((acts) => {
-        seedActivity(acts)
+      .then((list) => {
+        setUnlockedQuests(list)
       })
       .catch((e) => console.error('init error', e))
     return () => {
       off?.()
     }
-  }, [setWatcher, setSettings, seedPlayerQuests, seedActivity])
+  }, [setWatcher, setSettings, seedPlayerQuests, setUnlockedQuests])
+
+  // 屏蔽浏览器刷新（F5 / Ctrl+R）与右键菜单
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) {
+        e.preventDefault()
+      }
+    }
+    const onCtx = (e: MouseEvent) => e.preventDefault()
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('contextmenu', onCtx)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('contextmenu', onCtx)
+    }
+  }, [])
 
   return (
     <div className="h-full flex flex-col">
@@ -66,7 +88,11 @@ export default function App() {
         <Sidebar />
         <main className="flex-1 min-w-0 overflow-hidden">
           {page === 'monitor' && <MonitorPage />}
-          {page === 'graph' && <QuestGraphPage />}
+          {questAlive && (
+            <div className="h-full" style={{ display: page === 'graph' ? 'block' : 'none' }}>
+              <QuestGraphPage />
+            </div>
+          )}
           {page === 'profile' && <ProfilePage />}
           {mapAlive && (
             <div className="h-full" style={{ display: page === 'map' ? 'block' : 'none' }}>

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityRow {
     pub id: String,
@@ -12,7 +12,7 @@ pub struct ActivityRow {
     pub wiki: Option<String>,
 }
 
-#[derive(Default, Clone, serde::Serialize)]
+#[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuestEntry {
     pub accepted_at: Option<String>,
@@ -59,7 +59,7 @@ impl QuestStore {
         }
     }
 
-    fn push_activity(&mut self, row: ActivityRow) {
+    pub(crate) fn push_activity(&mut self, row: ActivityRow) {
         // 确定性 id 天然去重：开发热重载反复读取日志时，同一事件只记录一次
         if self.activity.iter().any(|a| a.id == row.id) {
             return;

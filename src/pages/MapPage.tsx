@@ -26,6 +26,15 @@ interface MarkerEntry {
   categories?: string[]
   kind?: string | null
   icon?: string | null
+  /** 撤离要求（合作撤离/信号弹/付费…），来自 tarkov.dev，缺失时为空 */
+  requirements?: {
+    type: string
+    value?: string | null
+    /** 物品类要求（itemRequired/payment）携带，用于 popup 显示图标 */
+    itemId?: string
+    name?: string
+    count?: number | null
+  }[] | null
 }
 
 interface MapMarkersDoc {
@@ -78,6 +87,8 @@ interface QuestZone {
   position: Position
   top?: number | null
   bottom?: number | null
+  /** 区域多边形（游戏坐标 x/z），用于绘制半透明黄色区块 */
+  outline?: { x: number; z: number }[]
 }
 interface QuestZoneObjective {
   type?: string | null
@@ -143,10 +154,62 @@ const EXTRACT_ICON: Record<string, string> = {
   transit: 'extract_transit',
 }
 
+/** 撤离要求类型 -> 中文标签（value 为补充细节，如信号弹颜色 / 付费金额） */
+const REQ_LABEL: Record<string, (v: string | null) => string> = {
+  cooperation: () => '合作撤离',
+  flare: (v) => '信号弹' + (v ? `·${flareColor(v)}` : ''),
+  payment: (v) => '付费' + (v ? ` ${v}` : ''),
+  beacon: () => '信标',
+  transit: () => '过境',
+  secsRequired: (v) => `停留 ${v}s`,
+  levelRequired: (v) => `等级≥${v}`,
+  zoneRequired: (v) => `区域 ${v}`,
+  itemRequired: (v) => '物品' + (v ? ` ${v}` : ''),
+  questRequired: (v) => '任务' + (v ? ` ${v}` : ''),
+  traderRequired: (v) => '商人' + (v ? ` ${v}` : ''),
+  switch: () => '需开开关',
+  btr: () => '需乘BTR',
+  spawn: () => '出生点',
+}
+/** 撤离要求类型 -> 配色 class（见 map.css .req-*） */
+const REQ_CLASS: Record<string, string> = {
+  cooperation: 'req-coop',
+  flare: 'req-flare',
+  payment: 'req-pay',
+  beacon: 'req-beacon',
+  transit: 'req-transit',
+  switch: 'req-switch',
+  btr: 'req-btr',
+}
+function flareColor(v: string) {
+  return ({ red: '红', green: '绿', white: '白', blue: '蓝', yellow: '黄' } as Record<string, string>)[v] ?? v
+}
+type Requirement = NonNullable<MarkerEntry['requirements']>[number]
+
+function reqText(r: Requirement) {
+  const fn = REQ_LABEL[r.type]
+  return fn ? fn(r.value ?? null) : r.type
+}
+function reqClass(r: Requirement) {
+  return REQ_CLASS[r.type] ?? 'req-info'
+}
+/** popup 内撤离要求渲染：物品类带图标 + 中文名，其余回退纯文本 */
+function reqHtml(r: Requirement): string {
+  if (r.itemId) {
+    const cnt = r.count != null && r.count > 0 ? ` ×${r.count}` : ''
+    const nm = r.name ?? r.value ?? ''
+    return `<span class="req-item"><img class="req-item-img" src="/item-icons/${r.itemId}.webp" alt=""/>` +
+      `<span class="req-item-name">${nm}</span>${cnt ? `<span class="req-item-count">${cnt}</span>` : ''}</span>`
+  }
+  return reqText(r)
+}
+
 type ChipKey =
   | 'quests'
-  | 'extracts'
-  | 'spawns'
+  | 'extract_pmc'
+  | 'extract_scav'
+  | 'player_spawns'
+  | 'ai_spawns'
   | 'bosses'
   | 'locks'
   | 'hazards'
@@ -158,8 +221,10 @@ type ChipKey =
 
 const CHIP_DEFS: { key: ChipKey; label: string }[] = [
   { key: 'quests', label: '任务目标' },
-  { key: 'extracts', label: '撤离点' },
-  { key: 'spawns', label: '出生点' },
+  { key: 'extract_pmc', label: 'PMC撤离' },
+  { key: 'extract_scav', label: 'Scav撤离' },
+  { key: 'player_spawns', label: '玩家出生点' },
+  { key: 'ai_spawns', label: 'AI出生点' },
   { key: 'bosses', label: 'Boss' },
   { key: 'locks', label: '钥匙锁' },
   { key: 'hazards', label: '危险区' },
@@ -251,8 +316,10 @@ export function MapPage() {
   const [selected, setSelected] = useState<string>(() => useStore.getState().currentMap ?? 'factory')
   const [chips, setChips] = useState<Record<ChipKey, boolean>>({
     quests: true,
-    extracts: true,
-    spawns: false,
+    extract_pmc: true,
+    extract_scav: true,
+    player_spawns: false,
+    ai_spawns: false,
     bosses: true,
     locks: false,
     hazards: false,
@@ -369,6 +436,7 @@ export function MapPage() {
       zoomSnap: 0.1,
       wheelPxPerZoomLevel: 120,
       attributionControl: false,
+      zoomControl: false,
       crs: getCRS(imap),
       minZoom: imap.minZoom ?? 1,
       maxZoom: imap.maxZoom ?? 6,
@@ -515,13 +583,15 @@ export function MapPage() {
     const groupOf = (
       list: MarkerEntry[],
       iconFile: (en: MarkerEntry) => string,
+      fallback?: (en: MarkerEntry) => string,
     ): L.LayerGroup => {
       const lg = L.layerGroup()
       for (const en of list) {
         if (!en.position) continue
+        const title = en.nameZh || en.name || (fallback && fallback(en)) || '未命名'
         lg.addLayer(
           L.marker(pos(en.position), { icon: makeIcon(iconFile(en)) }).bindPopup(
-            popupHtml(en.nameZh ?? en.name ?? '未命名', [
+            popupHtml(title, [
               ...(en.faction ? [`阵营 ${en.faction}`] : []),
               ...coordMeta(en),
             ]),
@@ -542,12 +612,28 @@ export function MapPage() {
     const hazardIcon = (en: MarkerEntry) => (en.kind === 'mortar' ? 'hazard_mortar' : 'hazard')
 
     const chipGroups = new Map<Exclude<ChipKey, 'labels'>, L.LayerGroup>()
-    const defs: [Exclude<ChipKey, 'labels'>, MarkerEntry[], (en: MarkerEntry) => string][] = [
-      ['extracts', mm.extracts ?? [], extractIcon],
+    const defs: [
+      Exclude<ChipKey, 'labels'>,
+      MarkerEntry[],
+      (en: MarkerEntry) => string,
+      ((en: MarkerEntry) => string)?,
+    ][] = [
       [
-        'spawns',
-        (mm.spawns ?? []).filter((s) => !(s.categories ?? []).includes('boss')),
+        'player_spawns',
+        (mm.spawns ?? []).filter(
+          (s) => !(s.categories ?? []).includes('boss') && (s.categories ?? []).includes('player'),
+        ),
         spawnIcon,
+        () => '玩家出生点',
+      ],
+      [
+        'ai_spawns',
+        (mm.spawns ?? []).filter(
+          (s) =>
+            !(s.categories ?? []).includes('boss') && !(s.categories ?? []).includes('player'),
+        ),
+        spawnIcon,
+        () => 'AI 出生点',
       ],
       [
         'bosses',
@@ -556,17 +642,18 @@ export function MapPage() {
           ...(mm.spawns ?? []).filter((s) => (s.categories ?? []).includes('boss')),
         ],
         () => 'spawn_boss',
+        () => 'Boss',
       ],
-      ['locks', mm.locks ?? [], () => 'lock'],
-      ['hazards', mm.hazards ?? [], hazardIcon],
-      ['containers', mm.lootContainers ?? [], containerIcon],
-      ['switches', mm.switches ?? [], () => 'switch'],
-      ['weapons', mm.stationaryWeapons ?? [], () => 'stationarygun'],
-      ['btr', mm.btrStops ?? [], () => 'btr_stop'],
+      ['locks', mm.locks ?? [], () => 'lock', undefined],
+      ['hazards', mm.hazards ?? [], hazardIcon, undefined],
+      ['containers', mm.lootContainers ?? [], containerIcon, undefined],
+      ['switches', mm.switches ?? [], () => 'switch', undefined],
+      ['weapons', mm.stationaryWeapons ?? [], () => 'stationarygun', undefined],
+      ['btr', mm.btrStops ?? [], () => 'btr_stop', undefined],
     ]
-    for (const [key, list, iconFn] of defs) {
+    for (const [key, list, iconFn, fb] of defs) {
       if (!list.length) continue
-      chipGroups.set(key, groupOf(list, iconFn))
+      chipGroups.set(key, groupOf(list, iconFn, fb))
     }
 
     const keyOf = (
@@ -586,8 +673,77 @@ export function MapPage() {
         else if (!cur[key] && container.hasLayer(lg)) container.removeLayer(lg)
       }
     }
+    // 撤离点：单独构建，直接永久绘制名称（不点击），按阵营配色
+    const EXTRACT_COLOR: Record<string, string> = {
+      pmc: '#f5c518', // PMC（USEC/BEAR）
+      scav: '#58a6ff', // Scav
+      shared: '#3fb950', // 共享
+      transit: '#8b949e',
+    }
+    // 图层层级：PMC 在最上，shared/transit 居中，scav 在最下
+    const EXTRACT_ZINDEX: Record<string, number> = {
+      pmc: 1000,
+      shared: 500,
+      transit: 500,
+      scav: 100,
+    }
+    const extractLayer = L.layerGroup()
+    const extractMarkers: { m: L.Marker; fac: string }[] = []
+    for (const en of mm.extracts ?? []) {
+      if (!en.position) continue
+      const fac = (en.faction ?? 'shared').toLowerCase()
+      const color = EXTRACT_COLOR[fac] ?? EXTRACT_COLOR.shared
+      const reqs = en.requirements ?? []
+      const m = L.marker(pos(en.position), { icon: makeIcon(extractIcon(en)) })
+      m.setZIndexOffset(EXTRACT_ZINDEX[fac] ?? 500)
+      m.bindPopup(
+        popupHtml(en.nameZh ?? en.name ?? '未命名', [
+          ...(en.faction ? [`阵营 ${en.faction}`] : []),
+          ...reqs.map((r) => `撤离要求：${reqHtml(r)}`),
+          ...coordMeta(en),
+        ]),
+      )
+      // 永久标签：名称（按阵营配色）+ 撤离要求小标签，无需点击即可见
+      const wrap = document.createElement('div')
+      wrap.className = 'extract-label'
+      const nameEl = document.createElement('div')
+      nameEl.className = 'extract-name'
+      nameEl.textContent = en.nameZh ?? en.name ?? ''
+      nameEl.style.color = color
+      wrap.appendChild(nameEl)
+      for (const r of reqs) {
+        const chip = document.createElement('span')
+        chip.className = `extract-req ${reqClass(r)}`
+        chip.textContent = reqText(r)
+        wrap.appendChild(chip)
+      }
+      m.bindTooltip(wrap, {
+        permanent: true,
+        direction: 'top',
+        className: 'extract-label',
+        offset: [0, -10],
+      })
+      extractLayer.addLayer(m)
+      extractMarkers.push({ m, fac })
+    }
+    // 撤离点按阵营显隐：PMC/Scav 各自独立开关；shared/transit（共享/合作）任一勾选即显示
+    const syncExtracts = () => {
+      const cur = chipsRef.current
+      const pmcOn = cur['extract_pmc']
+      const scavOn = cur['extract_scav']
+      for (const { m, fac } of extractMarkers) {
+        const show = fac === 'pmc' ? pmcOn : fac === 'scav' ? scavOn : pmcOn || scavOn
+        const on = extractLayer.hasLayer(m)
+        if (show && !on) extractLayer.addLayer(m)
+        else if (!show && on) extractLayer.removeLayer(m)
+      }
+    }
+    if (container.hasLayer(extractLayer)) container.removeLayer(extractLayer)
+    extractLayer.addTo(container)
+    syncExtracts()
+
     syncAll()
-    syncFnsRef.current = [syncAll]
+    syncFnsRef.current = [syncAll, syncExtracts]
 
     return () => {
       cancelled = true
@@ -650,10 +806,16 @@ export function MapPage() {
         zIndexOffset: 10000,
         interactive: false,
       }).addTo(map)
-      // 仅在首次出现时平移视角（换图后 panOnce 重置）
+      // 首次出现：缩放 + 平移聚焦到玩家；后续截图保持当前缩放、平移跟随
+      const targetZoom = Math.max(
+        imap.minZoom ?? 1,
+        Math.min(imap.maxZoom ?? 6, 4),
+      )
       if (!panOnceRef.current) {
         panOnceRef.current = true
-        map.panTo(ll, { animate: true })
+        map.setView(ll, targetZoom, { animate: true })
+      } else {
+        map.setView(ll, map.getZoom(), { animate: true })
       }
     } else {
       playerMarkerRef.current.setLatLng(ll)
@@ -680,14 +842,28 @@ export function MapPage() {
         if (!(o.maps ?? []).includes(imap.key)) continue // 目标与本图无关
         for (const z of o.zones ?? []) {
           if (z.nn !== imap.key) continue
+          // 任务区域：半透明黄色区块，提升目标可见度
+          if (z.outline && z.outline.length >= 3) {
+            const pts = z.outline.map((p) => pos({ x: p.x, z: p.z }))
+            L.polygon(pts, {
+              color: '#f5c518',
+              weight: 2,
+              opacity: 0.9,
+              fillColor: '#f5c518',
+              fillOpacity: 0.18,
+              interactive: false,
+              className: 'quest-zone',
+            }).addTo(lg)
+          }
           lg.addLayer(
             L.marker(pos(z.position), {
               icon: L.icon({
                 iconUrl: `${ICON_BASE}quest_objective.png`,
-                iconSize: [26, 26],
-                iconAnchor: [13, 13],
+                iconSize: [30, 30],
+                iconAnchor: [15, 15],
+                className: 'quest-obj-marker',
               }),
-              zIndexOffset: 500,
+              zIndexOffset: 600,
             }).bindPopup(
               popupHtml(`◎ ${t.nameZh ?? t.name ?? '任务'}`, [
                 ...(o.descZh ? [o.descZh] : []),

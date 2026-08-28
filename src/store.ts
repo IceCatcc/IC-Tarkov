@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useEffect, useState } from 'react'
 import type {
   ActivityItem,
   PlayerQuest,
@@ -8,7 +9,9 @@ import type {
   WatcherStatePayload,
   AppSettings,
   QuestEventPayload,
+  ItemRef,
 } from './types'
+import { getQuestDetail } from './tauri'
 
 interface AppState {
   page: 'monitor' | 'graph' | 'map' | 'profile'
@@ -31,10 +34,16 @@ interface AppState {
   setWatcher: (w: WatcherState) => void
 
   playerQuests: PlayerQuest[]
+  /** 实时活动（本会话内的事件，由 applyEvent 累积），默认只显示这部分 */
   activities: ActivityItem[]
+  /** 历史活动（来自持久化文件），默认不读取/不显示，点击「加载更多」才加载 */
+  historicalActivities: ActivityItem[]
+  historicalLoaded: boolean
   applyEvent: (e: QuestEventPayload) => void
   seedPlayerQuests: (list: PlayerQuest[]) => void
   seedActivity: (list: ActivityItem[]) => void
+  setHistoricalActivity: (list: ActivityItem[]) => void
+  clearHistorical: () => void
 
   filter: 'all' | 'in_progress' | 'completed'
   setFilter: (f: 'all' | 'in_progress' | 'completed') => void
@@ -44,9 +53,17 @@ interface AppState {
   graph: QuestGraph | null
   setGraph: (g: QuestGraph) => void
 
+  /** 手动解锁的任务集合（前置未达成但已解锁为可接取），来自后端持久化 */
+  unlockedQuests: string[]
+  setUnlockedQuests: (list: string[]) => void
+
   selectedId: string | null
   detail: QuestDetail | null
   setSelected: (id: string | null, d: QuestDetail | null) => void
+
+  /** 任务详情缓存（按 questId）：监控页任务卡片复用，避免重复请求 */
+  questDetails: Record<string, QuestDetail>
+  setQuestDetail: (id: string, d: QuestDetail) => void
 
   /** Wiki 内嵌抽屉 */
   wikiUrl: string | null
@@ -56,6 +73,7 @@ interface AppState {
   /** 任务图谱中关闭显示的商人（traderId -> true 为隐藏） */
   disabledTradersGraph: Record<string, boolean>
   toggleTraderGraph: (id: string) => void
+  setTraderGraph: (id: string, disabled: boolean) => void
 
   /** 地图单选筛选：''=全部地区 */
   mapSelGraph: string
@@ -72,6 +90,9 @@ interface AppState {
   /** 仅显示玩家等级足够的任务（搜索时忽略） */
   lvlMetGraph: boolean
   setLvlMetGraph: (v: boolean) => void
+  /** 仅显示地图已解锁（未锁定）的任务 */
+  mapUnlockedGraph: boolean
+  setMapUnlockedGraph: (v: boolean) => void
   focusGraph: boolean
   setFocusGraph: (v: boolean) => void
 }
@@ -79,6 +100,70 @@ interface AppState {
 function uid(): string {
   return Math.random().toString(36).slice(2, 10)
 }
+
+// —— 任务图谱筛选偏好持久化（localStorage）——
+// 好感达标 / 等级达标 / 地图解锁 / 专注模式 / 商人隐藏 的勾选状态跨启动保留。
+const GRAPH_PREFS_KEY = 'eft-spy.graphPrefs.v1'
+// 默认不勾选（即隐藏）的特殊商人：竞技场裁判、BTR 司机、灯塔守护者
+const DEFAULT_DISABLED_TRADERS = [
+  '6617beeaa9cfa777ca915b7c', // 竞技场裁判
+  '656f0f98d80a697f855d34b1', // BTR 司机
+  '638f541a29ffd1183d187f57', // 灯塔守护者
+]
+
+interface GraphPrefs {
+  repMet: boolean
+  lvlMet: boolean
+  mapUnlocked: boolean
+  focus: boolean
+  hideLegacy: boolean
+  disabledTraders: Record<string, boolean>
+}
+
+function loadGraphPrefs(): GraphPrefs {
+  const fallback: GraphPrefs = {
+    repMet: true,
+    lvlMet: false,
+    mapUnlocked: false,
+    focus: false,
+    hideLegacy: true, // 默认隐藏旧任务（「旧任务」勾选才显示）
+    disabledTraders: Object.fromEntries(DEFAULT_DISABLED_TRADERS.map((id) => [id, true])),
+  }
+  try {
+    const raw = localStorage.getItem(GRAPH_PREFS_KEY)
+    if (!raw) return fallback
+    const p = JSON.parse(raw) as Partial<GraphPrefs>
+    return {
+      repMet: p.repMet ?? fallback.repMet,
+      lvlMet: p.lvlMet ?? fallback.lvlMet,
+      mapUnlocked: p.mapUnlocked ?? fallback.mapUnlocked,
+      focus: p.focus ?? fallback.focus,
+      hideLegacy: p.hideLegacy ?? fallback.hideLegacy,
+      disabledTraders: { ...fallback.disabledTraders, ...(p.disabledTraders ?? {}) },
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function persistGraphPrefs() {
+  const s = useStore.getState()
+  const data: GraphPrefs = {
+    repMet: s.repMetGraph,
+    lvlMet: s.lvlMetGraph,
+    mapUnlocked: s.mapUnlockedGraph,
+    focus: s.focusGraph,
+    hideLegacy: s.hideLegacyGraph,
+    disabledTraders: s.disabledTradersGraph,
+  }
+  try {
+    localStorage.setItem(GRAPH_PREFS_KEY, JSON.stringify(data))
+  } catch {
+    /* 忽略写入失败（隐私模式等） */
+  }
+}
+
+const prefs0 = loadGraphPrefs()
 
 export const useStore = create<AppState>((set) => ({
   page: 'monitor',
@@ -89,7 +174,7 @@ export const useStore = create<AppState>((set) => ({
   currentMap: null,
   setCurrentMap: (m) => set({ currentMap: m }),
 
-  settings: { logDir: '', screenshotDir: '', profile: { level: 1, loyalty: {} } },
+  settings: { logDir: '', screenshotDir: '', profile: { level: 1, loyalty: {}, lockedMaps: [] }, deleteScreenshots: true },
   setSettings: (s) => set({ settings: s }),
   showSettings: false,
   openSettings: () => set({ showSettings: true }),
@@ -115,6 +200,8 @@ export const useStore = create<AppState>((set) => ({
 
   playerQuests: [],
   activities: [],
+  historicalActivities: [],
+  historicalLoaded: false,
 
   filter: 'all',
   setFilter: (f) => set({ filter: f }),
@@ -224,37 +311,121 @@ export const useStore = create<AppState>((set) => ({
 
   seedPlayerQuests: (list) => set({ playerQuests: list }),
   seedActivity: (list) => set({ activities: list }),
+  setHistoricalActivity: (list) => set({ historicalActivities: list, historicalLoaded: true }),
+  clearHistorical: () => set({ historicalActivities: [], historicalLoaded: false }),
 
   graph: null,
   setGraph: (g) => set({ graph: g }),
+
+  unlockedQuests: [],
+  setUnlockedQuests: (list) => set({ unlockedQuests: list }),
 
   selectedId: null,
   detail: null,
   setSelected: (id, d) => set({ selectedId: id, detail: d }),
 
+  questDetails: {},
+  setQuestDetail: (id, d) => set((s) => ({ questDetails: { ...s.questDetails, [id]: d } })),
+
   wikiUrl: null,
   openWiki: (url) => set({ wikiUrl: url }),
   closeWiki: () => set({ wikiUrl: null }),
 
-  disabledTradersGraph: {},
-  toggleTraderGraph: (id) =>
+  disabledTradersGraph: prefs0.disabledTraders,
+  toggleTraderGraph: (id) => {
     set((state) => ({
       disabledTradersGraph: {
         ...state.disabledTradersGraph,
         [id]: !state.disabledTradersGraph[id],
       },
-    })),
+    }))
+    persistGraphPrefs()
+  },
+  setTraderGraph: (id, disabled) => {
+    set((state) => ({
+      disabledTradersGraph: { ...state.disabledTradersGraph, [id]: disabled },
+    }))
+    persistGraphPrefs()
+  },
   mapSelGraph: '',
   setMapSelGraph: (m) => set({ mapSelGraph: m }),
   searchGraph: '',
   setSearchGraph: (s) => set({ searchGraph: s }),
 
-  hideLegacyGraph: false,
+  hideLegacyGraph: prefs0.hideLegacy,
   setHideLegacyGraph: (v) => set({ hideLegacyGraph: v }),
-  repMetGraph: true,
-  setRepMetGraph: (v) => set({ repMetGraph: v }),
-  lvlMetGraph: false,
-  setLvlMetGraph: (v) => set({ lvlMetGraph: v }),
-  focusGraph: false,
-  setFocusGraph: (v) => set({ focusGraph: v }),
+  repMetGraph: prefs0.repMet,
+  setRepMetGraph: (v) => {
+    set({ repMetGraph: v })
+    persistGraphPrefs()
+  },
+  lvlMetGraph: prefs0.lvlMet,
+  setLvlMetGraph: (v) => {
+    set({ lvlMetGraph: v })
+    persistGraphPrefs()
+  },
+  mapUnlockedGraph: prefs0.mapUnlocked,
+  setMapUnlockedGraph: (v) => {
+    set({ mapUnlockedGraph: v })
+    persistGraphPrefs()
+  },
+  focusGraph: prefs0.focus,
+  setFocusGraph: (v) => {
+    set({ focusGraph: v })
+    persistGraphPrefs()
+  },
 }))
+
+/** 从任务目标里聚合去重所需物品（与任务图谱详情一致） */
+export function dedupeItems(items: ItemRef[]): ItemRef[] {
+  const m = new Map<string, ItemRef>()
+  for (const it of items) {
+    const prev = m.get(it.id)
+    const c = it.count ?? 1
+    if (prev) {
+      if (it.count != null) prev.count = (prev.count ?? 0) + c
+    } else {
+      m.set(it.id, { ...it })
+    }
+  }
+  return [...m.values()]
+}
+
+/**
+ * 取任务详情并缓存：监控页卡片调用，离线读取本地索引，无需网络。
+ * 优先命中缓存，未命中则异步拉取后写入 store 供其他卡片复用。
+ */
+export function useQuestDetail(id: string | null): QuestDetail | null {
+  const map = useStore((s) => s.questDetails)
+  const setDetail = useStore((s) => s.setQuestDetail)
+  const cached = id ? map[id] ?? null : null
+  const [detail, setLocal] = useState<QuestDetail | null>(cached)
+
+  useEffect(() => {
+    if (!id) {
+      setLocal(null)
+      return
+    }
+    if (map[id]) {
+      setLocal(map[id])
+      return
+    }
+    let alive = true
+    getQuestDetail(id)
+      .then((d) => {
+        if (!alive) return
+        if (d) {
+          setDetail(id, d)
+          setLocal(d)
+        } else {
+          setLocal(null)
+        }
+      })
+      .catch(() => alive && setLocal(null))
+    return () => {
+      alive = false
+    }
+  }, [id, map, setDetail])
+
+  return detail
+}

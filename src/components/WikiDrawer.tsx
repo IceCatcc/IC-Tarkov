@@ -19,7 +19,7 @@ export function WikiDrawer() {
   if (!wikiUrl) return null
 
   return (
-    <div className="fixed inset-0 z-50" onKeyDown={(e) => e.key === 'Escape' && closeWiki()}>
+    <div className="fixed inset-0 z-[2000]" onKeyDown={(e) => e.key === 'Escape' && closeWiki()}>
       {/* 遮罩 */}
       <div
         className="absolute inset-0 bg-black/50 transition-opacity duration-200"

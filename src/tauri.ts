@@ -11,6 +11,7 @@ import type {
   AppSettings,
   PlayerProfile,
   PlayerPositionPayload,
+  MapInfo,
 } from './types'
 
 export async function initTauri(): Promise<UnlistenFn> {
@@ -70,6 +71,33 @@ export async function getActivity(): Promise<ActivityItem[]> {
   return await invoke<ActivityItem[]>('get_activity')
 }
 
+export async function getUnlocked(): Promise<string[]> {
+  return await invoke<string[]>('get_unlocked')
+}
+
+/** 手动修改任务状态：accept=接取（同时完成前置）、complete=完成、unlock=解锁（含前置未结束任务） */
+export async function setQuestStatus(
+  questId: string,
+  action: 'accept' | 'complete' | 'unlock',
+): Promise<{ quests: PlayerQuest[]; unlocked: string[] }> {
+  return await invoke<{ quests: PlayerQuest[]; unlocked: string[] }>('set_quest_status', {
+    questId,
+    action,
+  })
+}
+
+export async function resetAndRescan(): Promise<void> {
+  await invoke('reset_and_rescan')
+}
+
+export async function exportData(path: string): Promise<void> {
+  await invoke('export_data', { path })
+}
+
+export async function importData(path: string): Promise<void> {
+  await invoke('import_data', { path })
+}
+
 export async function getQuestGraph(): Promise<QuestGraph> {
   return await invoke<QuestGraph>('get_quest_graph')
 }
@@ -85,9 +113,15 @@ export async function getSettings(): Promise<AppSettings> {
 export async function saveSettings(
   logDir: string,
   screenshotDir: string,
+  deleteScreenshots?: boolean,
   profile?: PlayerProfile,
 ): Promise<AppSettings> {
-  return await invoke<AppSettings>('save_settings', { logDir, screenshotDir, profile })
+  return await invoke<AppSettings>('save_settings', {
+    logDir,
+    screenshotDir,
+    deleteScreenshots,
+    profile,
+  })
 }
 
 export async function openUrl(url: string): Promise<void> {
@@ -100,4 +134,8 @@ export async function getPlayerPosition(): Promise<PlayerPositionPayload | null>
 
 export async function getCurrentMap(): Promise<string | null> {
   return await invoke<string | null>('get_current_map')
+}
+
+export async function getMaps(): Promise<MapInfo[]> {
+  return await invoke<MapInfo[]>('get_maps')
 }
