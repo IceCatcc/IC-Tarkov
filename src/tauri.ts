@@ -23,9 +23,26 @@ export async function initTauri(): Promise<UnlistenFn> {
     setWatcher(e.payload)
   })
 
+  // 全局监听当前地图变化：任何页面（含非地图页）收到 map-changed 都写入 store，
+  // 保证在别的页面进入某张地图时全局当前地图被更新，切回地图页即默认切换到对应地图。
+  const { setCurrentMapId } = useStore.getState()
+  const offMap = await listen<{ locationId: string; timestamp?: string }>(
+    'map-changed',
+    (e) => {
+      setCurrentMapId(e.payload.locationId)
+    },
+  )
+  // 启动时拉取后端已记录的当前地图（历史值），避免等到下一次地图变化事件
+  getCurrentMap()
+    .then((id) => {
+      if (id) setCurrentMapId(id)
+    })
+    .catch(() => {})
+
   return () => {
     offQuest()
     offState()
+    offMap()
   }
 }
 

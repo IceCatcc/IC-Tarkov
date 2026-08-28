@@ -14,6 +14,13 @@ interface AppState {
   page: 'monitor' | 'graph' | 'map' | 'profile'
   setPage: (p: AppState['page']) => void
 
+  /** 当前游戏所在地图（游戏内部 location id，如 factory4_day），由全局 map-changed 事件写入，任何页面生效 */
+  currentMapId: string | null
+  setCurrentMapId: (id: string | null) => void
+  /** 已解析的地图 normalizedName（MapPage 用 markers 映射后写回），用于切回地图页默认选中 */
+  currentMap: string | null
+  setCurrentMap: (m: string | null) => void
+
   settings: AppSettings
   setSettings: (s: AppSettings) => void
   showSettings: boolean
@@ -76,6 +83,11 @@ function uid(): string {
 export const useStore = create<AppState>((set) => ({
   page: 'monitor',
   setPage: (p) => set({ page: p }),
+
+  currentMapId: null,
+  setCurrentMapId: (id) => set({ currentMapId: id }),
+  currentMap: null,
+  setCurrentMap: (m) => set({ currentMap: m }),
 
   settings: { logDir: '', screenshotDir: '', profile: { level: 1, loyalty: {} } },
   setSettings: (s) => set({ settings: s }),

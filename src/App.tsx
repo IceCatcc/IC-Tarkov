@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import {
   initTauri,
   startWatching,
@@ -19,6 +19,11 @@ import { WikiDrawer } from './components/WikiDrawer'
 
 export default function App() {
   const page = useStore((s) => s.page)
+  // 地图页 keepAlive：首次访问后常驻挂载（仅用 display 切换隐藏），切走不销毁状态
+  const [mapAlive, setMapAlive] = useState(false)
+  useEffect(() => {
+    if (page === 'map') setMapAlive(true)
+  }, [page])
   const showSettings = useStore((s) => s.showSettings)
   const setWatcher = useStore((s) => s.setWatcher)
   const setSettings = useStore((s) => s.setSettings)
@@ -63,7 +68,11 @@ export default function App() {
           {page === 'monitor' && <MonitorPage />}
           {page === 'graph' && <QuestGraphPage />}
           {page === 'profile' && <ProfilePage />}
-          {page === 'map' && <MapPage />}
+          {mapAlive && (
+            <div className="h-full" style={{ display: page === 'map' ? 'block' : 'none' }}>
+              <MapPage />
+            </div>
+          )}
         </main>
       </div>
       {showSettings && <SettingsModal />}

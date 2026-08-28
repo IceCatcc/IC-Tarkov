@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './map.css'
-import { getPlayerPosition, getCurrentMap } from '../tauri'
+import { getPlayerPosition } from '../tauri'
 import type { PlayerPositionPayload } from '../types'
 import { useStore } from '../store'
 
@@ -248,7 +248,7 @@ export function MapPage() {
   const [markers, setMarkers] = useState<MapMarkersDoc | null>(null)
   const [qzDoc, setQzDoc] = useState<QuestZonesDoc | null>(null)
   const [loadErr, setLoadErr] = useState('')
-  const [selected, setSelected] = useState('factory')
+  const [selected, setSelected] = useState<string>(() => useStore.getState().currentMap ?? 'factory')
   const [chips, setChips] = useState<Record<ChipKey, boolean>>({
     quests: true,
     extracts: true,
@@ -264,9 +264,10 @@ export function MapPage() {
   })
   const [floorSel, setFloorSel] = useState(-1) // -1 = 默认主层
   const [cursorCoord, setCursorCoord] = useState<{ x: number; z: number } | null>(null)
-  // 截图解析出的玩家位置 + 日志检测到的当前地图 nameId
+  // 截图解析出的玩家位置 + 全局当前地图（location id），由 tauri 全局监听写入，任何页面生效
   const [shotPos, setShotPos] = useState<PlayerPositionPayload | null>(null)
-  const [locationId, setLocationId] = useState<string | null>(null)
+  const currentMapId = useStore((s) => s.currentMapId)
+  const page = useStore((s) => s.page)
 
   useEffect(() => {
     const base = import.meta.env.BASE_URL.replace(/\/$/, '')
@@ -299,30 +300,23 @@ export function MapPage() {
 
   useEffect(() => {
     let offPos: (() => void) | undefined
-    let offMap: (() => void) | undefined
     getPlayerPosition()
       .then((p) => p && setShotPos(p))
-      .catch(() => {})
-    getCurrentMap()
-      .then((id) => id && setLocationId(id))
       .catch(() => {})
     listen<PlayerPositionPayload>('player-position', (e) => setShotPos(e.payload)).then(
       (u) => (offPos = u),
     )
-    listen<{ locationId: string }>('map-changed', (e) => setLocationId(e.payload.locationId)).then(
-      (u) => (offMap = u),
-    )
     return () => {
       offPos?.()
-      offMap?.()
     }
   }, [])
 
-  // 日志检测到新地图 -> 自动切换（nameId 经 JSON 映射，变体经 fallback 归并）
+  // 全局检测到新地图 -> 自动切换（nameId 经 JSON 映射，变体经 fallback 归并）
+  // 即便当前在别的页面，currentMapId 已被全局监听更新，切回地图页即显示对应地图
   useEffect(() => {
-    if (!locationId || !markers || !selectable.length) return
+    if (!currentMapId || !markers || !selectable.length) return
     const nn =
-      markers.nameIdFallback?.[locationId] ?? markers.nameIds?.[locationId] ?? locationId
+      markers.nameIdFallback?.[currentMapId] ?? markers.nameIds?.[currentMapId] ?? currentMapId
     if (selectable.some((g) => g.normalizedName === nn)) {
       setSelected((prev) => {
         if (prev !== nn) {
@@ -331,8 +325,9 @@ export function MapPage() {
         }
         return nn
       })
+      useStore.getState().setCurrentMap(nn)
     }
-  }, [locationId, markers, selectable])
+  }, [currentMapId, markers, selectable])
 
   /* ---------- Leaflet 构建（每张地图重建实例，保证状态干净） ---------- */
 
@@ -345,6 +340,10 @@ export function MapPage() {
   const playerMarkerRef = useRef<L.Marker | null>(null)
   const questLayerRef = useRef<L.LayerGroup | null>(null)
   const panOnceRef = useRef(false)
+  // keepAlive 适配：页面隐藏（display:none）时容器尺寸为 0，需记录可见状态并在切回时重算
+  const pageRef = useRef(page)
+  pageRef.current = page
+  const rawBoundsRef = useRef<L.LatLngBounds | null>(null)
 
   // 进行中任务（仅用于地图上标注目标位置）
   const playerQuests = useStore((s) => s.playerQuests)
@@ -377,8 +376,10 @@ export function MapPage() {
     mapRef.current = container
 
     const rawBounds = getBounds(imap.bounds)
+    rawBoundsRef.current = rawBounds
     container.setMaxBounds(getScaledBounds(rawBounds, 1.5))
-    container.fitBounds(rawBounds)
+    // 仅当当前可见时 fit（隐藏时容器尺寸为 0，fit 会告警；切回时由可见 effect 复位）
+    if (pageRef.current === 'map') container.fitBounds(rawBounds)
 
     container.on('mousemove', (e: L.LeafletMouseEvent) => {
       setCursorCoord({ x: e.latlng.lng, z: e.latlng.lat })
@@ -607,6 +608,18 @@ export function MapPage() {
     syncFnsRef.current.forEach((fn) => fn())
   }, [chips])
 
+  /* ---------- keepAlive：切回地图页（或从隐藏恢复）时重算尺寸并复位视图 ---------- */
+  useEffect(() => {
+    if (page !== 'map') return
+    requestAnimationFrame(() => {
+      const m = mapRef.current
+      if (m) {
+        m.invalidateSize()
+        if (rawBoundsRef.current) m.fitBounds(rawBoundsRef.current)
+      }
+    })
+  }, [page])
+
   /* ---------- 玩家标记（截图驱动，带朝向旋转） ---------- */
 
   useEffect(() => {
@@ -771,9 +784,9 @@ export function MapPage() {
             ))}
           </div>
         )}
-        {locationId && (
-          <span className="text-[10.5px] text-muted" title={`游戏 location id：${locationId}`}>
-            当前地图：{markers.nameIdFallback?.[locationId] ?? markers.nameIds?.[locationId] ?? locationId}
+        {currentMapId && (
+          <span className="text-[10.5px] text-muted" title={`游戏 location id：${currentMapId}`}>
+            当前地图：{markers.nameIdFallback?.[currentMapId] ?? markers.nameIds?.[currentMapId] ?? currentMapId}
           </span>
         )}
       </div>
