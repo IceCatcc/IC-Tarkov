@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getVersion } from '@tauri-apps/api/app'
 import { useStore } from '../store'
 import { startWatching, stopWatching } from '../tauri'
 
@@ -32,6 +34,14 @@ export function TopBar() {
   const watcher = useStore((s) => s.watcher)
   const openSettings = useStore((s) => s.openSettings)
   const live = watcher.watching && !watcher.error
+  const [version, setVersion] = useState<string>('')
+
+  // 应用版本号（Tauri 运行时；开发环境取不到时静默留空）
+  useEffect(() => {
+    getVersion()
+      .then(setVersion)
+      .catch(() => {})
+  }, [])
 
   const onToggle = () => {
     if (watcher.watching) stopWatching()
@@ -47,6 +57,11 @@ export function TopBar() {
       >
         <img src="/icons/icon.png" alt="" className="w-5 h-5 rounded shrink-0" />
         <span className="font-medium text-[15px]">EFT Spy</span>
+        {version && (
+          <span className="text-[11px] text-muted px-1.5 py-[1px] rounded bg-ink-700 border border-line">
+            v{version}
+          </span>
+        )}
         <span className={`w-2 h-2 rounded-full ${live ? 'bg-ok' : 'bg-red-500'}`} />
         <span className={`text-[12px] ${live ? 'text-ok' : 'text-red-400'}`}>
           {live ? '监控中' : '已暂停'}

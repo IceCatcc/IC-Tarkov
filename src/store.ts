@@ -29,6 +29,10 @@ interface AppState {
   showSettings: boolean
   openSettings: () => void
   closeSettings: () => void
+  /** 左侧导航栏是否展开（持久化） */
+  sidebarOpen: boolean
+  setSidebarOpen: (v: boolean) => void
+  toggleSidebar: () => void
 
   watcher: WatcherState
   setWatcher: (w: WatcherState) => void
@@ -97,6 +101,15 @@ interface AppState {
   setFocusGraph: (v: boolean) => void
 }
 
+/** 侧边栏折叠时，页面顶部需为左上角浮动按钮预留的左侧空位（px） */
+export const SIDEBAR_COLLAPSED_W = 38
+
+/** 页面顶部行的左侧预留：侧边栏折叠时让出浮动按钮位置，展开时为 0 */
+export function useTopPad(): number {
+  const open = useStore((s) => s.sidebarOpen)
+  return open ? 0 : SIDEBAR_COLLAPSED_W
+}
+
 function uid(): string {
   return Math.random().toString(36).slice(2, 10)
 }
@@ -104,6 +117,7 @@ function uid(): string {
 // —— 任务图谱筛选偏好持久化（localStorage）——
 // 好感达标 / 等级达标 / 地图解锁 / 专注模式 / 商人隐藏 的勾选状态跨启动保留。
 const GRAPH_PREFS_KEY = 'eft-spy.graphPrefs.v1'
+const SIDEBAR_KEY = 'eft-spy.sidebarOpen.v1'
 // 默认不勾选（即隐藏）的特殊商人：竞技场裁判、BTR 司机、灯塔守护者
 const DEFAULT_DISABLED_TRADERS = [
   '6617beeaa9cfa777ca915b7c', // 竞技场裁判
@@ -179,6 +193,30 @@ export const useStore = create<AppState>((set) => ({
   showSettings: false,
   openSettings: () => set({ showSettings: true }),
   closeSettings: () => set({ showSettings: false }),
+  sidebarOpen: (() => {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })(),
+  setSidebarOpen: (v) => {
+    set({ sidebarOpen: v })
+    try {
+      localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0')
+    } catch {
+      /* 忽略写入失败 */
+    }
+  },
+  toggleSidebar: () => {
+    const v = !useStore.getState().sidebarOpen
+    set({ sidebarOpen: v })
+    try {
+      localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0')
+    } catch {
+      /* 忽略写入失败 */
+    }
+  },
 
   watcher: {
     watching: false,

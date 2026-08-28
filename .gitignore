@@ -1,8 +1,11 @@
 node_modules
 dist
+dist-verify*
 src-tauri/target
 src-tauri/gen
 *.log
 .DS_Store
 check-tauri.bat
 vite.config.ts.timestamp-*.mjs
+.workbuddy
+quest_analysis

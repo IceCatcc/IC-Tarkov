@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useStore } from '../store'
+import { useStore, useTopPad } from '../store'
 import { saveSettings, getMaps } from '../tauri'
 import { traderImage } from '../traderImages'
 import { TRADERS } from '../traderMeta'
@@ -8,6 +8,8 @@ import type { PlayerProfile, MapInfo } from '../types'
 export function ProfilePage() {
   const settings = useStore((s) => s.settings)
   const setSettings = useStore((s) => s.setSettings)
+  // 侧边栏折叠时，顶部标题为左上角浮动按钮预留空位
+  const topPad = useTopPad()
 
   const [profile, setProfile] = useState<PlayerProfile>(
     settings.profile ?? { level: 1, loyalty: {}, lockedMaps: [] },
@@ -63,8 +65,10 @@ export function ProfilePage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-[720px] mx-auto px-6 py-6">
-        <div className="text-[15px] font-medium mb-1">角色管理</div>
+      <div className="max-w-[1100px] mx-auto px-6 py-6">
+        <div className="text-[15px] font-medium mb-1" style={{ paddingLeft: topPad }}>
+          角色管理
+        </div>
         <div className="text-[12px] text-muted mb-5 leading-relaxed">
           日志中不含好感度信息，需在此维护；点击商人右侧按钮即可切换忠诚等级 / 解锁状态，改动自动保存。
           任务图谱默认只显示「好感达标」的任务。标为「未解锁」的商人，其全部任务会被隐藏
@@ -83,49 +87,57 @@ export function ProfilePage() {
           className="w-28 bg-ink-700 border border-line rounded px-2 py-1.5 text-[13px] text-[#e6edf3]"
         />
 
-        <div className="mt-6 space-y-2">
+        {/* 商人好感：卡片网格，从左向右排列、排不下自动换行 */}
+        <div className="mt-6 grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))' }}>
           {TRADERS.map((t) => {
             const av = traderImage(t.id)
             const cur = profile.loyalty[t.id] ?? 1
             return (
               <div
                 key={t.id}
-                className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
+                className={`flex flex-col gap-2 rounded-lg border px-3 py-2.5 ${
                   t.special ? 'border-dashed' : ''
                 } ${cur === 0 ? 'border-red-500/40 bg-red-500/5' : 'border-line bg-ink-800/60'}`}
               >
-                {av ? (
-                  <img
-                    src={av}
-                    alt={t.name}
-                    className={`w-9 h-9 rounded-full object-cover border border-line shrink-0 ${
-                      cur === 0 ? 'grayscale opacity-50' : ''
+                {/* 上：头像 + 名称 + 未解锁 Tag */}
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {av ? (
+                    <img
+                      src={av}
+                      alt={t.name}
+                      className={`w-10 h-10 rounded-full object-cover border border-line shrink-0 ${
+                        cur === 0 ? 'grayscale opacity-50' : ''
+                      }`}
+                    />
+                  ) : (
+                    <span className="w-10 h-10" />
+                  )}
+                  <span
+                    className={`text-[13px] truncate flex-1 min-w-0 ${
+                      cur === 0
+                        ? 'text-muted line-through decoration-red-400/60'
+                        : 'text-[#e6edf3]'
                     }`}
-                  />
-                ) : (
-                  <span className="w-9 h-9" />
-                )}
-                <span
-                  className={`text-[13px] truncate flex-1 min-w-0 ${
-                    cur === 0 ? 'text-muted line-through decoration-red-400/60' : 'text-[#e6edf3]'
-                  }`}
-                  title={`${t.name}${t.unlockQuestId ? ' · 有解锁任务依赖' : ''}`}
-                >
-                  {t.zh}
+                    title={`${t.name}${t.unlockQuestId ? ' · 有解锁任务依赖' : ''}`}
+                  >
+                    {t.zh}
+                  </span>
                   {cur === 0 && (
-                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/40 align-middle">
+                    <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-red-300 border border-red-500/40">
                       未解锁
                     </span>
                   )}
-                </span>
-                <div className="flex items-center gap-1 shrink-0">
+                </div>
+
+                {/* 下：忠诚等级按钮组 */}
+                <div className="flex items-center gap-1">
                   {[0, 1, 2, 3, 4].map((ll) => (
                     <button
                       key={ll}
                       type="button"
                       onClick={() => applyLoyalty(t.id, ll)}
                       title={`${t.name} 忠诚等级 / 解锁状态`}
-                      className={`px-2 py-1 rounded text-[11px] border transition-colors ${
+                      className={`flex-1 px-1 py-1 rounded text-[11px] border transition-colors ${
                         cur === ll
                           ? 'bg-amber text-black border-amber'
                           : 'bg-ink-700 border-line text-muted hover:text-[#e6edf3]'

@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import type { MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from 'react'
-import { useStore } from '../store'
+import { useStore, useTopPad } from '../store'
 import { getQuestGraph, getQuestDetail, setQuestStatus, getMaps } from '../tauri'
 import { traderImage } from '../traderImages'
 import { TRADER_UNLOCK_QUEST, traderDisplayName, TRADERS } from '../traderMeta'
@@ -138,6 +146,62 @@ function FilterCheck({
       />
       {label}
     </label>
+  )
+}
+
+// 下拉触发器：带边框的胶囊按钮，含图标 / 文案 / 数量徽标 / 下拉箭头
+function DropdownTrigger({
+  icon,
+  label,
+  count,
+  active,
+  open,
+  onClick,
+  title,
+}: {
+  icon: ReactNode
+  label: string
+  count: number
+  active: boolean
+  open: boolean
+  onClick: () => void
+  title: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={`flex items-center gap-1.5 h-[26px] pl-2 pr-1.5 rounded-full border text-[12px] whitespace-nowrap transition-colors ${
+        active
+          ? 'border-amber/70 bg-amber/10 text-[#e6edf3]'
+          : 'border-line bg-ink-700 text-muted hover:text-[#e6edf3] hover:border-[#4d5560]'
+      } ${open ? 'border-amber/70' : ''}`}
+    >
+      <span className={`flex items-center ${active ? 'text-amber' : 'opacity-70'}`}>{icon}</span>
+      <span>{label}</span>
+      {count > 0 && (
+        <span className="ml-0.5 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-amber text-black text-[10px] font-medium leading-none">
+          {count}
+        </span>
+      )}
+      <svg
+        width="9"
+        height="9"
+        viewBox="0 0 12 12"
+        aria-hidden
+        className={`opacity-70 transition-transform ${open ? 'rotate-180' : ''}`}
+      >
+        <path
+          d="M2.5 4.5 6 8l3.5-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
   )
 }
 
@@ -895,8 +959,6 @@ export function QuestGraphPage() {
   const chip =
     'px-2.5 py-1 rounded-full text-[12px] border transition-colors whitespace-nowrap'
   const chipOff = 'bg-ink-800 border-line text-muted hover:text-[#e6edf3]'
-  const checkLabel =
-    'flex items-center gap-1.5 text-[12px] text-muted cursor-pointer select-none whitespace-nowrap [&>input]:accent-[#ef9f27]'
 
   // 悬浮 tooltip 数据
   const hoverTip = (() => {
@@ -1297,27 +1359,40 @@ export function QuestGraphPage() {
     (!hideLegacy ? 1 : 0)
   // 商人下拉：已隐藏（未勾选显示）的商人数量
   const hiddenTraders = Object.values(disabledTraders).filter(Boolean).length
+  // 侧边栏折叠时，顶部工具栏为左上角浮动按钮预留空位
+  const topPad = useTopPad()
 
   return (
     <div className="h-full flex flex-col relative">
       {/* 工具栏：筛选 + 图例 */}
-      <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 bg-ink-800 border-b border-line relative z-30 overflow-visible">
+      <div
+        className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 bg-ink-800 border-b border-line relative z-30 overflow-visible"
+        style={{ paddingLeft: 16 + topPad }}
+      >
         {/* 筛选条件：好感达标 / 等级达标 / 地图解锁 / 专注模式 / 旧任务，合并为下拉多选 */}
         <div className="relative shrink-0" ref={filterRef}>
-          <button
-            type="button"
+          <DropdownTrigger
+            icon={
+              <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            }
+            label="筛选"
+            count={filterCount}
+            active={filterCount > 0}
+            open={filterOpen}
             onClick={() => setFilterOpen((o) => !o)}
-            className={checkLabel + ' cursor-pointer'}
             title="筛选条件：好感达标 / 等级达标 / 地图解锁 / 专注模式 / 旧任务（点击展开勾选）"
-          >
-            筛选
-            <span className="ml-0.5 text-[10px] leading-none">▾</span>
-            {filterCount > 0 && (
-              <span className="ml-1 text-amber">({filterCount})</span>
-            )}
-          </button>
+          />
           {filterOpen && (
-            <div className="absolute left-0 top-full mt-1 z-50 bg-ink-800 border border-line rounded shadow-lg p-1.5 space-y-1 min-w-[180px] max-w-[260px] max-h-[70vh] overflow-y-auto">
+            <div className="absolute left-0 top-full mt-1.5 z-50 bg-ink-800 border border-line rounded-lg shadow-xl p-1.5 space-y-0.5 min-w-[180px] max-w-[260px] max-h-[70vh] overflow-y-auto">
               <FilterCheck
                 label="好感达标"
                 checked={focusMode || repMet}
@@ -1369,20 +1444,35 @@ export function QuestGraphPage() {
 
         {/* 商人显隐：下拉多选（默认不勾选竞技场裁判 / BTR 司机 / 灯塔守护者） */}
         <div className="relative shrink-0" ref={traderRef}>
-          <button
-            type="button"
+          <DropdownTrigger
+            icon={
+              <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden>
+                <circle
+                  cx="12"
+                  cy="8"
+                  r="3.4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                />
+                <path
+                  d="M4.8 20a7.2 7.2 0 0 1 14.4 0"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            }
+            label="商人"
+            count={hiddenTraders}
+            active={hiddenTraders > 0}
+            open={traderOpen}
             onClick={() => setTraderOpen((o) => !o)}
-            className={checkLabel + ' cursor-pointer'}
             title="选择要显示的商人（点击展开勾选）"
-          >
-            商人
-            <span className="ml-0.5 text-[10px] leading-none">▾</span>
-            {hiddenTraders > 0 && (
-              <span className="ml-1 text-amber">({hiddenTraders})</span>
-            )}
-          </button>
+          />
           {traderOpen && (
-            <div className="absolute left-0 top-full mt-1 z-50 bg-ink-800 border border-line rounded shadow-lg p-1.5 space-y-1 min-w-[170px] max-w-[220px] max-h-[70vh] overflow-y-auto">
+            <div className="absolute left-0 top-full mt-1.5 z-50 bg-ink-800 border border-line rounded-lg shadow-xl p-1.5 space-y-0.5 min-w-[170px] max-w-[220px] max-h-[70vh] overflow-y-auto">
               {TRADERS.map((t) => (
                 <FilterCheck
                   key={t.id}
@@ -1467,7 +1557,7 @@ export function QuestGraphPage() {
             onMouseDown={(e) => e.stopPropagation()}
             onWheel={(e) => e.stopPropagation()}
             style={{ maxHeight: `min(88%, calc(100% - ${miniDim.h + 36}px))` }}
-            className="absolute right-3 top-3 w-[310px] overflow-y-auto bg-ink-800 border border-line rounded-xl p-4 shadow-xl z-50 cursor-default"
+            className="absolute right-3 top-3 w-[720px] max-w-[calc(100%-24px)] overflow-y-auto bg-ink-800 border border-line rounded-xl p-4 shadow-xl z-50 cursor-default"
           >
             <button
               onClick={(e) => {

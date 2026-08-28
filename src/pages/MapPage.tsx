@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css'
 import './map.css'
 import { getPlayerPosition } from '../tauri'
 import type { PlayerPositionPayload } from '../types'
-import { useStore } from '../store'
+import { useStore, useTopPad } from '../store'
 
 /* ================= 类型（对应 public/data/*.json 生成脚本输出） ================= */
 
@@ -313,6 +313,8 @@ export function MapPage() {
   const [markers, setMarkers] = useState<MapMarkersDoc | null>(null)
   const [qzDoc, setQzDoc] = useState<QuestZonesDoc | null>(null)
   const [loadErr, setLoadErr] = useState('')
+  // 侧边栏折叠时，顶部工具条为左上角浮动按钮预留空位
+  const topPad = useTopPad()
   const [selected, setSelected] = useState<string>(() => useStore.getState().currentMap ?? 'factory')
   const [chips, setChips] = useState<Record<ChipKey, boolean>>({
     quests: true,
@@ -330,6 +332,7 @@ export function MapPage() {
     labels: false,
   })
   const [floorSel, setFloorSel] = useState(-1) // -1 = 默认主层
+  const [floorOpen, setFloorOpen] = useState(false) // 层级切换浮层
   const [cursorCoord, setCursorCoord] = useState<{ x: number; z: number } | null>(null)
   // 截图解析出的玩家位置 + 全局当前地图（location id），由 tauri 全局监听写入，任何页面生效
   const [shotPos, setShotPos] = useState<PlayerPositionPayload | null>(null)
@@ -904,7 +907,10 @@ export function MapPage() {
   return (
     <div className="h-full flex flex-col bg-ink-900">
       {/* 工具条 */}
-      <div className="shrink-0 flex items-center flex-wrap gap-x-3 gap-y-1 px-3 py-2 border-b border-line bg-ink-800">
+      <div
+        className="shrink-0 flex items-center flex-wrap gap-x-3 gap-y-1 px-3 py-2 border-b border-line bg-ink-800"
+        style={{ paddingLeft: 12 + topPad }}
+      >
         <select
           value={selected}
           onChange={(e) => {
@@ -937,29 +943,6 @@ export function MapPage() {
           ))}
         </div>
         <div className="flex-1" />
-        {floors.length > 0 && (
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setFloorSel(-1)}
-              className={`map-floor-btn px-2 py-[3px] rounded text-[11px] border ${
-                floorSel === -1 ? 'active' : 'border-line text-muted hover:text-[#e6edf3]'
-              }`}
-            >
-              主层
-            </button>
-            {floors.map((f, i) => (
-              <button
-                key={f.name}
-                onClick={() => setFloorSel(i)}
-                className={`map-floor-btn px-2 py-[3px] rounded text-[11px] border ${
-                  floorSel === i ? 'active' : 'border-line text-muted hover:text-[#e6edf3]'
-                }`}
-              >
-                {f.name}
-              </button>
-            ))}
-          </div>
-        )}
         {currentMapId && (
           <span className="text-[10.5px] text-muted" title={`游戏 location id：${currentMapId}`}>
             当前地图：{markers.nameIdFallback?.[currentMapId] ?? markers.nameIds?.[currentMapId] ?? currentMapId}
@@ -970,6 +953,74 @@ export function MapPage() {
       {/* 地图区 */}
       <div className="relative flex-1 min-h-0">
         <div id={mapDivId} className="absolute inset-0" />
+        {/* 层级切换：地图右上浮动按钮（tarkov.dev 风格，自定义非原生组件） */}
+        {floors.length > 0 && (
+          <div className="absolute right-3 top-3 z-[600] flex flex-col items-end gap-1.5">
+            <button
+              onClick={() => setFloorOpen((o) => !o)}
+              title="切换地图层级"
+              className="min-w-[86px] flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/95 shadow-lg text-[12px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M12 3 2 8l10 5 10-5-10-5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="m2 14 10 5 10-5"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                  opacity="0.55"
+                />
+              </svg>
+              {floorSel === -1 ? '主层' : floors[floorSel]?.name || '主层'}
+              <span
+                className="text-[9px] opacity-70 transition-transform"
+                style={{ transform: floorOpen ? 'rotate(180deg)' : 'none' }}
+              >
+                ▼
+              </span>
+            </button>
+
+            {floorOpen && (
+              <div className="min-w-[110px] py-1 rounded-md border border-line bg-ink-800/95 shadow-xl backdrop-blur-sm">
+                <button
+                  onClick={() => {
+                    setFloorSel(-1)
+                    setFloorOpen(false)
+                  }}
+                  className={`w-full text-left px-2.5 py-1.5 text-[12px] ${
+                    floorSel === -1
+                      ? 'text-[#d4a174] bg-amber/10'
+                      : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
+                  }`}
+                >
+                  主层
+                </button>
+                {floors.map((f, i) => (
+                  <button
+                    key={f.name}
+                    onClick={() => {
+                      setFloorSel(i)
+                      setFloorOpen(false)
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 text-[12px] ${
+                      floorSel === i
+                        ? 'text-[#d4a174] bg-amber/10'
+                        : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
+                    }`}
+                  >
+                    {f.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="absolute left-2 bottom-2 z-[500] px-2 py-1 rounded bg-black/60 text-[10.5px] text-[#8b949e] pointer-events-none">
           {cursorCoord ? `X ${cursorCoord.x.toFixed(1)} · Z ${cursorCoord.z.toFixed(1)}` : ''}
           {'　'}
