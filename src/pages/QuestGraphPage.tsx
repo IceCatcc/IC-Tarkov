@@ -12,7 +12,7 @@ import { useStore, useTopPad } from '../store'
 import { getQuestGraph, getQuestDetail, setQuestStatus, getMaps } from '../tauri'
 import { traderImage } from '../traderImages'
 import { TRADER_UNLOCK_QUEST, traderDisplayName, TRADERS } from '../traderMeta'
-import type { GraphNode, ItemRef, MapInfo } from '../types'
+import type { GraphEdge, GraphNode, ItemRef, MapInfo } from '../types'
 
 
 const ROW_H = 104
@@ -234,6 +234,9 @@ export function QuestGraphPage() {
   const focusMode = useStore((s) => s.focusGraph)
   const setFocusMode = useStore((s) => s.setFocusGraph)
   const setTraderGraph = useStore((s) => s.setTraderGraph)
+  // 任务模式过滤（pvp/pve，localStorage 持久化；日志检测到会话模式时自动跟随）
+  const questMode = useStore((s) => s.questMode)
+  const setQuestMode = useStore((s) => s.setQuestMode)
   // 侧边栏折叠时，顶部工具栏为左上角浮动按钮预留空位
   // 注意：hook 必须位于所有 early return 之前，否则触发 "Rendered more hooks" 崩溃
   const topPad = useTopPad()
@@ -357,11 +360,18 @@ export function QuestGraphPage() {
     return { statusMap: sm, completedSet: cs, unlockedSet: us }
   }, [playerQuests, unlockedQuests])
 
+  // 任务在该模式下是否可用（无 modes 字段的旧数据视为全部可用）
+  const modeOk = (n: GraphNode): boolean =>
+    !n.modes || n.modes.length === 0 || n.modes.includes(questMode)
+  // 模式感知前置：pve 模式下优先用 prereqsPve（后端仅在两种模式不同时填充）
+  const prereqsOf = (n: GraphNode): string[] =>
+    questMode === 'pve' && n.prereqsPve && n.prereqsPve.length > 0 ? n.prereqsPve : n.prereqs ?? []
+
   const classify = (n: GraphNode): NodeState => {
     const st = statusMap[n.id]
     if (st === 'completed') return 'completed'
     if (st === 'in_progress') return 'in_progress'
-    if (unlockedSet.has(n.id) || n.prereqs.every((p) => completedSet.has(p)))
+    if (unlockedSet.has(n.id) || prereqsOf(n).every((p) => completedSet.has(p)))
       return 'available'
     return 'locked'
   }
@@ -421,6 +431,8 @@ export function QuestGraphPage() {
       if (mapSel && mapSel !== '__none__' && !(n.maps ?? []).includes(mapSel) && (n.map ?? '__none__') !== mapSel) return true
       if (mapSel === '__none__' && (n.map ?? '__none__') !== '__none__') return true
       if (hasLockedMap(n.maps)) return true
+      // 模式过滤（pvp/pve）：不属于当前模式的任务视为隐藏，并参与任务链传播
+      if (!modeOk(n)) return true
       const ll = profile?.loyalty?.[n.traderId] ?? 1
       if (effRepMet && ll === 0) return true
       if (effLvlMet && (n.minLevel ?? 1) > Math.max(1, profile?.level ?? 1)) return true
@@ -433,6 +445,7 @@ export function QuestGraphPage() {
     }
     const vis = new Set<string>()
     for (const n of graph.nodes) {
+      if (!modeOk(n)) continue
       if (hideLegacy && n.legacy) continue
       if (disabledTraders[n.traderId]) continue
       // 地图单选筛选：非空时任务涉及的任一地图命中即显示（__none__=未指定地图）
@@ -471,6 +484,14 @@ export function QuestGraphPage() {
     // 专注模式下记录「保留集」，供任务链过滤传播判断阻断点（进行中 / 可接取 的下游是合法"下一步"）
     let focusKeep = new Set<string>()
 
+    // 模式有效的边：pve 模式下，仅当 from ∈ to 的 pve 前置（或共有前置）时才视为该模式的边。
+    // 后端边是 pvp/pve 两套前置的并集，模式专属边的一端会被隐藏，但传播/布局仍需按模式剔除。
+    const edgeValid = (e: GraphEdge): boolean => {
+      const v = nodeMap[e.to]
+      if (!v) return false
+      return prereqsOf(v).includes(e.from)
+    }
+
     // 专注模式（原「只看可达」）：进行中 + 好感&等级达标的「可接取」+ 其下游一级；不含已完成。
     // 启用时「好感达标 / 等级达标」勾选框被禁用，达标条件在此强制应用。
     if (!q && focusMode) {
@@ -485,9 +506,9 @@ export function QuestGraphPage() {
         }
         if (st === 'completed') continue // 已完成：专注模式不显示
         // 可接取：前置全完成 / 已解锁，且好感与等级达标（专注模式强制达标）
+        const pr = prereqsOf(n)
         const prereqOk =
-          n.prereqs.length === 0 ||
-          n.prereqs.every((p) => completedSet.has(p) || unlockedSet.has(p))
+          pr.length === 0 || pr.every((p) => completedSet.has(p) || unlockedSet.has(p))
         if (!prereqOk) continue
         if ((profile?.loyalty?.[n.traderId] ?? 1) === 0) continue // 商人未解锁
         if ((n.minLevel ?? 1) > lvl) continue // 玩家等级不足
@@ -509,6 +530,7 @@ export function QuestGraphPage() {
       const succ = new Map<string, string[]>()
       for (const e of graph.edges) {
         if (!keep.has(e.from)) continue
+        if (!edgeValid(e)) continue
         ;(succ.get(e.from) ?? succ.set(e.from, []).get(e.from)!).push(e.to)
       }
       for (const a of keep) {
@@ -526,6 +548,7 @@ export function QuestGraphPage() {
     if (!q) {
       const fwd = new Map<string, string[]>()
       for (const e of graph.edges) {
+        if (!edgeValid(e)) continue
         ;(fwd.get(e.from) ?? fwd.set(e.from, []).get(e.from)!).push(e.to)
       }
       const isBarrier = (id: string) =>
@@ -577,7 +600,10 @@ export function QuestGraphPage() {
           changed = true
         }
       }
-      for (const e of graph.edges) relax(e.from, e.to)
+      for (const e of graph.edges) {
+        if (!edgeValid(e)) continue
+        relax(e.from, e.to)
+      }
       for (const [from, to] of extraEdges) relax(from, to)
       if (!changed) break
     }
@@ -736,7 +762,7 @@ export function QuestGraphPage() {
       bands: bandsOut,
       zones,
     }
-  }, [graph, disabledTraders, mapSel, search, hideLegacy, focusMode, repMet, lvlMet, mapUnlocked, profile, statusMap, completedSet, unlockedSet])
+  }, [graph, disabledTraders, mapSel, search, hideLegacy, focusMode, repMet, lvlMet, mapUnlocked, profile, statusMap, completedSet, unlockedSet, questMode])
 
   // 缩略图尺寸：按世界包围盒宽高比动态确定（最长边固定，含上下限）
   const MINI_LONG = 170
@@ -759,6 +785,8 @@ export function QuestGraphPage() {
 
   const edges = useMemo(() => {
     if (!graph) return []
+    const nodeById = new Map<string, GraphNode>()
+    for (const n of graph.nodes) nodeById.set(n.id, n)
     const out: {
       id: string
       x1: number
@@ -769,6 +797,10 @@ export function QuestGraphPage() {
     }[] = []
     for (const e of graph.edges) {
       if (!visible.has(e.from) || !visible.has(e.to)) continue
+      // 模式有效边：仅绘制当前模式前置关系（后端边为 pvp/pve 并集）
+      const v = nodeById.get(e.to)
+      const pr = questMode === 'pve' && v?.prereqsPve?.length ? v.prereqsPve : v?.prereqs
+      if (!pr?.includes(e.from)) continue
       const a = positions[e.from]
       const b = positions[e.to]
       if (!a || !b) continue
@@ -782,7 +814,7 @@ export function QuestGraphPage() {
       })
     }
     return out
-  }, [graph, visible, positions, statusMap])
+  }, [graph, visible, positions, statusMap, questMode])
 
   // 节点状态表（世界绘制与拾取共用）
   const nodeStates = useMemo(() => {
@@ -794,7 +826,7 @@ export function QuestGraphPage() {
     }
     return m
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, visible, positions, statusMap, completedSet, unlockedSet])
+  }, [graph, visible, positions, statusMap, completedSet, unlockedSet, questMode])
 
   // 地图筛选选项（图谱中出现的所有地图 + 未指定）
   const mapOptions = useMemo(() => {
@@ -1370,6 +1402,26 @@ export function QuestGraphPage() {
         className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 bg-ink-800 border-b border-line relative z-30 overflow-visible"
         style={{ paddingLeft: 16 + topPad }}
       >
+        {/* 模式切换：PVP / PVE（日志检测到游戏会话模式时自动跟随切换） */}
+        <div
+          className="shrink-0 flex items-center rounded-full border border-line bg-ink-700 p-0.5"
+          title="任务模式：PVP（正规服务器）/ PVE（PvE 服务器）。游戏启动时从日志检测会话模式并自动切换，也可手动点选（会记住选择）。"
+        >
+          {(['pvp', 'pve'] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setQuestMode(m)}
+              className={`px-2.5 h-[22px] rounded-full text-[11px] leading-none transition-colors ${
+                questMode === m
+                  ? 'bg-amber text-black font-medium'
+                  : 'text-muted hover:text-[#e6edf3]'
+              }`}
+            >
+              {m === 'pvp' ? 'PVP' : 'PVE'}
+            </button>
+          ))}
+        </div>
+
         {/* 筛选条件：好感达标 / 等级达标 / 地图解锁 / 专注模式 / 旧任务，合并为下拉多选 */}
         <div className="relative shrink-0" ref={filterRef}>
           <DropdownTrigger
@@ -1711,21 +1763,33 @@ export function QuestGraphPage() {
                   </div>
                 )}
 
-                {detail.prereqs?.length > 0 && (
-                  <div className="mt-3">
-                    <div className="text-[11px] text-muted mb-1">前置任务</div>
-                    <div className="text-[12px] text-[#c9d1d9] space-y-0.5">
-                      {detail.prereqs.map((p) => (
-                        <div key={p.id} className="truncate flex items-center gap-1">
-                          <span className={completedSet.has(p.id) ? 'text-ok' : 'text-muted'}>
-                            {completedSet.has(p.id) ? '✓' : '○'}
-                          </span>
-                          {p.name}
-                        </div>
-                      ))}
+                {(() => {
+                  // 前置任务：pve 模式下优先展示 prereqsPve（后端仅在两种模式不同时填充）
+                  const pr =
+                    questMode === 'pve' && detail.prereqsPve?.length
+                      ? detail.prereqs.map((p) => ({
+                          ...p,
+                          hidden: !detail.prereqsPve!.includes(p.id),
+                        }))
+                      : detail.prereqs.map((p) => ({ ...p, hidden: false }))
+                  const shown = pr.filter((p) => !p.hidden)
+                  if (shown.length === 0) return null
+                  return (
+                    <div className="mt-3">
+                      <div className="text-[11px] text-muted mb-1">前置任务</div>
+                      <div className="text-[12px] text-[#c9d1d9] space-y-0.5">
+                        {shown.map((p) => (
+                          <div key={p.id} className="truncate flex items-center gap-1">
+                            <span className={completedSet.has(p.id) ? 'text-ok' : 'text-muted'}>
+                              {completedSet.has(p.id) ? '✓' : '○'}
+                            </span>
+                            {p.name}
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )
+                })()}
 
                 <div className="mt-4 flex items-center gap-2">
                   {selStatus === 'available' && (

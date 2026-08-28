@@ -99,6 +99,11 @@ interface AppState {
   setMapUnlockedGraph: (v: boolean) => void
   focusGraph: boolean
   setFocusGraph: (v: boolean) => void
+  /** 任务图谱模式过滤：'pvp' | 'pve'（localStorage 持久化；日志检测到会话模式时自动跟随） */
+  questMode: 'pvp' | 'pve'
+  setQuestMode: (v: 'pvp' | 'pve') => void
+  /** 日志检测到会话模式时调用：自动切换 questMode 并持久化 */
+  applyDetectedMode: (m: string) => void
 }
 
 /** 侧边栏折叠时，页面顶部需为左上角浮动按钮预留的左侧空位（px） */
@@ -132,6 +137,7 @@ interface GraphPrefs {
   focus: boolean
   hideLegacy: boolean
   disabledTraders: Record<string, boolean>
+  questMode: 'pvp' | 'pve'
 }
 
 function loadGraphPrefs(): GraphPrefs {
@@ -142,6 +148,7 @@ function loadGraphPrefs(): GraphPrefs {
     focus: false,
     hideLegacy: true, // 默认隐藏旧任务（「旧任务」勾选才显示）
     disabledTraders: Object.fromEntries(DEFAULT_DISABLED_TRADERS.map((id) => [id, true])),
+    questMode: 'pvp',
   }
   try {
     const raw = localStorage.getItem(GRAPH_PREFS_KEY)
@@ -154,6 +161,7 @@ function loadGraphPrefs(): GraphPrefs {
       focus: p.focus ?? fallback.focus,
       hideLegacy: p.hideLegacy ?? fallback.hideLegacy,
       disabledTraders: { ...fallback.disabledTraders, ...(p.disabledTraders ?? {}) },
+      questMode: p.questMode === 'pve' ? 'pve' : 'pvp',
     }
   } catch {
     return fallback
@@ -169,6 +177,7 @@ function persistGraphPrefs() {
     focus: s.focusGraph,
     hideLegacy: s.hideLegacyGraph,
     disabledTraders: s.disabledTradersGraph,
+    questMode: s.questMode,
   }
   try {
     localStorage.setItem(GRAPH_PREFS_KEY, JSON.stringify(data))
@@ -410,6 +419,18 @@ export const useStore = create<AppState>((set) => ({
   focusGraph: prefs0.focus,
   setFocusGraph: (v) => {
     set({ focusGraph: v })
+    persistGraphPrefs()
+  },
+  questMode: prefs0.questMode,
+  setQuestMode: (v) => {
+    set({ questMode: v })
+    persistGraphPrefs()
+  },
+  applyDetectedMode: (m) => {
+    const mode = m === 'pve' ? 'pve' : 'pvp'
+    const cur = useStore.getState().questMode
+    if (cur === mode) return
+    set({ questMode: mode })
     persistGraphPrefs()
   },
 }))

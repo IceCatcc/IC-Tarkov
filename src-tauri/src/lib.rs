@@ -554,6 +554,13 @@ fn get_current_map(app: tauri::AppHandle) -> Option<String> {
 }
 
 #[tauri::command]
+fn get_session_mode(app: tauri::AppHandle) -> Option<String> {
+    let st = app.state::<AppState>();
+    let s = st.store.lock().unwrap();
+    s.current_mode.clone()
+}
+
+#[tauri::command]
 fn get_maps() -> Vec<data::MapInfo> {
     data::get_maps()
 }
@@ -672,6 +679,7 @@ pub fn run() {
             save_settings,
             get_player_position,
             get_current_map,
+            get_session_mode,
             get_maps,
             open_url,
             reset_and_rescan,

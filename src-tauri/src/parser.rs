@@ -19,6 +19,12 @@ static RE_TRAIL_COMMA: Lazy<Regex> = Lazy::new(|| Regex::new(r",(\s*[}\]])").unw
 /// 进入 raid 时 application 行：`[Transit] Flag:None, RaidId:..., Count:0, Locations:Sandbox_start -> `
 static RE_LOCATION: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"Locations:([A-Za-z0-9_]+)").unwrap());
+/// 会话模式行（application_000.log 启动时一行）：`Session mode: Pve` / `Session mode: Pvp`
+static RE_SESSION_MODE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)Session mode:\s*(Pve|Pvp)").unwrap());
+/// 后端网关域名兜底：PvE 走 `gw-pve.escapefromtarkov.ru`，PvP 走 `gw-pvp.*`。
+/// 注意 `client/game/mode` 恒走 gw-pvp（启动器模式查询），不能作为判别依据。
+static RE_GW_MODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"https?://gw-(pve|pvp)\.").unwrap());
 
 #[derive(Debug, Clone)]
 pub enum RawEvent {
@@ -42,6 +48,11 @@ pub enum RawEvent {
         location_id: String,
         timestamp: String,
     },
+    /// 会话模式（"pve" | "pvp"），主来源为 `Session mode:` 行，兜底为网关域名
+    SessionMode {
+        mode: String,
+        timestamp: String,
+    },
 }
 
 fn full_ts(line: &str) -> Option<String> {
@@ -57,6 +68,8 @@ pub struct ParseState {
     pub depth: i32,
     pub json_buf: String,
     pub cur_ts: String,
+    /// 兜底网关域名已上报过（每文件只报一次，避免每条请求都产生事件）
+    pub mode_sent: bool,
 }
 
 /// 解析一段日志文本，返回其中的接取 / 完成 / 进度事件。
@@ -103,8 +116,28 @@ pub fn parse_chunk(text: &str, st: &mut ParseState) -> Vec<RawEvent> {
             st.in_json = true;
             st.depth = 0;
             st.json_buf.clear();
+        } else if let Some(cap) = RE_SESSION_MODE.captures(line) {
+            // 权威来源：`Session mode: Pve/Pvp`（每文件首个命中即上报，store 侧按值去重）
+            if !st.mode_sent {
+                st.mode_sent = true;
+                out.push(RawEvent::SessionMode {
+                    mode: cap.get(1).unwrap().as_str().to_lowercase(),
+                    timestamp: st.cur_ts.clone(),
+                });
+            }
         } else if let Some(urlcap) = RE_URL.captures(line) {
             let url = urlcap.get(1).unwrap().as_str();
+            // 网关域名兜底：文件未出现 Session mode: 行时，用请求域名判别。
+            // `client/game/mode` 恒走 gw-pvp（启动器模式查询），排除。
+            if !st.mode_sent && !url.contains("client/game/mode") {
+                if let Some(cap) = RE_GW_MODE.captures(line) {
+                    st.mode_sent = true;
+                    out.push(RawEvent::SessionMode {
+                        mode: cap.get(1).unwrap().as_str().to_lowercase(),
+                        timestamp: st.cur_ts.clone(),
+                    });
+                }
+            }
             let key = make_progress_key(line, url, &st.cur_ts);
             if RE_QUEST_COMPLETE.is_match(url) {
                 out.push(RawEvent::Progress {

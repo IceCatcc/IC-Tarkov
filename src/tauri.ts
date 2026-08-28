@@ -40,10 +40,22 @@ export async function initTauri(): Promise<UnlistenFn> {
     })
     .catch(() => {})
 
+  // 全局监听会话模式（pve/pvp）：游戏以某模式启动时，任务图谱自动跟随切换
+  const { applyDetectedMode } = useStore.getState()
+  const offMode = await listen<{ mode: string; timestamp?: string }>('session-mode', (e) => {
+    applyDetectedMode(e.payload.mode)
+  })
+  getSessionMode()
+    .then((m) => {
+      if (m) applyDetectedMode(m)
+    })
+    .catch(() => {})
+
   return () => {
     offQuest()
     offState()
     offMap()
+    offMode()
   }
 }
 
@@ -134,6 +146,10 @@ export async function getPlayerPosition(): Promise<PlayerPositionPayload | null>
 
 export async function getCurrentMap(): Promise<string | null> {
   return await invoke<string | null>('get_current_map')
+}
+
+export async function getSessionMode(): Promise<string | null> {
+  return await invoke<string | null>('get_session_mode')
 }
 
 export async function getMaps(): Promise<MapInfo[]> {

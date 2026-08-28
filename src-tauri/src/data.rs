@@ -9,6 +9,9 @@ struct RawNode {
     trader_id: String,
     trader_name: String,
     prereqs: Vec<String>,
+    /// PVE 模式下的前置（与 prereqs 不同时才存在，如 收视灵药）
+    #[serde(default)]
+    prereqs_pve: Vec<String>,
     #[allow(dead_code)]
     trader_reqs: Vec<RawTraderReq>,
     min_level: Option<u32>,
@@ -22,6 +25,9 @@ struct RawNode {
     legacy: bool,
     #[serde(default)]
     special: bool,
+    /// 任务可用模式：pvp / pve / 两者
+    #[serde(default)]
+    modes: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -193,6 +199,10 @@ pub struct GraphNode {
     pub special: bool,
     /// 是否为旧任务（当前赛季已移除）
     pub legacy: bool,
+    /// PVE 模式下的前置（与 prereqs 不同时非空）
+    pub prereqs_pve: Vec<String>,
+    /// 任务可用模式：pvp / pve
+    pub modes: Vec<String>,
     /// 需要提交的物品（全部目标中出现的物品扁平化）
     pub turn_ins: Vec<ItemPayload>,
 }
@@ -235,6 +245,10 @@ pub struct QuestDetail {
     pub trader_reqs: Vec<TraderReqPayload>,
     pub legacy: bool,
     pub special: bool,
+    /// PVE 模式下的前置（与 prereqs 不同时非空）
+    pub prereqs_pve: Vec<String>,
+    /// 任务可用模式：pvp / pve
+    pub modes: Vec<String>,
 }
 
 /// 接取事件所需信息（watcher 使用）
@@ -346,7 +360,8 @@ pub fn prereqs_closure(quest_id: &str) -> Vec<String> {
     out
 }
 
-/// 全量任务图谱（不含玩家状态，前端按 id 合并）
+/// 全量任务图谱（不含玩家状态，前端按 id 合并）。
+/// 边取 pvp/pve 两套前置的并集：模式专属边的一端节点会被前端按模式隐藏，绘制时自动跳过。
 pub fn get_graph() -> QuestGraph {
     let mut nodes = Vec::with_capacity(INDEX.len());
     let mut edges = Vec::new();
@@ -364,6 +379,8 @@ pub fn get_graph() -> QuestGraph {
             trader_reqs: trader_reqs_payload(n),
             legacy: n.legacy,
             special: n.special,
+            prereqs_pve: n.prereqs_pve.clone(),
+            modes: n.modes.clone(),
             turn_ins: flatten_turn_ins(n),
         });
         for p in &n.prereqs {
@@ -371,6 +388,15 @@ pub fn get_graph() -> QuestGraph {
                 from: p.clone(),
                 to: id.clone(),
             });
+        }
+        // pve 专属前置边（仅当与 pvp 前置不同）
+        for p in &n.prereqs_pve {
+            if !n.prereqs.contains(p) {
+                edges.push(GraphEdge {
+                    from: p.clone(),
+                    to: id.clone(),
+                });
+            }
         }
     }
     QuestGraph { nodes, edges }
@@ -406,5 +432,7 @@ pub fn get_detail(quest_id: &str) -> Option<QuestDetail> {
         trader_reqs: trader_reqs_payload(n),
         legacy: n.legacy,
         special: n.special,
+        prereqs_pve: n.prereqs_pve.clone(),
+        modes: n.modes.clone(),
     })
 }

@@ -91,6 +91,8 @@ export interface GraphNode {
   traderId: string
   traderName: string
   prereqs: string[]
+  /** PVE 模式下的前置（与 prereqs 不同时非空，如 收视灵药） */
+  prereqsPve?: string[]
   minLevel: number | null
   map: string | null
   /** 地图展示名（官方中文，后端由缓存 map_meta.json 解析） */
@@ -102,6 +104,8 @@ export interface GraphNode {
   /** 是否为旧任务（当前赛季已移除，多为旧 PvP 专属任务） */
   legacy: boolean
   special: boolean
+  /** 任务可用模式：pvp / pve（两者都有则为 ['pvp','pve']） */
+  modes?: string[]
   turnIns: ItemRef[]
 }
 
@@ -132,6 +136,10 @@ export interface QuestDetail {
   objectives: ObjectiveInfo[]
   rewards: Reward[]
   prereqs: PrereqInfo[]
+  /** PVE 模式下的前置 id（与 prereqs 不同时非空） */
+  prereqsPve?: string[]
+  /** 任务可用模式：pvp / pve */
+  modes?: string[]
   traderReqs: TraderReq[]
   legacy: boolean
   special: boolean

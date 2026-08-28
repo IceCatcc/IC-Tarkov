@@ -42,6 +42,8 @@ pub struct QuestStore {
     pub error: Option<String>,
     /// 当前所在地图（游戏内部 location id，如 Sandbox_start / factory4_day）
     pub current_map_nameid: Option<String>,
+    /// 当前会话模式（"pve" | "pvp"，来自 Session mode: 行或网关域名兜底）
+    pub current_mode: Option<String>,
 }
 
 const ACTIVITY_CAP: usize = 800;
@@ -56,6 +58,7 @@ impl QuestStore {
             last_scan: None,
             error: None,
             current_map_nameid: None,
+            current_mode: None,
         }
     }
 
@@ -123,6 +126,15 @@ impl QuestStore {
         let changed = self.current_map_nameid.as_deref() != Some(location_id);
         if changed {
             self.current_map_nameid = Some(location_id.to_string());
+        }
+        changed
+    }
+
+    /// 更新当前会话模式（pve/pvp）；返回是否发生变化（变化时 emit session-mode）
+    pub fn apply_session_mode(&mut self, mode: &str) -> bool {
+        let changed = self.current_mode.as_deref() != Some(mode);
+        if changed {
+            self.current_mode = Some(mode.to_string());
         }
         changed
     }

@@ -270,6 +270,20 @@ fn process_file(
                     );
                 }
             }
+            parser::RawEvent::SessionMode { mode, timestamp } => {
+                // 会话模式（pve/pvp）：初始扫描静默更新 store，实时检测到变化才 emit
+                let changed = {
+                    let binding = app.state::<AppState>();
+                    let mut st = binding.store.lock().unwrap();
+                    st.apply_session_mode(&mode)
+                };
+                if changed && emit {
+                    let _ = app.emit(
+                        "session-mode",
+                        serde_json::json!({ "mode": mode, "timestamp": timestamp }),
+                    );
+                }
+            }
         }
     }
 }
