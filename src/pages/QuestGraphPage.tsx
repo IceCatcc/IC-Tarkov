@@ -24,8 +24,11 @@ const BAND_GAP = 26
 const DEFAULT_SCALE = 0.8
 
 // 网格布局常量（布局与绘制共用）
-const SUB_G = 10 // 小列间距
-const ZONE_PAD_IN = 20 // 大列内边距
+// 水平间距与竖直间距一致（竖直 = ROW_H - NODE_H = 26），视觉网格均匀
+const SUB_G = 26 // 小列间距（水平卡片间隔）
+const ZONE_PAD_IN = 20 // 大列内边距（列与列之间，内含分区分隔线）
+const EDGE_STUB = 12 // 连线出入卡片的水平引出段
+const EDGE_CORNER = 6 // 正交连线的拐角圆角半径
 const ROWS_CAP = 3 // 每个小列的最大行数（超出则开新小列，行数永久封顶）
 const GRID_TOP = 38 // 顶部等级标尺高度（屏幕像素）
 const BAND_X = 78 // 网格整体右移量：左侧为外置商人头像的固定屏幕沟槽
@@ -59,7 +62,9 @@ function clampView(
 const STATE_STYLE: Record<NodeState, { bg: string; border: string; text: string }> = {
   completed: { bg: '#14261b', border: '#2ea043', text: '#86e29b' },
   in_progress: { bg: '#0e2438', border: '#58a6ff', text: '#a8d1ff' },
-  available: { bg: '#231b0d', border: '#c08a2a', text: '#e6c089' },
+  // 待接取：底色与文字保持黄色系，描边改用中性浅灰——
+  // 黄色描边会与「任务链高亮」的琥珀色撞色，难以区分
+  available: { bg: '#231b0d', border: '#9aa5b1', text: '#e6c089' },
   locked: { bg: '#1f2730', border: '#6b7682', text: '#c2cad3' },
 }
 const SPECIAL_BORDER = '#a371f7'
@@ -101,6 +106,47 @@ function truncateText(ctx: CanvasRenderingContext2D, text: string, maxW: number)
   let s = text
   while (s.length > 1 && ctx.measureText(s + '…').width > maxW) s = s.slice(0, -1)
   return s + '…'
+}
+
+/**
+ * 正交（曼哈顿）走线：水平引出 → 垂直 → 水平进入，全程走卡片之间的通道，不斜穿。
+ * 目标在正右方足够远时走 4 点（竖直段位于两卡片水平中点）；
+ * 否则（同列回流等）走 6 点绕行，避开卡片本体。
+ */
+function orthoPath(x1: number, y1: number, x2: number, y2: number): number[][] {
+  if (Math.abs(y1 - y2) < 0.5) return [[x1, y1], [x2, y2]]
+  if (x2 - x1 >= EDGE_STUB * 2) {
+    const midX = (x1 + x2) / 2
+    return [
+      [x1, y1],
+      [midX, y1],
+      [midX, y2],
+      [x2, y2],
+    ]
+  }
+  const outX = x1 + EDGE_STUB
+  const inX = x2 - EDGE_STUB
+  const midY = (y1 + y2) / 2
+  return [
+    [x1, y1],
+    [outX, y1],
+    [outX, midY],
+    [inX, midY],
+    [inX, y2],
+    [x2, y2],
+  ]
+}
+
+/** 绘制带圆角拐角的折线 */
+function strokePolyline(ctx: CanvasRenderingContext2D, pts: number[][], r: number) {
+  if (pts.length < 2) return
+  ctx.beginPath()
+  ctx.moveTo(pts[0][0], pts[0][1])
+  for (let i = 1; i < pts.length - 1; i++) {
+    ctx.arcTo(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], r)
+  }
+  ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1])
+  ctx.stroke()
 }
 
 function dedupeItems(items: ItemRef[]): ItemRef[] {
@@ -737,11 +783,11 @@ export function QuestGraphPage() {
     for (const n of graph.nodes) nodeById.set(n.id, n)
     const out: {
       id: string
-      x1: number
-      y1: number
-      x2: number
-      y2: number
+      /** 正交折线路径点（起点 → … → 终点） */
+      pts: number[][]
       doneEdge: boolean
+      from: string
+      to: string
     }[] = []
     for (const e of graph.edges) {
       if (!visible.has(e.from) || !visible.has(e.to)) continue
@@ -754,15 +800,55 @@ export function QuestGraphPage() {
       if (!a || !b) continue
       out.push({
         id: `${e.from}->${e.to}`,
-        x1: a.x + NODE_W,
-        y1: a.y + NODE_H / 2,
-        x2: b.x,
-        y2: b.y + NODE_H / 2,
+        pts: orthoPath(
+          a.x + NODE_W,
+          a.y + NODE_H / 2,
+          b.x,
+          b.y + NODE_H / 2,
+        ),
         doneEdge: statusMap[e.from] === 'completed',
+        from: e.from,
+        to: e.to,
       })
     }
     return out
   }, [graph, visible, positions, statusMap, questMode])
+
+  // 点击节点所属的整条任务链（全部祖先 + 全部后代），用于高亮；信息面板仍只显示点击的那个
+  const chainIds = useMemo(() => {
+    const set = new Set<string>()
+    if (!graph || !selectedId || !visible.has(selectedId)) return set
+    const nodeById = new Map<string, GraphNode>()
+    for (const n of graph.nodes) nodeById.set(n.id, n)
+    const fwd = new Map<string, string[]>()
+    const back = new Map<string, string[]>()
+    for (const e of graph.edges) {
+      if (!visible.has(e.from) || !visible.has(e.to)) continue
+      const v = nodeById.get(e.to)
+      const pr = questMode === 'pve' && v?.prereqsPve?.length ? v.prereqsPve : v?.prereqs
+      if (!pr?.includes(e.from)) continue
+      if (!fwd.has(e.from)) fwd.set(e.from, [])
+      if (!back.has(e.to)) back.set(e.to, [])
+      fwd.get(e.from)!.push(e.to)
+      back.get(e.to)!.push(e.from)
+    }
+    const walk = (adj: Map<string, string[]>) => {
+      const stack = [selectedId]
+      while (stack.length) {
+        const u = stack.pop()!
+        for (const v of adj.get(u) ?? []) {
+          if (!set.has(v)) {
+            set.add(v)
+            stack.push(v)
+          }
+        }
+      }
+    }
+    set.add(selectedId)
+    walk(fwd) // 后代
+    walk(back) // 祖先
+    return set
+  }, [graph, visible, selectedId, questMode])
 
   // 节点状态表（世界绘制与拾取共用）
   const nodeStates = useMemo(() => {
@@ -1022,14 +1108,53 @@ export function QuestGraphPage() {
       ctx.stroke()
     })
 
-    // 连线
+    // 连线：正交折线（先画普通，再画链内高亮，避免被覆盖）
+    ctx.lineJoin = 'round'
+    ctx.lineCap = 'round'
     for (const e of edges) {
-      ctx.strokeStyle = e.doneEdge ? 'rgba(46,160,67,0.67)' : '#454f59'
-      ctx.lineWidth = e.doneEdge ? 2.4 : 1.8
+      ctx.strokeStyle = e.doneEdge ? 'rgba(46,160,67,0.8)' : '#5b6773'
+      ctx.lineWidth = e.doneEdge ? 3.4 : 2.8
+      strokePolyline(ctx, e.pts, EDGE_CORNER)
+    }
+    if (chainIds.size > 0) {
+      for (const e of edges) {
+        if (!chainIds.has(e.from) || !chainIds.has(e.to)) continue
+        ctx.strokeStyle = e.doneEdge ? 'rgba(63,185,80,0.95)' : '#ef9f27'
+        ctx.lineWidth = 4
+        strokePolyline(ctx, e.pts, EDGE_CORNER)
+      }
+    }
+    // 端点圆点：只画在真正接入卡片的端点上，
+    // 与「连线只是从卡片旁边/上方经过」区分开
+    const endDot = (x: number, y: number, r: number, fill: string, edge?: string) => {
       ctx.beginPath()
-      ctx.moveTo(e.x1, e.y1)
-      ctx.lineTo(e.x2, e.y2)
-      ctx.stroke()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fillStyle = fill
+      ctx.fill()
+      if (edge) {
+        ctx.strokeStyle = edge
+        ctx.lineWidth = 1.4
+        ctx.stroke()
+      }
+    }
+    for (const e of edges) {
+      const a = e.pts[0]
+      const b = e.pts[e.pts.length - 1]
+      const fill = e.doneEdge ? 'rgba(63,185,80,0.98)' : '#b8c4d0'
+      const edge = e.doneEdge ? 'rgba(6,32,12,0.85)' : 'rgba(10,14,20,0.9)'
+      endDot(a[0], a[1], 5.4, fill, edge)
+      endDot(b[0], b[1], 5.4, fill, edge)
+    }
+    if (chainIds.size > 0) {
+      for (const e of edges) {
+        if (!chainIds.has(e.from) || !chainIds.has(e.to)) continue
+        const a = e.pts[0]
+        const b = e.pts[e.pts.length - 1]
+        const fill = e.doneEdge ? '#5ce06d' : '#f5c518'
+        const edge = e.doneEdge ? 'rgba(6,32,12,0.9)' : 'rgba(40,26,0,0.9)'
+        endDot(a[0], a[1], 6.8, fill, edge)
+        endDot(b[0], b[1], 6.8, fill, edge)
+      }
     }
 
     // 节点
@@ -1054,6 +1179,14 @@ export function QuestGraphPage() {
       ctx.lineWidth = n.special ? 1.4 : 1.2
       ctx.stroke()
       ctx.setLineDash([])
+
+      // 任务链高亮（点击节点所属的整条链，含自身）
+      if (chainIds.has(n.id)) {
+        rr(ctx, p.x - 2, p.y - 2, NODE_W + 4, NODE_H + 4, 9)
+        ctx.strokeStyle = '#ef9f27'
+        ctx.lineWidth = 1.8
+        ctx.stroke()
+      }
 
       // 选中光环
       if (selectedId === n.id) {
@@ -1519,7 +1652,7 @@ export function QuestGraphPage() {
         <div className="absolute bottom-3 left-3 z-40 flex flex-col gap-1 px-2.5 py-2 rounded-md bg-ink-800/85 border border-line shadow-lg backdrop-blur-sm text-[13px] text-muted pointer-events-none">
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#14261b] border border-[#2ea043]" />已完成</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#0e2438] border border-[#58a6ff]" />进行中</span>
-          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#231b0d] border border-[#c08a2a]" />待接取</span>
+          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#231b0d] border border-[#9aa5b1]" />待接取</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#1f2730] border border-[#6b7682]" />后续解锁</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-ink-800 border border-dashed border-[#a371f7]" />特殊✦</span>
         </div>
