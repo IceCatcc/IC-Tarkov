@@ -309,6 +309,11 @@ fn objectives_payload(n: &RawNode) -> Vec<ObjectivePayload> {
         .collect()
 }
 
+/// 任务涉及的地图 id 列表
+pub fn quest_maps(quest_id: &str) -> Vec<String> {
+    INDEX.get(quest_id).map(|n| n.maps.clone()).unwrap_or_default()
+}
+
 pub fn resolve_accept(quest_id: &str) -> AcceptInfo {
     match INDEX.get(quest_id) {
         Some(n) => AcceptInfo {

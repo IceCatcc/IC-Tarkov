@@ -354,6 +354,7 @@ fn get_player_quests(app: tauri::AppHandle) -> Vec<store::PlayerQuest> {
             status: status.to_string(),
             wiki: info.wiki,
             min_level: info.min_level,
+            maps: data::quest_maps(qid),
         });
     }
     out.sort_by(|a, b| {
@@ -504,6 +505,7 @@ fn set_quest_status(
             status: status.to_string(),
             wiki: info.wiki,
             min_level: info.min_level,
+            maps: data::quest_maps(qid),
         });
     }
     out.sort_by(|a, b| {

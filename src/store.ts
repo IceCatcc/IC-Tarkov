@@ -10,6 +10,8 @@ import type {
   AppSettings,
   QuestEventPayload,
   ItemRef,
+  Toast,
+  ToastKind,
 } from './types'
 import { getQuestDetail } from './tauri'
 
@@ -29,6 +31,24 @@ interface AppState {
   showSettings: boolean
   openSettings: () => void
   closeSettings: () => void
+
+  /** 全局通知队列（右下角堆叠，最新在下） */
+  toasts: Toast[]
+  pushToast: (text: string, kind?: ToastKind) => void
+  dismissToast: (id: string) => void
+  /** 地图 id -> 中文名（用于通知显示当前地图名） */
+  mapNames: Record<string, string>
+  setMapNames: (m: Record<string, string>) => void
+
+  /** 地图：截图定位后是否每次都缩放聚焦（关闭则只平移、保持用户缩放） */
+  autoZoomMap: boolean
+  setAutoZoomMap: (v: boolean) => void
+  /** 地图：不跟踪的任务 id（不跟踪=不在地图绘制其目标图标）；缺省视为全部跟踪 */
+  untrackedQuests: string[]
+  toggleQuestTracked: (id: string) => void
+  /** 监控页：任务列表的地图过滤（normalizedName，空=全部） */
+  mapFilter: string
+  setMapFilter: (m: string) => void
 
   watcher: WatcherState
   setWatcher: (w: WatcherState) => void
@@ -193,11 +213,16 @@ export function collectUiPrefs(): Record<string, unknown> {
       disabledTraders: s.disabledTradersGraph,
       questMode: s.questMode,
     } satisfies GraphPrefs,
+    mapPrefs: {
+      autoZoom: s.autoZoomMap,
+      untrackedQuests: s.untrackedQuests,
+    },
   }
 }
 
 interface UiPrefsShape {
   graphPrefs?: Partial<GraphPrefs>
+  mapPrefs?: { autoZoom?: boolean; untrackedQuests?: string[] }
 }
 
 const prefs0 = loadGraphPrefs()
@@ -216,6 +241,28 @@ export const useStore = create<AppState>((set) => ({
   showSettings: false,
   openSettings: () => set({ showSettings: true }),
   closeSettings: () => set({ showSettings: false }),
+
+  toasts: [],
+  // 最多堆叠 5 条，超出丢弃最旧的
+  pushToast: (text, kind = 'info') =>
+    set((state) => ({
+      toasts: [...state.toasts, { id: uid(), text, kind: kind as ToastKind }].slice(-5),
+    })),
+  dismissToast: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
+  mapNames: {},
+  setMapNames: (m) => set({ mapNames: m }),
+
+  autoZoomMap: false,
+  setAutoZoomMap: (v) => set({ autoZoomMap: v }),
+  untrackedQuests: [],
+  toggleQuestTracked: (id) =>
+    set((s) => ({
+      untrackedQuests: s.untrackedQuests.includes(id)
+        ? s.untrackedQuests.filter((x) => x !== id)
+        : [...s.untrackedQuests, id],
+    })),
+  mapFilter: '',
+  setMapFilter: (m) => set({ mapFilter: m }),
 
   watcher: {
     watching: false,
@@ -240,7 +287,8 @@ export const useStore = create<AppState>((set) => ({
   historicalActivities: [],
   historicalLoaded: false,
 
-  filter: 'all',
+  // 默认显示「进行中」
+  filter: 'in_progress',
   setFilter: (f) => set({ filter: f }),
   traderFilter: null,
   setTraderFilter: (t) => set({ traderFilter: t }),
@@ -288,6 +336,7 @@ export const useStore = create<AppState>((set) => ({
               status: 'in_progress',
               wiki: e.wiki,
               minLevel: null,
+              maps: [],
             },
           ]
         }
@@ -327,6 +376,7 @@ export const useStore = create<AppState>((set) => ({
             status: 'completed',
             wiki: `https://www.eftarkov.com/news/id/${e.questId}.html`,
             minLevel: null,
+            maps: [],
           },
         ]
       }
@@ -443,6 +493,12 @@ export const useStore = create<AppState>((set) => ({
           ...(g.disabledTraders as Record<string, boolean>),
         }
       }
+    }
+    const mp = u.mapPrefs
+    if (mp && typeof mp === 'object') {
+      if (typeof mp.autoZoom === 'boolean') patch.autoZoomMap = mp.autoZoom
+      if (Array.isArray(mp.untrackedQuests))
+        patch.untrackedQuests = mp.untrackedQuests.filter((x) => typeof x === 'string')
     }
     if (Object.keys(patch).length > 0) set(patch)
   },

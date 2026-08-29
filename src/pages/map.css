@@ -155,10 +155,7 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     0%, 100% { fill-opacity: 0.16; }
     50% { fill-opacity: 0.30; }
 }
-/* 任务目标 marker：发光描边提升可见度 */
-.quest-obj-marker {
-    filter: drop-shadow(0 0 4px rgba(245, 197, 24, 0.9)) drop-shadow(0 0 8px rgba(245, 197, 24, 0.6));
-}
+/* 任务目标 marker：图标发光（见下方 .quest-obj-marker img），任务名紧随图标右侧 */
 
 /* 玩家位置图标（截图定位，带朝向旋转） */
 .map-player {
@@ -173,4 +170,34 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     filter:
         drop-shadow(0 0 2px rgba(0, 0, 0, 0.9))
         drop-shadow(0 0 4px rgba(0, 0, 0, 0.6));
+}
+
+/* 任务目标标记：图标 + 任务名（文字比地点标签小一号） */
+.quest-obj-marker {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+.quest-obj-marker img {
+    width: 30px;
+    height: 30px;
+    display: block;
+    filter: drop-shadow(0 0 4px rgba(245, 197, 24, 0.9)) drop-shadow(0 0 8px rgba(245, 197, 24, 0.6));
+}
+.quest-obj-name {
+    position: absolute;
+    left: 32px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 15px;
+    font-weight: 600;
+    color: #f0d9a0;
+    white-space: nowrap;
+    user-select: none;
+    pointer-events: none;
+    text-shadow:
+        0 0 3px #000,
+        0 0 6px #000,
+        -1px -1px 2px #000,
+        1px 1px 2px #000;
 }

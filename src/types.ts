@@ -1,6 +1,14 @@
 // 与 src-tauri 后端事件/命令对应的前端类型定义（Rust 侧 rename_all = "camelCase"）
 export type QuestStatus = 'in_progress' | 'completed'
 
+/** 全局通知（右下角堆叠，3s 自动关闭） */
+export type ToastKind = 'info' | 'accept' | 'done' | 'map'
+export interface Toast {
+  id: string
+  text: string
+  kind: ToastKind
+}
+
 export interface Reward {
   name: string
   count: number
@@ -16,6 +24,8 @@ export interface PlayerQuest {
   status: QuestStatus
   wiki: string
   minLevel: number | null
+  /** 任务涉及的地图 id（normalizedName，来自后端任务索引） */
+  maps: string[]
 }
 
 export type ActivityKind = 'accept' | 'complete' | 'progress'

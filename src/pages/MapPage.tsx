@@ -3,7 +3,7 @@ import { listen } from '@tauri-apps/api/event'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './map.css'
-import { getPlayerPosition } from '../tauri'
+import { getPlayerPosition, fetchTarkovTime } from '../tauri'
 import type { PlayerPositionPayload } from '../types'
 import { useStore, useTopPad } from '../store'
 import { QuestCard } from '../components/QuestCard'
@@ -106,6 +106,13 @@ interface QuestZonesDoc {
     string,
     { name?: string; nameZh?: string; objectives: QuestZoneObjective[] }
   >
+}
+
+/** 地图 Boss 刷新率（按 normalizedName 索引） */
+interface MapBossesDoc {
+  version: number
+  source?: string
+  maps: Record<string, { id: string; name: string; nameZh: string; chance: number; locations: number }[]>
 }
 
 /* ================= 常量 ================= */
@@ -340,6 +347,29 @@ function fmtNum(v: number | null | undefined) {
   return typeof v === 'number' ? v.toFixed(1) : '-'
 }
 
+/**
+ * 塔科夫游戏内时钟：现实 1 秒 = 游戏 7 秒。
+ * @param realMs 现实时间毫秒戳
+ * @param offsetHours 左右局偏移（左局 0，右局 +12）
+ */
+function tarkovClockText(realMs: number, offsetHours: number): string {
+  const gameMs = realMs * 7 + offsetHours * 3600_000
+  const total = Math.floor(gameMs / 1000) % 86400
+  const h = String(Math.floor(total / 3600)).padStart(2, '0')
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0')
+  const s = String(total % 60).padStart(2, '0')
+  return `${h}:${m}:${s}`
+}
+
+/** HTML 转义（任务名等文本注入到 divIcon/popup 前使用） */
+function escapeHtml(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
+  )
+}
+
 /** 标记弹窗内容 */
 function popupHtml(title: string, meta: string[]) {
   return `<div><div class="map-popup-title">${title}</div>${meta
@@ -353,10 +383,15 @@ export function MapPage() {
   const [skeleton, setSkeleton] = useState<SkeletonDoc | null>(null)
   const [markers, setMarkers] = useState<MapMarkersDoc | null>(null)
   const [qzDoc, setQzDoc] = useState<QuestZonesDoc | null>(null)
+  const [bossDoc, setBossDoc] = useState<MapBossesDoc | null>(null)
   const [loadErr, setLoadErr] = useState('')
   // 侧边栏折叠时，顶部工具条为左上角浮动按钮预留空位
   const topPad = useTopPad()
   const [selected, setSelected] = useState<string>(() => useStore.getState().currentMap ?? 'factory')
+  const autoZoomMap = useStore((s) => s.autoZoomMap)
+  const setAutoZoomMap = useStore((s) => s.setAutoZoomMap)
+  const untrackedQuests = useStore((s) => s.untrackedQuests)
+  const toggleQuestTracked = useStore((s) => s.toggleQuestTracked)
   const [chips, setChips] = useState<Record<ChipKey, boolean>>({
     quests: true,
     extract_pmc: true,
@@ -376,10 +411,18 @@ export function MapPage() {
   const [floorOpen, setFloorOpen] = useState(false) // 层级切换浮层
   const [mapMenuOpen, setMapMenuOpen] = useState(false) // 左下角地图选单浮层
   const [tasksOpen, setTasksOpen] = useState(false) // 右下角任务浮窗
+  const [infoOpen, setInfoOpen] = useState(false) // 右下角地图信息浮窗
+  // 塔科夫游戏内时间：{ serverMs: 同步到的服务器时间, localMs: 同步时的本地时间 }
+  // 同步失败时保持 null（顶部时间显示隐藏）
+  const [tarkovClock, setTarkovClock] = useState<{ serverMs: number; localMs: number } | null>(
+    null,
+  )
+  const [nowTick, setNowTick] = useState(() => Date.now())
   const [cursorCoord, setCursorCoord] = useState<{ x: number; z: number } | null>(null)
   // 三个浮窗（地图选单/任务/层级）的容器 ref：点击外部自动关闭
   const mapMenuRef = useRef<HTMLDivElement | null>(null)
   const tasksRef = useRef<HTMLDivElement | null>(null)
+  const infoRef = useRef<HTMLDivElement | null>(null)
   const floorRef = useRef<HTMLDivElement | null>(null)
   // 截图解析出的玩家位置 + 全局当前地图（location id），由 tauri 全局监听写入，任何页面生效
   const [shotPos, setShotPos] = useState<PlayerPositionPayload | null>(null)
@@ -392,11 +435,16 @@ export function MapPage() {
       fetch(`${base}/data/maps-skeleton.json`).then((r) => r.json()),
       fetch(`${base}/data/map-markers.json`).then((r) => r.json()),
       fetch(`${base}/data/quest-zones.json`).then((r) => r.json()),
+      // Boss 刷新率：加载失败不影响地图，仅面板显示为空
+      fetch(`${base}/data/map-bosses.json`)
+        .then((r) => r.json())
+        .catch(() => null),
     ])
-      .then(([sk, mk, qz]) => {
+      .then(([sk, mk, qz, bs]) => {
         setSkeleton(sk as SkeletonDoc)
         setMarkers(mk as MapMarkersDoc)
         setQzDoc(qz as QuestZonesDoc)
+        setBossDoc((bs as MapBossesDoc) ?? null)
       })
       .catch((e) => setLoadErr(String(e)))
   }, [])
@@ -446,6 +494,25 @@ export function MapPage() {
     }
   }, [currentMapId, markers, selectable])
 
+  /* ---------- 塔科夫游戏内时间（左右局） ---------- */
+  // 游戏内时间是现实的 7 倍速；左右局相差 12 小时且同时正向流逝
+  useEffect(() => {
+    let timer: number | undefined
+    const sync = async () => {
+      const serverMs = await fetchTarkovTime()
+      if (serverMs) setTarkovClock({ serverMs, localMs: Date.now() })
+    }
+    void sync()
+    // 1s 刷新显示，10 分钟重新与服务器同步一次
+    timer = window.setInterval(() => setNowTick(Date.now()), 1000)
+    const resync = window.setInterval(() => void sync(), 10 * 60 * 1000)
+    return () => {
+      if (timer) window.clearInterval(timer)
+      window.clearInterval(resync)
+    }
+    // currentMapId 变化 = 进入（切换）地图，此时重新同步一次时间
+  }, [currentMapId])
+
   /* ---------- Leaflet 构建（每张地图重建实例，保证状态干净） ---------- */
 
   const mapDivId = 'eft-spy-map'
@@ -460,12 +527,18 @@ export function MapPage() {
   // 楼层选择 ref：标记灰显的 syncAll 闭包在构建 effect 内创建，通过 ref 读最新值
   const floorSelRef = useRef(floorSel)
   floorSelRef.current = floorSel
+  // 自动缩放 / 任务跟踪 ref：地图构建 effect 与跟随 effect 通过 ref 读最新值
+  const autoZoomRef = useRef(false)
+  autoZoomRef.current = autoZoomMap
+  const untrackedRef = useRef<Set<string>>(new Set())
+  untrackedRef.current = new Set(untrackedQuests)
   // keepAlive 适配：页面隐藏（display:none）时容器尺寸为 0，需记录可见状态并在切回时重算
   const pageRef = useRef(page)
   pageRef.current = page
   const rawBoundsRef = useRef<L.LatLngBounds | null>(null)
 
   // 点击浮窗外部自动关闭（容器内 onMouseDown 已 stopPropagation，不会误触发）
+  // 注意：「地图信息」面板不在此列——它只由按钮点击切换显隐，点外部不关闭
   useEffect(() => {
     if (!mapMenuOpen && !tasksOpen && !floorOpen) return
     const onDown = (e: MouseEvent) => {
@@ -935,14 +1008,13 @@ export function MapPage() {
         ?.querySelector<HTMLImageElement>('img')
       if (img) img.style.transform = `rotate(${deg.toFixed(1)}deg)`
     }
-    // 每次截图都平移跟随玩家：首次（换图后第一帧）聚焦缩放，之后保持用户当前缩放。
-    // animate:false——无平移动画，截图一到立即到位
+    // 每次截图都平移跟随玩家；「自动缩放」开启时每次都缩放到聚焦级别，
+    // 关闭时保持用户当前缩放。animate:false——无平移动画，截图一到立即到位
+    const targetZoom = Math.max(imap.minZoom ?? 1, Math.min(imap.maxZoom ?? 6, 4))
     if (!panOnceRef.current) {
       panOnceRef.current = true
-      const targetZoom = Math.max(
-        imap.minZoom ?? 1,
-        Math.min(imap.maxZoom ?? 6, 4),
-      )
+      map.setView(ll, targetZoom, { animate: false })
+    } else if (autoZoomRef.current) {
       map.setView(ll, targetZoom, { animate: false })
     } else {
       map.setView(ll, map.getZoom(), { animate: false })
@@ -959,12 +1031,15 @@ export function MapPage() {
       questLayerRef.current = null
     }
     const lg = L.layerGroup()
+    const untracked = untrackedRef.current
     for (const [tid, t] of Object.entries(qzDoc.tasks)) {
       if (!inProgressIds.has(tid)) continue // 只显示正在进行的任务
+      if (untracked.has(tid)) continue // 用户取消跟踪的任务不绘制
       for (const o of t.objectives ?? []) {
         if (!(o.maps ?? []).includes(imap.key)) continue // 目标与本图无关
         for (const z of o.zones ?? []) {
           if (z.nn !== imap.key) continue
+          const qName = escapeHtml(t.nameZh ?? t.name ?? '任务')
           // 任务区域：半透明黄色区块，提升目标可见度
           if (z.outline && z.outline.length >= 3) {
             const pts = z.outline.map((p) => pos({ x: p.x, z: p.z }))
@@ -978,16 +1053,17 @@ export function MapPage() {
               className: 'quest-zone',
             }).addTo(lg)
           }
+          // 图标 + 任务名（文字比地点/撤离点标签小一号）
+          const icon = L.divIcon({
+            className: 'quest-obj-marker',
+            html:
+              `<img src="${ICON_BASE}quest_objective.png" alt="" />` +
+              `<span class="quest-obj-name">${qName}</span>`,
+            iconSize: [30, 30],
+            iconAnchor: [15, 15],
+          })
           lg.addLayer(
-            L.marker(pos(z.position), {
-              icon: L.icon({
-                iconUrl: `${ICON_BASE}quest_objective.png`,
-                iconSize: [30, 30],
-                iconAnchor: [15, 15],
-                className: 'quest-obj-marker',
-              }),
-              zIndexOffset: 600,
-            }).bindPopup(
+            L.marker(pos(z.position), { icon, zIndexOffset: 600 }).bindPopup(
               popupHtml(`◎ ${t.nameZh ?? t.name ?? '任务'}`, [
                 ...(o.descZh ? [o.descZh] : []),
                 ...(o.optional ? ['可选目标'] : []),
@@ -1003,7 +1079,7 @@ export function MapPage() {
     }
     lg.addTo(map)
     questLayerRef.current = lg
-  }, [qzDoc, inProgressIds, imap, chips.quests])
+  }, [qzDoc, inProgressIds, imap, chips.quests, untrackedQuests])
 
   /* ---------- 渲染 ---------- */
 
@@ -1029,8 +1105,29 @@ export function MapPage() {
     { lyr: null, i: -1 },
     ...floors.map((lyr, i) => ({ lyr, i })),
   ].sort((a, b) => floorHeight(b.lyr) - floorHeight(a.lyr))
-  // 地图任务浮窗数据：进行中任务（与监控页卡片一致）
-  const inProgressQuests = playerQuests.filter((q) => q.status === 'in_progress')
+  // 地图任务浮窗数据：本图的进行中任务（无 zone 数据时不过滤，避免误隐藏）
+  const mapInProgressQuests = playerQuests.filter((q) => {
+    if (q.status !== 'in_progress') return false
+    if (!qzDoc || !imap) return true
+    const t = qzDoc.tasks[q.questId]
+    if (!t) return false
+    return (t.objectives ?? []).some(
+      (o) =>
+        (o.maps ?? []).includes(imap.key) ||
+        (o.zones ?? []).some((z) => z.nn === imap.key),
+    )
+  })
+
+  // 地图时间（左右局）：同步失败时为空，面板内显示「暂不可用」
+  const clockText = tarkovClock
+    ? {
+        left: tarkovClockText(tarkovClock.serverMs + (nowTick - tarkovClock.localMs), 0),
+        right: tarkovClockText(tarkovClock.serverMs + (nowTick - tarkovClock.localMs), 12),
+      }
+    : null
+
+  // 本图 Boss 刷新率（按刷新率降序，数据来自 map-bosses.json）
+  const mapBosses = (imap && bossDoc?.maps?.[imap.key]) ?? []
 
   return (
     <div className="h-full flex flex-col bg-ink-900">
@@ -1055,6 +1152,31 @@ export function MapPage() {
           ))}
         </div>
         <div className="flex-1" />
+        {/* 自动缩放：截图定位后是否每次都缩放聚焦（关闭则只平移、保持当前缩放） */}
+        <button
+          onClick={() => setAutoZoomMap(!autoZoomMap)}
+          title={
+            autoZoomMap
+              ? '自动缩放已开启：每次截图定位都会缩放到聚焦级别'
+              : '自动缩放已关闭：截图定位只平移，保持你当前的缩放级别'
+          }
+          className={`shrink-0 flex items-center gap-1.5 px-2 py-[3px] rounded text-[13px] border ${
+            autoZoomMap
+              ? 'border-amber text-[#d4a174] bg-amber/10'
+              : 'border-line text-muted hover:text-[#e6edf3]'
+          }`}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <circle cx="11" cy="11" r="6.4" stroke="currentColor" strokeWidth="1.8" />
+            <path
+              d="M20 20l-4.4-4.4M11 8.4v5.2M8.4 11h5.2"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+          </svg>
+          自动缩放
+        </button>
       </div>
 
       {/* 地图区 */}
@@ -1066,7 +1188,7 @@ export function MapPage() {
             <button
               onClick={() => setFloorOpen((o) => !o)}
               title="切换地图层级"
-              className="min-w-[86px] flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/95 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+              className="min-w-[86px] flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path
@@ -1093,7 +1215,7 @@ export function MapPage() {
             </button>
 
             {floorOpen && (
-              <div className="min-w-[110px] py-1 rounded-md border border-line bg-ink-800/95 shadow-xl backdrop-blur-sm">
+              <div className="min-w-[110px] py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
                 {floorItems.map(({ lyr, i }) => (
                   <button
                     key={lyr?.name ?? 'main'}
@@ -1123,7 +1245,7 @@ export function MapPage() {
           onWheel={(e) => e.stopPropagation()}
         >
           {mapMenuOpen && (
-            <div className="w-[120px] max-h-[45vh] overflow-y-auto py-1 rounded-md border border-line bg-ink-800/95 shadow-xl backdrop-blur-sm">
+            <div className="w-[120px] max-h-[45vh] overflow-y-auto py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
               {skeleton.groups
                 .filter((g) => g.maps.some((m) => m.projection === 'interactive'))
                 .map((g) => (
@@ -1149,7 +1271,7 @@ export function MapPage() {
           <button
             onClick={() => setMapMenuOpen((o) => !o)}
             title="选择地图"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/95 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
@@ -1182,7 +1304,7 @@ export function MapPage() {
           <button
             onClick={() => setTasksOpen((o) => !o)}
             title="进行中任务"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/95 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path
@@ -1199,7 +1321,7 @@ export function MapPage() {
                 strokeLinejoin="round"
               />
             </svg>
-            任务{inProgressQuests.length > 0 ? ` · ${inProgressQuests.length}` : ''}
+            任务{mapInProgressQuests.length > 0 ? ` · ${mapInProgressQuests.length}` : ''}
             <span
               className="text-[11px] opacity-70 transition-transform"
               style={{ transform: tasksOpen ? 'rotate(180deg)' : 'none' }}
@@ -1208,23 +1330,114 @@ export function MapPage() {
             </span>
           </button>
           {tasksOpen && (
-            <div className="w-[360px] max-w-[calc(100vw-24px)] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/95 shadow-xl backdrop-blur-sm p-2.5 space-y-2">
+            <div className="w-[380px] max-w-[calc(100vw-24px)] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm p-2.5 space-y-2">
               <div className="text-[13px] text-muted px-0.5">
-                进行中任务 · {inProgressQuests.length}
+                本图进行中任务 · {mapInProgressQuests.length}
+                <span className="ml-1 opacity-70">
+                  （◉ 跟踪/○ 不跟踪，不跟踪的任务不在地图绘制）
+                </span>
               </div>
-              {inProgressQuests.length === 0 ? (
+              {mapInProgressQuests.length === 0 ? (
                 <div className="text-[13px] text-muted px-0.5 py-3 text-center">
-                  暂无进行中任务
+                  本地图暂无进行中任务
                 </div>
               ) : (
-                inProgressQuests.map((q) => <QuestCard key={q.questId} quest={q} />)
+                mapInProgressQuests.map((q) => {
+                  const tracked = !untrackedQuests.includes(q.questId)
+                  return (
+                    <div key={q.questId} className="flex items-start gap-1.5">
+                      <button
+                        onClick={() => toggleQuestTracked(q.questId)}
+                        title={tracked ? '取消跟踪：不在地图绘制该任务目标' : '跟踪：在地图绘制该任务目标'}
+                        className={`mt-3 shrink-0 w-5 h-5 grid place-items-center rounded border text-[12px] ${
+                          tracked
+                            ? 'border-amber text-[#d4a174] bg-amber/10'
+                            : 'border-line text-muted hover:text-[#e6edf3]'
+                        }`}
+                      >
+                        {tracked ? '◉' : '○'}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <QuestCard quest={q} />
+                      </div>
+                    </div>
+                  )
+                })
               )}
             </div>
           )}
         </div>
 
+        {/* 地图信息：右下角浮动按钮 —— Boss 刷新率 + 地图时间 */}
+        <div
+          ref={infoRef}
+          className="absolute right-3 bottom-3 z-[600] flex flex-col items-end gap-1.5"
+          onMouseDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
+        >
+          {infoOpen && (
+            <div className="w-[280px] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm p-2.5 space-y-2.5">
+              <div>
+                <div className="text-[13px] text-muted mb-1">地图时间</div>
+                {clockText ? (
+                  <div className="text-[14px] text-[#c9d1d9] tabular-nums leading-relaxed">
+                    <div>左局 {clockText.left}</div>
+                    <div>右局 {clockText.right}</div>
+                  </div>
+                ) : (
+                  <div className="text-[13px] text-muted/70">
+                    暂不可用（无可用时间源，预留）
+                  </div>
+                )}
+              </div>
+              <div className="border-t border-line pt-2">
+                <div className="text-[13px] text-muted mb-1">Boss 刷新率</div>
+                {mapBosses.length === 0 ? (
+                  <div className="text-[13px] text-muted/70">本图无固定 Boss</div>
+                ) : (
+                  <div className="space-y-1">
+                    {mapBosses.map((b) => (
+                      <div
+                        key={b.id}
+                        className="flex items-center justify-between gap-2 text-[14px]"
+                      >
+                        <span className="text-[#c9d1d9] truncate">{b.nameZh}</span>
+                        <span className="shrink-0 tabular-nums text-amber">
+                          {Math.round(b.chance * 100)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <button
+            onClick={() => setInfoOpen((o) => !o)}
+            title="地图信息：Boss 刷新率与地图时间"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="8.4" stroke="currentColor" strokeWidth="1.6" />
+              <path
+                d="M12 10.6v6M12 7.8v.6"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+              />
+            </svg>
+            地图信息
+            <span
+              className="text-[11px] opacity-70 transition-transform"
+              style={{ transform: infoOpen ? 'rotate(180deg)' : 'none' }}
+            >
+              ▼
+            </span>
+          </button>
+        </div>
+
         {/* 坐标状态条：底部居中（左下/右下已让给浮窗按钮） */}
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[500] px-2 py-1 rounded bg-black/60 text-[12.5px] text-[#8b949e] pointer-events-none">
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[500] px-2 py-1 rounded bg-black/50 text-[12.5px] text-[#8b949e] pointer-events-none">
           {cursorCoord ? `X ${cursorCoord.x.toFixed(1)} · Z ${cursorCoord.z.toFixed(1)}` : ''}
           {shotPos && (
             <>

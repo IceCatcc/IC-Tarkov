@@ -15,10 +15,14 @@ import type {
 } from './types'
 
 export async function initTauri(): Promise<UnlistenFn> {
-  const { applyEvent, setWatcher } = useStore.getState()
+  const { applyEvent, setWatcher, pushToast } = useStore.getState()
 
+  // 任务接取 / 完成 → 全局通知
   const offQuest = await listen<QuestEventPayload>('quest-event', (e) => {
-    applyEvent(e.payload)
+    const p = e.payload
+    applyEvent(p)
+    if (p.type === 'accept') pushToast(`接取任务：${p.name} · ${p.traderName}`, 'accept')
+    else if (p.type === 'complete') pushToast(`完成任务：${p.name}`, 'done')
   })
   const offState = await listen<WatcherStatePayload>('watcher-state', (e) => {
     setWatcher(e.payload)
@@ -26,17 +30,26 @@ export async function initTauri(): Promise<UnlistenFn> {
 
   // 全局监听当前地图变化：任何页面（含非地图页）收到 map-changed 都写入 store，
   // 保证在别的页面进入某张地图时全局当前地图被更新，切回地图页即默认切换到对应地图。
-  const { setCurrentMapId } = useStore.getState()
+  const { setCurrentMapId, setMapNames } = useStore.getState()
   const offMap = await listen<{ locationId: string; timestamp?: string }>(
     'map-changed',
     (e) => {
       setCurrentMapId(e.payload.locationId)
+      // 进入地图 → 全局通知（名称取启动时缓存的地图名表）
+      const name = useStore.getState().mapNames[e.payload.locationId]
+      pushToast(`进入地图：${name ?? e.payload.locationId}`, 'map')
     },
   )
   // 启动时拉取后端已记录的当前地图（历史值），避免等到下一次地图变化事件
   getCurrentMap()
     .then((id) => {
       if (id) setCurrentMapId(id)
+    })
+    .catch(() => {})
+  // 缓存地图 id -> 中文名，供通知与列表显示使用
+  getMaps()
+    .then((list) => {
+      if (list?.length) setMapNames(Object.fromEntries(list.map((m) => [m.id, m.name])))
     })
     .catch(() => {})
 
@@ -63,6 +76,8 @@ export async function initTauri(): Promise<UnlistenFn> {
     'hideLegacyGraph',
     'disabledTradersGraph',
     'questMode',
+    'autoZoomMap',
+    'untrackedQuests',
   ] as const
   const snapState = (s: ReturnType<typeof useStore.getState>) =>
     JSON.stringify(Object.fromEntries(prefFields.map((k) => [k, s[k]])))
@@ -186,6 +201,32 @@ export async function getCurrentMap(): Promise<string | null> {
 
 export async function openDataDir(): Promise<void> {
   await invoke('open_data_dir')
+}
+
+/**
+ * 从 tarkov.dev API 同步服务器时间（用于推算塔科夫游戏内左右局时间）。
+ * 取不到（离线 / 接口不可用时）返回 null，前端据此隐藏时间显示。
+ * @returns 服务器当前时间的毫秒时间戳
+ */
+export async function fetchTarkovTime(): Promise<number | null> {
+  try {
+    const res = await fetch('https://api.tarkov.dev/graphql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: '{ ServerStatus { currentTime } }' }),
+    })
+    if (!res.ok) return null
+    const json = (await res.json()) as {
+      data?: { ServerStatus?: { currentTime?: string }[] | { currentTime?: string } }
+    }
+    const st = json.data?.ServerStatus
+    const cur = Array.isArray(st) ? st[0]?.currentTime : st?.currentTime
+    if (!cur) return null
+    const ms = Date.parse(cur)
+    return Number.isFinite(ms) ? ms : null
+  } catch {
+    return null
+  }
 }
 
 export async function getSessionMode(): Promise<string | null> {

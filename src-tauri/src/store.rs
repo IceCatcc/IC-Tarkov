@@ -31,6 +31,9 @@ pub struct PlayerQuest {
     pub status: String, // "in_progress" | "completed"
     pub wiki: String,
     pub min_level: Option<u32>,
+    /// 任务涉及的地图 id（normalizedName，来自任务索引）
+    #[serde(default)]
+    pub maps: Vec<String>,
 }
 
 pub struct QuestStore {

@@ -15,6 +15,7 @@ import { ProfilePage } from './pages/ProfilePage'
 import { MapPage } from './pages/MapPage'
 import SettingsModal from './components/SettingsModal'
 import { WikiDrawer } from './components/WikiDrawer'
+import { Toasts } from './components/Toasts'
 
 export default function App() {
   const page = useStore((s) => s.page)
@@ -108,6 +109,7 @@ export default function App() {
       </main>
       {showSettings && <SettingsModal />}
       <WikiDrawer />
+      <Toasts />
     </div>
   )
 }

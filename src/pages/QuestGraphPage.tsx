@@ -20,6 +20,9 @@ const NODE_W = 204
 const NODE_H = 78
 const BAND_GAP = 26
 
+/** 默认视图缩放（初始打开与「重置视图」按钮共用）：偏大以便看清节点文字 */
+const DEFAULT_SCALE = 0.8
+
 // 网格布局常量（布局与绘制共用）
 const SUB_G = 10 // 小列间距
 const ZONE_PAD_IN = 20 // 大列内边距
@@ -242,7 +245,7 @@ export function QuestGraphPage() {
   // 注意：hook 必须位于所有 early return 之前，否则触发 "Rendered more hooks" 崩溃
   const topPad = useTopPad()
 
-  const [view, setView] = useState({ x: 30, y: 30, scale: 0.65 })
+  const [view, setView] = useState({ x: 30, y: 30, scale: DEFAULT_SCALE })
   const dragRef = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(
     null,
   )
@@ -1493,7 +1496,7 @@ export function QuestGraphPage() {
 
         {/* 重置视图：右对齐 */}
         <button
-          onClick={() => setView({ x: 30, y: 30, scale: 0.65 })}
+          onClick={() => setView({ x: 30, y: 30, scale: DEFAULT_SCALE })}
           className={`${chip} ${chipOff} ml-auto shrink-0`}
         >
           重置视图
