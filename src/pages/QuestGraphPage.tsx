@@ -1784,15 +1784,22 @@ export function QuestGraphPage() {
                       {detail.traderReqs.map((r) => {
                         const cur = profile?.loyalty?.[r.traderId] ?? 1
                         const met = cur >= r.value
+                        // 需求文案：level = 忠诚等级（权威的 traderRequirements）；
+                        // reputation = 好感；variable = 仅知存在额外商人条件，
+                        // 源数据只给全局变量阈值，不等于等级/好感数字，故不展示具体数值
+                        const text =
+                          r.reqType === 'level'
+                            ? `忠诚等级 LL${r.value}（当前 LL${cur}）`
+                            : r.reqType === 'reputation'
+                              ? `好感 ≥${r.value}`
+                              : '额外条件（需达成商人要求）'
                         return (
                           <div
                             key={`${r.traderId}-${r.reqType}`}
                             className="flex items-center justify-between gap-2"
                           >
                             <span className="text-[#c9d1d9] truncate">
-                              {traderDisplayName(r.traderId, r.traderName)}{' '}
-                              {r.reqType === 'level' ? `忠诚等级 LL${r.value}` : `好感 ≥${r.value}`}
-                              {r.reqType === 'level' && `（当前 LL${cur}）`}
+                              {traderDisplayName(r.traderId, r.traderName)} {text}
                             </span>
                             {r.reqType === 'level' &&
                               (met ? (
