@@ -6,6 +6,7 @@ import './map.css'
 import { getPlayerPosition } from '../tauri'
 import type { PlayerPositionPayload } from '../types'
 import { useStore, useTopPad } from '../store'
+import { QuestCard } from '../components/QuestCard'
 
 /* ================= 类型（对应 public/data/*.json 生成脚本输出） ================= */
 
@@ -51,6 +52,8 @@ interface SkeletonLayer {
   svgLayer?: string
   tilePath?: string
   show?: boolean
+  /** 楼层高度范围（y 轴区间），用于标记自动分层；bounds 区域约束暂不参与判定 */
+  extents?: { height?: [number, number] }[]
 }
 
 interface SkeletonMap {
@@ -108,6 +111,44 @@ interface QuestZonesDoc {
 /* ================= 常量 ================= */
 
 const ICON_BASE = 'maps/interactive/'
+
+// 常见英文楼层名的中文显示
+const FLOOR_NAME_ZH: Record<string, string> = {
+  'Ground Floor': '主层',
+  'Ground Level': '主层',
+  '1st Floor': '1楼',
+  'First Floor': '1楼',
+  '2nd Floor': '2楼',
+  'Second Floor': '2楼',
+  'Second Level': '2楼',
+  '3rd Floor': '3楼',
+  'Third Floor': '3楼',
+  '4th Floor': '4楼',
+  'Fourth Floor': '4楼',
+  '5th Floor': '5楼',
+  'Fifth Floor': '5楼',
+  '6th Floor': '6楼',
+  Basement: '地下',
+  Tunnels: '隧道',
+  Underground: '地下',
+  'Underground Level': '地下',
+  'Underground Parking': '地下停车场',
+  Infirmary: '医务室',
+  Helipad: '停机坪',
+  Technical: '技术层',
+  Entresol: '夹层',
+  Roof: '屋顶',
+}
+const floorNameZh = (name: string | undefined): string =>
+  name ? FLOOR_NAME_ZH[name] ?? name : '主层'
+/** 楼层实际高度（extents height 上限的最大值），用于排序；主层（null）按 0 处理 */
+const floorHeight = (lyr: SkeletonLayer | null): number => {
+  if (!lyr) return 0
+  const hs = (lyr.extents ?? [])
+    .map((e) => e.height?.[1])
+    .filter((v): v is number => typeof v === 'number')
+  return hs.length ? Math.max(...hs) : Number.NEGATIVE_INFINITY
+}
 // lootContainer normalizedName -> 已下载图标文件
 const CONTAINER_ICONS = new Set([
   'buried-barrel-cache',
@@ -333,7 +374,13 @@ export function MapPage() {
   })
   const [floorSel, setFloorSel] = useState(-1) // -1 = 默认主层
   const [floorOpen, setFloorOpen] = useState(false) // 层级切换浮层
+  const [mapMenuOpen, setMapMenuOpen] = useState(false) // 左下角地图选单浮层
+  const [tasksOpen, setTasksOpen] = useState(false) // 右下角任务浮窗
   const [cursorCoord, setCursorCoord] = useState<{ x: number; z: number } | null>(null)
+  // 三个浮窗（地图选单/任务/层级）的容器 ref：点击外部自动关闭
+  const mapMenuRef = useRef<HTMLDivElement | null>(null)
+  const tasksRef = useRef<HTMLDivElement | null>(null)
+  const floorRef = useRef<HTMLDivElement | null>(null)
   // 截图解析出的玩家位置 + 全局当前地图（location id），由 tauri 全局监听写入，任何页面生效
   const [shotPos, setShotPos] = useState<PlayerPositionPayload | null>(null)
   const currentMapId = useStore((s) => s.currentMapId)
@@ -410,10 +457,27 @@ export function MapPage() {
   const playerMarkerRef = useRef<L.Marker | null>(null)
   const questLayerRef = useRef<L.LayerGroup | null>(null)
   const panOnceRef = useRef(false)
+  // 楼层选择 ref：标记灰显的 syncAll 闭包在构建 effect 内创建，通过 ref 读最新值
+  const floorSelRef = useRef(floorSel)
+  floorSelRef.current = floorSel
   // keepAlive 适配：页面隐藏（display:none）时容器尺寸为 0，需记录可见状态并在切回时重算
   const pageRef = useRef(page)
   pageRef.current = page
   const rawBoundsRef = useRef<L.LatLngBounds | null>(null)
+
+  // 点击浮窗外部自动关闭（容器内 onMouseDown 已 stopPropagation，不会误触发）
+  useEffect(() => {
+    if (!mapMenuOpen && !tasksOpen && !floorOpen) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node
+      if (mapMenuOpen && mapMenuRef.current && !mapMenuRef.current.contains(t))
+        setMapMenuOpen(false)
+      if (tasksOpen && tasksRef.current && !tasksRef.current.contains(t)) setTasksOpen(false)
+      if (floorOpen && floorRef.current && !floorRef.current.contains(t)) setFloorOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [mapMenuOpen, tasksOpen, floorOpen])
 
   // 进行中任务（仅用于地图上标注目标位置）
   const playerQuests = useStore((s) => s.playerQuests)
@@ -608,6 +672,32 @@ export function MapPage() {
     const makeIcon = (file: string) =>
       L.icon({ iconUrl: `${ICON_BASE}${file}.png`, iconSize: [20, 20], iconAnchor: [10, 10] })
 
+    // —— 标记自动分层：按高度（top/bottom/position.y）与楼层 extents 的 height 区间求交 ——
+    const floorMarkers: { m: L.Marker; idx: number }[] = []
+    const markerFloorIdx = (en: MarkerEntry): number => {
+      const layers = imap.layers ?? []
+      if (!layers.length) return -1
+      const lo2 = en.bottom ?? en.top ?? en.position?.y
+      const hi2 = en.top ?? en.bottom ?? en.position?.y
+      if (lo2 == null || hi2 == null) return -1 // 无高度信息：归属主层（不参与灰显）
+      for (let i = 0; i < layers.length; i++) {
+        for (const ext of layers[i].extents ?? []) {
+          const [lo, hi] = ext.height ?? []
+          if (lo == null || hi == null) continue
+          if (hi2 >= lo && lo2 <= hi) return i // 高度区间相交
+        }
+      }
+      return -1
+    }
+    /** 按当前楼层灰显不属于该层的标记（无高度信息的标记保持正常） */
+    const syncFloors = () => {
+      const cur = floorSelRef.current
+      const hasFloors = (imap.layers?.length ?? 0) > 0
+      for (const { m, idx } of floorMarkers) {
+        m.setOpacity(!hasFloors || idx === -1 || idx === cur ? 1 : 0.2)
+      }
+    }
+
     const groupOf = (
       list: MarkerEntry[],
       iconFile: (en: MarkerEntry) => string,
@@ -617,14 +707,14 @@ export function MapPage() {
       for (const en of list) {
         if (!en.position) continue
         const title = en.nameZh || en.name || (fallback && fallback(en)) || '未命名'
-        lg.addLayer(
-          L.marker(pos(en.position), { icon: makeIcon(iconFile(en)) }).bindPopup(
-            popupHtml(title, [
-              ...(en.faction ? [`阵营 ${en.faction}`] : []),
-              ...coordMeta(en),
-            ]),
-          ),
+        const mk = L.marker(pos(en.position), { icon: makeIcon(iconFile(en)) }).bindPopup(
+          popupHtml(title, [
+            ...(en.faction ? [`阵营 ${en.faction}`] : []),
+            ...coordMeta(en),
+          ]),
         )
+        floorMarkers.push({ m: mk, idx: markerFloorIdx(en) })
+        lg.addLayer(mk)
       }
       return lg
     }
@@ -724,6 +814,7 @@ export function MapPage() {
       const reqs = en.requirements ?? []
       const m = L.marker(pos(en.position), { icon: makeIcon(extractIcon(en)) })
       m.setZIndexOffset(EXTRACT_ZINDEX[fac] ?? 500)
+      floorMarkers.push({ m, idx: markerFloorIdx(en) })
       m.bindPopup(
         popupHtml(en.nameZh ?? en.name ?? '未命名', [
           ...(en.faction ? [`阵营 ${en.faction}`] : []),
@@ -771,7 +862,8 @@ export function MapPage() {
     syncExtracts()
 
     syncAll()
-    syncFnsRef.current = [syncAll, syncExtracts]
+    syncFloors()
+    syncFnsRef.current = [syncAll, syncExtracts, syncFloors]
 
     return () => {
       cancelled = true
@@ -786,6 +878,8 @@ export function MapPage() {
 
   useEffect(() => {
     floorApplyRef.current?.(floorSel)
+    // 楼层切换后重新同步标记灰显
+    syncFnsRef.current.forEach((fn) => fn())
   }, [floorSel, imap])
 
   useEffect(() => {
@@ -929,30 +1023,22 @@ export function MapPage() {
   }
 
   const floors = imap?.layers ?? []
+  // 楼层按实际高度排序（越高越上面），主层（高度 0）参与排序：
+  // 如工厂 → 3楼、2楼、主层、隧道。i=-1 表示主层。
+  const floorItems: { lyr: SkeletonLayer | null; i: number }[] = [
+    { lyr: null, i: -1 },
+    ...floors.map((lyr, i) => ({ lyr, i })),
+  ].sort((a, b) => floorHeight(b.lyr) - floorHeight(a.lyr))
+  // 地图任务浮窗数据：进行中任务（与监控页卡片一致）
+  const inProgressQuests = playerQuests.filter((q) => q.status === 'in_progress')
 
   return (
     <div className="h-full flex flex-col bg-ink-900">
-      {/* 工具条 */}
+      {/* 工具条（地图选单已移至左下角浮动按钮） */}
       <div
         className="shrink-0 flex items-center flex-wrap gap-x-3 gap-y-1 px-3 py-2 border-b border-line bg-ink-800"
         style={{ paddingLeft: 12 + topPad }}
       >
-        <select
-          value={selected}
-          onChange={(e) => {
-            setSelected(e.target.value)
-            setFloorSel(-1)
-          }}
-          className="bg-ink-700 border border-line rounded px-2 py-[4px] text-[14px] text-[#e6edf3] outline-none cursor-pointer"
-        >
-          {skeleton.groups
-            .filter((g) => g.maps.some((m) => m.projection === 'interactive'))
-            .map((g) => (
-              <option key={g.normalizedName} value={g.normalizedName}>
-                {g.nameZh || g.normalizedName}
-              </option>
-            ))}
-        </select>
         <div className="flex items-center gap-1 flex-wrap">
           {CHIP_DEFS.map((c) => (
             <button
@@ -976,7 +1062,7 @@ export function MapPage() {
         <div id={mapDivId} className="absolute inset-0" />
         {/* 层级切换：地图右上浮动按钮（tarkov.dev 风格，自定义非原生组件） */}
         {floors.length > 0 && (
-          <div className="absolute right-3 top-3 z-[600] flex flex-col items-end gap-1.5">
+          <div ref={floorRef} className="absolute right-3 top-3 z-[600] flex flex-col items-end gap-1.5">
             <button
               onClick={() => setFloorOpen((o) => !o)}
               title="切换地图层级"
@@ -997,7 +1083,7 @@ export function MapPage() {
                   opacity="0.55"
                 />
               </svg>
-              {floorSel === -1 ? '主层' : floors[floorSel]?.name || '主层'}
+              {floorSel === -1 ? '主层' : floorNameZh(floors[floorSel]?.name)}
               <span
                 className="text-[11px] opacity-70 transition-transform"
                 style={{ transform: floorOpen ? 'rotate(180deg)' : 'none' }}
@@ -1008,33 +1094,20 @@ export function MapPage() {
 
             {floorOpen && (
               <div className="min-w-[110px] py-1 rounded-md border border-line bg-ink-800/95 shadow-xl backdrop-blur-sm">
-                <button
-                  onClick={() => {
-                    setFloorSel(-1)
-                    setFloorOpen(false)
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 text-[14px] ${
-                    floorSel === -1
-                      ? 'text-[#d4a174] bg-amber/10'
-                      : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
-                  }`}
-                >
-                  主层
-                </button>
-                {floors.map((f, i) => (
+                {floorItems.map(({ lyr, i }) => (
                   <button
-                    key={f.name}
+                    key={lyr?.name ?? 'main'}
                     onClick={() => {
                       setFloorSel(i)
                       setFloorOpen(false)
                     }}
-                    className={`w-full text-left px-2.5 py-1.5 text-[14px] ${
+                    className={`w-full text-left px-2.5 py-1.5 text-[14px] whitespace-nowrap ${
                       floorSel === i
                         ? 'text-[#d4a174] bg-amber/10'
                         : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
                     }`}
                   >
-                    {f.name}
+                    {lyr ? floorNameZh(lyr.name) : '主层'}
                   </button>
                 ))}
               </div>
@@ -1042,7 +1115,116 @@ export function MapPage() {
           </div>
         )}
 
-        <div className="absolute left-2 bottom-2 z-[500] px-2 py-1 rounded bg-black/60 text-[12.5px] text-[#8b949e] pointer-events-none">
+        {/* 地图选单：左下角浮动按钮（原顶栏 select 移此） */}
+        <div
+          ref={mapMenuRef}
+          className="absolute left-3 bottom-3 z-[600] flex flex-col items-start gap-1.5"
+          onMouseDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
+        >
+          {mapMenuOpen && (
+            <div className="w-[120px] max-h-[45vh] overflow-y-auto py-1 rounded-md border border-line bg-ink-800/95 shadow-xl backdrop-blur-sm">
+              {skeleton.groups
+                .filter((g) => g.maps.some((m) => m.projection === 'interactive'))
+                .map((g) => (
+                  <button
+                    key={g.normalizedName}
+                    onClick={() => {
+                      setSelected(g.normalizedName)
+                      setFloorSel(-1)
+                      setMapMenuOpen(false)
+                    }}
+                    title={g.nameZh || g.normalizedName}
+                    className={`w-full text-left px-1.5 py-1.5 text-[13px] truncate ${
+                      selected === g.normalizedName
+                        ? 'text-[#d4a174] bg-amber/10'
+                        : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
+                    }`}
+                  >
+                    {g.nameZh || g.normalizedName}
+                  </button>
+                ))}
+            </div>
+          )}
+          <button
+            onClick={() => setMapMenuOpen((o) => !o)}
+            title="选择地图"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/95 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              />
+              <path d="M9 4v14M15 6v14" stroke="currentColor" strokeWidth="1.2" opacity="0.6" />
+            </svg>
+            {(skeleton.groups ?? []).find((g) => g.normalizedName === selected)?.nameZh ||
+              selected ||
+              '选择地图'}
+            <span
+              className="text-[11px] opacity-70 transition-transform"
+              style={{ transform: mapMenuOpen ? 'rotate(180deg)' : 'none' }}
+            >
+              ▼
+            </span>
+          </button>
+        </div>
+
+        {/* 任务浮窗：左上角浮动按钮，显示监控页的进行中任务卡片 */}
+        <div
+          ref={tasksRef}
+          className="absolute left-3 top-3 z-[600] flex flex-col items-start gap-1.5"
+          onMouseDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => setTasksOpen((o) => !o)}
+            title="进行中任务"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/95 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M5 4h14v16H5V4Z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              />
+              <path
+                d="m8.5 12 2.2 2.2L15.5 9.5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            任务{inProgressQuests.length > 0 ? ` · ${inProgressQuests.length}` : ''}
+            <span
+              className="text-[11px] opacity-70 transition-transform"
+              style={{ transform: tasksOpen ? 'rotate(180deg)' : 'none' }}
+            >
+              ▼
+            </span>
+          </button>
+          {tasksOpen && (
+            <div className="w-[360px] max-w-[calc(100vw-24px)] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/95 shadow-xl backdrop-blur-sm p-2.5 space-y-2">
+              <div className="text-[13px] text-muted px-0.5">
+                进行中任务 · {inProgressQuests.length}
+              </div>
+              {inProgressQuests.length === 0 ? (
+                <div className="text-[13px] text-muted px-0.5 py-3 text-center">
+                  暂无进行中任务
+                </div>
+              ) : (
+                inProgressQuests.map((q) => <QuestCard key={q.questId} quest={q} />)
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 坐标状态条：底部居中（左下/右下已让给浮窗按钮） */}
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[500] px-2 py-1 rounded bg-black/60 text-[12.5px] text-[#8b949e] pointer-events-none">
           {cursorCoord ? `X ${cursorCoord.x.toFixed(1)} · Z ${cursorCoord.z.toFixed(1)}` : ''}
           {shotPos && (
             <>

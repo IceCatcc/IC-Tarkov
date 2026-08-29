@@ -624,6 +624,32 @@ fn open_url(url: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn open_data_dir(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| e.to_string())?;
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 pub(crate) fn emit_state(app: &tauri::AppHandle) {
     let st = app.state::<AppState>();
     let w = st.watcher.lock().unwrap();
@@ -722,6 +748,7 @@ pub fn run() {
             get_session_mode,
             get_maps,
             open_url,
+            open_data_dir,
             reset_and_rescan,
             export_data,
             import_data,

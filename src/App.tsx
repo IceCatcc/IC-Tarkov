@@ -9,7 +9,6 @@ import {
 } from './tauri'
 import { useStore } from './store'
 import { TopBar } from './components/TopBar'
-import { Sidebar } from './components/Sidebar'
 import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -93,23 +92,20 @@ export default function App() {
   return (
     <div className="h-full flex flex-col">
       <TopBar />
-      <div className="flex-1 flex min-h-0">
-        <Sidebar />
-        <main className="flex-1 min-w-0 overflow-hidden">
-          {page === 'monitor' && <MonitorPage />}
-          {questAlive && (
-            <div className="h-full" style={{ display: page === 'graph' ? 'block' : 'none' }}>
-              <QuestGraphPage />
-            </div>
-          )}
-          {page === 'profile' && <ProfilePage />}
-          {mapAlive && (
-            <div className="h-full" style={{ display: page === 'map' ? 'block' : 'none' }}>
-              <MapPage />
-            </div>
-          )}
-        </main>
-      </div>
+      <main className="flex-1 min-w-0 overflow-hidden">
+        {page === 'monitor' && <MonitorPage />}
+        {questAlive && (
+          <div className="h-full" style={{ display: page === 'graph' ? 'block' : 'none' }}>
+            <QuestGraphPage />
+          </div>
+        )}
+        {page === 'profile' && <ProfilePage />}
+        {mapAlive && (
+          <div className="h-full" style={{ display: page === 'map' ? 'block' : 'none' }}>
+            <MapPage />
+          </div>
+        )}
+      </main>
       {showSettings && <SettingsModal />}
       <WikiDrawer />
     </div>

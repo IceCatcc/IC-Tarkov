@@ -8,6 +8,7 @@ import {
   resetAndRescan,
   exportData,
   importData,
+  openDataDir,
 } from '../tauri'
 
 async function pickDirectory(current: string): Promise<string | null> {
@@ -123,6 +124,15 @@ export default function SettingsModal() {
     }
   }
 
+  const onOpenDataDir = async () => {
+    setError(null)
+    try {
+      await openDataDir()
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
   const onExport = async () => {
     setBusy('export')
     setError(null)
@@ -234,10 +244,18 @@ export default function SettingsModal() {
               >
                 {busy === 'import' ? '导入中…' : '导入数据'}
               </button>
+              <button
+                onClick={onOpenDataDir}
+                className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700"
+                title="打开持久化文件所在目录（settings.json / quest_state.json）"
+              >
+                打开数据目录
+              </button>
             </div>
             <div className="text-[13px] text-muted mt-2">
               重新读取日志：清空任务持久化文件，从零全量扫描日志重新生成。
               导出 / 导入：备份或恢复任务进度与扫描记录（quest_state.json）。
+              打开数据目录：查看持久化配置与任务进度文件。
             </div>
             {feedback && (
               <div className="text-[14px] text-ok mt-2">{feedback}</div>

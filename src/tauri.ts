@@ -55,9 +55,7 @@ export async function initTauri(): Promise<UnlistenFn> {
   // 启动恢复在 App.tsx 拿到 getSettings 结果后调用 applyUiPrefs；
   // 这里订阅偏好字段变化，防抖写回后端。
   let prefTimer: number | undefined
-  let prevSnapshot = JSON.stringify({ sidebarOpen: useStore.getState().sidebarOpen })
   const prefFields = [
-    'sidebarOpen',
     'repMetGraph',
     'lvlMetGraph',
     'mapUnlockedGraph',
@@ -66,8 +64,11 @@ export async function initTauri(): Promise<UnlistenFn> {
     'disabledTradersGraph',
     'questMode',
   ] as const
+  const snapState = (s: ReturnType<typeof useStore.getState>) =>
+    JSON.stringify(Object.fromEntries(prefFields.map((k) => [k, s[k]])))
+  let prevSnapshot = snapState(useStore.getState())
   const offPrefs = useStore.subscribe((state) => {
-    const snap = JSON.stringify(Object.fromEntries(prefFields.map((k) => [k, state[k]])))
+    const snap = snapState(state)
     if (snap === prevSnapshot) return
     prevSnapshot = snap
     if (prefTimer) window.clearTimeout(prefTimer)
@@ -181,6 +182,10 @@ export async function getPlayerPosition(): Promise<PlayerPositionPayload | null>
 
 export async function getCurrentMap(): Promise<string | null> {
   return await invoke<string | null>('get_current_map')
+}
+
+export async function openDataDir(): Promise<void> {
+  await invoke('open_data_dir')
 }
 
 export async function getSessionMode(): Promise<string | null> {

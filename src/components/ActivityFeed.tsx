@@ -24,7 +24,7 @@ export function ActivityFeed() {
   }
 
   return (
-    <aside className="w-[220px] shrink-0 bg-ink-800 border-l border-line p-3 overflow-y-auto">
+    <aside className="w-[300px] shrink-0 bg-ink-800 border-l border-line p-3 overflow-y-auto">
       <div className="text-[15px] font-medium mb-3">实时活动</div>
       <div className="space-y-2">
         {activities.length === 0 && !historicalLoaded && (

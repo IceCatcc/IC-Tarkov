@@ -109,17 +109,8 @@ impl QuestStore {
         });
     }
 
-    pub fn apply_progress(&mut self, endpoint: &str, ts: &str) {
-        self.push_activity(ActivityRow {
-            id: format!("prg|{ts}|{endpoint}"),
-            ts: ts.to_string(),
-            kind: "progress".into(),
-            quest_id: String::new(),
-            quest_name: String::new(),
-            text: endpoint.into(),
-            wiki: None,
-        });
-    }
+    /// 任务列表同步等进度事件：仅向前端发事件，不再计入活动流（实时/历史均不显示）
+    pub fn apply_progress(&mut self, _endpoint: &str, _ts: &str) {}
 
     /// 更新当前所在地图；返回是否发生变化（变化时前端需要 emit map-changed）
     pub fn apply_location(&mut self, location_id: &str) -> bool {

@@ -21,8 +21,8 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
       onClick={() => quest.wiki && openWiki(quest.wiki)}
       title={quest.wiki ? '点击查看资料' : undefined}
     >
-      {/* 同一行：头像 + 标题 + 商人徽章 + 弱化的时间 + 状态药丸 */}
-      <div className="flex items-center gap-2">
+      {/* 第一行：头像 + 任务名（优先显示，加粗加大）+ 状态药丸 */}
+      <div className="flex items-center gap-2 min-w-0">
         {avatar && (
           <img
             src={avatar}
@@ -30,28 +30,24 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
             className="w-6 h-6 rounded-full object-cover border border-line shrink-0"
           />
         )}
-        <span className="text-[16px] font-medium truncate">{quest.name}</span>
-        {quest.traderName && (
-          <span className="px-2 py-0.5 rounded text-[13px] border border-amber text-amber bg-amber-soft shrink-0">
-            {quest.traderName.toUpperCase()}
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-2 shrink-0">
-          <div className="text-[12px] text-muted/60 leading-tight whitespace-nowrap">
-            {quest.acceptedAt && <span>接取 {quest.acceptedAt}</span>}
-            {quest.completedAt && <span> · 完成 {quest.completedAt}</span>}
-            {quest.minLevel != null && <span> · 最低 Lv{quest.minLevel}</span>}
-          </div>
-          <span
-            className={`px-2 py-0.5 rounded-full text-[13px] border shrink-0 ${
-              completed
-                ? 'bg-[#1b1f24] border-done text-muted'
-                : 'bg-blue-soft border-blue text-blue'
-            }`}
-          >
-            {completed ? '已完成' : '进行中'}
-          </span>
-        </div>
+        <span className="text-[18px] font-semibold truncate min-w-0">{quest.name}</span>
+        <span
+          className={`ml-auto px-2 py-0.5 rounded-full text-[13px] border shrink-0 ${
+            completed
+              ? 'bg-[#1b1f24] border-done text-muted'
+              : 'bg-blue-soft border-blue text-blue'
+          }`}
+        >
+          {completed ? '已完成' : '进行中'}
+        </span>
+      </div>
+
+      {/* 第二行：商人名（弱化）+ 时间（最不重要） */}
+      <div className="mt-1 flex items-center gap-2 text-[12px] text-muted flex-wrap">
+        {quest.traderName && <span>{quest.traderName}</span>}
+        {quest.acceptedAt && <span className="text-muted/60">接取 {quest.acceptedAt}</span>}
+        {quest.completedAt && <span className="text-muted/60">完成 {quest.completedAt}</span>}
+        {quest.minLevel != null && <span className="text-muted/60">最低 Lv{quest.minLevel}</span>}
       </div>
 
       {/* 任务目标 */}

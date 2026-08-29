@@ -2,9 +2,15 @@ import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVersion } from '@tauri-apps/api/app'
 import { useStore } from '../store'
-import { startWatching, stopWatching } from '../tauri'
 
 const win = getCurrentWindow()
+
+const NAV_ITEMS: { key: 'monitor' | 'graph' | 'profile' | 'map'; label: string }[] = [
+  { key: 'monitor', label: '监控' },
+  { key: 'graph', label: '任务图谱' },
+  { key: 'profile', label: '角色' },
+  { key: 'map', label: '地图' },
+]
 
 function WinButton({
   onClick,
@@ -31,6 +37,8 @@ function WinButton({
 }
 
 export function TopBar() {
+  const page = useStore((s) => s.page)
+  const setPage = useStore((s) => s.setPage)
   const watcher = useStore((s) => s.watcher)
   const openSettings = useStore((s) => s.openSettings)
   const live = watcher.watching && !watcher.error
@@ -43,18 +51,10 @@ export function TopBar() {
       .catch(() => {})
   }, [])
 
-  const onToggle = () => {
-    if (watcher.watching) stopWatching()
-    else startWatching()
-  }
-
   return (
-    <header className="h-10 flex items-center gap-2 pl-3 bg-ink-800 border-b border-line shrink-0 select-none">
-      {/* 左侧：应用状态（此区域可拖动窗口） */}
-      <div
-        data-tauri-drag-region
-        className="flex-1 self-stretch flex items-center gap-3 min-w-0"
-      >
+    <header className="h-10 flex items-stretch bg-ink-800 border-b border-line shrink-0 select-none">
+      {/* 左侧：品牌 + 导航（空白处可拖动窗口） */}
+      <div className="flex items-center gap-2 pl-3">
         <img src="/icons/icon.png" alt="" className="w-5 h-5 rounded shrink-0" />
         <span className="font-medium text-[15px]">EFT Spy</span>
         {version && (
@@ -62,34 +62,49 @@ export function TopBar() {
             v{version}
           </span>
         )}
+        {/* 导航：跟在版本号后面 */}
+        <nav className="flex items-center gap-1 ml-2">
+          {NAV_ITEMS.map((it) => (
+            <button
+              key={it.key}
+              onClick={() => setPage(it.key)}
+              className={`px-2.5 h-7 rounded text-[13px] leading-none transition-colors ${
+                page === it.key
+                  ? 'bg-amber/15 text-[#d4a174] border border-amber/60'
+                  : 'text-muted hover:text-[#e6edf3] border border-transparent'
+              }`}
+            >
+              {it.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+
+      {/* 中间：可拖动窗口的空白区域 */}
+      <div data-tauri-drag-region className="flex-1 self-stretch min-w-0" />
+
+      {/* 右侧：监控状态显示 + 设置 + 窗口控制 */}
+      <div className="flex items-center gap-2 pr-2">
         <span className={`w-2 h-2 rounded-full ${live ? 'bg-ok' : 'bg-red-500'}`} />
         <span className={`text-[12px] ${live ? 'text-ok' : 'text-red-400'}`}>
-          {live ? '监控中' : '已暂停'}
+          {live ? '监控中' : '未监控'}
         </span>
-        <span className="text-[11px] text-muted truncate max-w-[300px]">
+        <span className="text-[11px] text-muted truncate max-w-[220px]">
           {watcher.logDir || '未设置日志目录'}
         </span>
         {watcher.error && (
-          <span className="text-[11px] text-red-400 truncate max-w-[240px]">
+          <span className="text-[11px] text-red-400 truncate max-w-[180px]" title={watcher.error}>
             {watcher.error}
           </span>
         )}
+        <button
+          onClick={openSettings}
+          title="设置"
+          className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
+        >
+          ⚙ 设置
+        </button>
       </div>
-
-      {/* 右侧：控制按钮（不可拖动区域） */}
-      <button
-        onClick={onToggle}
-        className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
-      >
-        {watcher.watching ? '暂停' : '开始'}
-      </button>
-      <button
-        onClick={openSettings}
-        title="设置"
-        className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
-      >
-        ⚙ 设置
-      </button>
 
       {/* 窗口控制按钮 */}
       <div className="w-px self-stretch bg-line mx-1" />

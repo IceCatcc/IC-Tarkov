@@ -29,10 +29,6 @@ interface AppState {
   showSettings: boolean
   openSettings: () => void
   closeSettings: () => void
-  /** 左侧导航栏是否展开（持久化） */
-  sidebarOpen: boolean
-  setSidebarOpen: (v: boolean) => void
-  toggleSidebar: () => void
 
   watcher: WatcherState
   setWatcher: (w: WatcherState) => void
@@ -109,13 +105,9 @@ interface AppState {
   applyUiPrefs: (p: Record<string, unknown>) => void
 }
 
-/** 侧边栏折叠时，页面顶部需为左上角浮动按钮预留的左侧空位（px） */
-export const SIDEBAR_COLLAPSED_W = 38
-
-/** 页面顶部行的左侧预留：侧边栏折叠时让出浮动按钮位置，展开时为 0 */
+/** 页面顶部行的左侧预留：导航已移至顶部栏，恒为 0（保留函数签名减少页面改动） */
 export function useTopPad(): number {
-  const open = useStore((s) => s.sidebarOpen)
-  return open ? 0 : SIDEBAR_COLLAPSED_W
+  return 0
 }
 
 function uid(): string {
@@ -125,7 +117,6 @@ function uid(): string {
 // —— 任务图谱筛选偏好持久化（localStorage）——
 // 好感达标 / 等级达标 / 地图解锁 / 专注模式 / 商人隐藏 的勾选状态跨启动保留。
 const GRAPH_PREFS_KEY = 'eft-spy.graphPrefs.v1'
-const SIDEBAR_KEY = 'eft-spy.sidebarOpen.v1'
 // 默认不勾选（即隐藏）的特殊商人：竞技场裁判、BTR 司机、灯塔守护者
 const DEFAULT_DISABLED_TRADERS = [
   '6617beeaa9cfa777ca915b7c', // 竞技场裁判
@@ -193,7 +184,6 @@ function persistGraphPrefs() {
 export function collectUiPrefs(): Record<string, unknown> {
   const s = useStore.getState()
   return {
-    sidebarOpen: s.sidebarOpen,
     graphPrefs: {
       repMet: s.repMetGraph,
       lvlMet: s.lvlMetGraph,
@@ -207,7 +197,6 @@ export function collectUiPrefs(): Record<string, unknown> {
 }
 
 interface UiPrefsShape {
-  sidebarOpen?: boolean
   graphPrefs?: Partial<GraphPrefs>
 }
 
@@ -227,30 +216,6 @@ export const useStore = create<AppState>((set) => ({
   showSettings: false,
   openSettings: () => set({ showSettings: true }),
   closeSettings: () => set({ showSettings: false }),
-  sidebarOpen: (() => {
-    try {
-      return localStorage.getItem(SIDEBAR_KEY) !== '0'
-    } catch {
-      return true
-    }
-  })(),
-  setSidebarOpen: (v) => {
-    set({ sidebarOpen: v })
-    try {
-      localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0')
-    } catch {
-      /* 忽略写入失败 */
-    }
-  },
-  toggleSidebar: () => {
-    const v = !useStore.getState().sidebarOpen
-    set({ sidebarOpen: v })
-    try {
-      localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0')
-    } catch {
-      /* 忽略写入失败 */
-    }
-  },
 
   watcher: {
     watching: false,
@@ -289,15 +254,8 @@ export const useStore = create<AppState>((set) => ({
       const activities = state.activities.slice()
 
       if (e.type === 'progress') {
-        const text = `同步任务列表 · ${e.endpoint}`
-        if (isDup('progress', text, e.timestamp)) return {}
-        activities.unshift({
-          id: uid(),
-          ts: e.timestamp,
-          kind: 'progress',
-          text,
-        })
-        return { activities: activities.slice(0, 300) }
+        // 同步任务列表等进度噪声：不进实时活动流，也不进历史
+        return {}
       }
 
       if (e.type === 'accept') {
@@ -339,7 +297,7 @@ export const useStore = create<AppState>((set) => ({
           kind: 'accept',
           text: acceptText,
         })
-        return { playerQuests, activities: activities.slice(0, 300) }
+        return { playerQuests, activities: activities.slice(0, 20) }
       }
 
       // complete
@@ -378,12 +336,19 @@ export const useStore = create<AppState>((set) => ({
         kind: 'complete',
         text: completeText,
       })
-      return { playerQuests, activities: activities.slice(0, 300) }
+      return { playerQuests, activities: activities.slice(0, 20) }
     }),
 
   seedPlayerQuests: (list) => set({ playerQuests: list }),
-  seedActivity: (list) => set({ activities: list }),
-  setHistoricalActivity: (list) => set({ historicalActivities: list, historicalLoaded: true }),
+  // 启动装载实时区：只保留玩家任务活动（排除进度噪声），最多 20 条
+  seedActivity: (list) =>
+    set({ activities: list.filter((a) => a.kind !== 'progress').slice(0, 20) }),
+  // 历史活动：同样排除进度噪声
+  setHistoricalActivity: (list) =>
+    set({
+      historicalActivities: list.filter((a) => a.kind !== 'progress'),
+      historicalLoaded: true,
+    }),
   clearHistorical: () => set({ historicalActivities: [], historicalLoaded: false }),
 
   graph: null,
@@ -461,7 +426,6 @@ export const useStore = create<AppState>((set) => ({
   applyUiPrefs: (p) => {
     const u = p as UiPrefsShape
     const patch: Partial<AppState> = {}
-    if (typeof u.sidebarOpen === 'boolean') patch.sidebarOpen = u.sidebarOpen
     const g = u.graphPrefs
     if (g && typeof g === 'object') {
       if (typeof g.repMet === 'boolean') patch.repMetGraph = g.repMet
