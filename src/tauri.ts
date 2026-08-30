@@ -14,7 +14,12 @@ import type {
   MapInfo,
 } from './types'
 
+/** 幂等守卫：只允许注册一次全局监听。StrictMode 双挂载 / HMR 重入时避免重复注册导致通知重复弹出 */
+let tauriInited = false
+
 export async function initTauri(): Promise<UnlistenFn> {
+  if (tauriInited) return () => {}
+  tauriInited = true
   const { applyEvent, setWatcher, pushToast } = useStore.getState()
 
   // 任务接取 / 完成 → 全局通知

@@ -19,7 +19,13 @@ export function WikiDrawer() {
   if (!wikiUrl) return null
 
   return (
-    <div className="fixed inset-0 z-[2000]" onKeyDown={(e) => e.key === 'Escape' && closeWiki()}>
+    <div
+      className="fixed inset-0 z-[2000]"
+      onKeyDown={(e) => e.key === 'Escape' && closeWiki()}
+      // 阻止 mousedown 冒泡：wiki 打开期间，点外部（遮罩/抽屉内）只关闭 wiki，
+      // 不触发地图页等底层的「点外部关闭浮窗」逻辑
+      onMouseDown={(e) => e.stopPropagation()}
+    >
       {/* 遮罩 */}
       <div
         className="absolute inset-0 bg-black/50 transition-opacity duration-200"

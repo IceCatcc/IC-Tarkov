@@ -32,7 +32,7 @@ interface AppState {
   openSettings: () => void
   closeSettings: () => void
 
-  /** 全局通知队列（右下角堆叠，最新在下） */
+  /** 全局通知队列（顶部居中堆叠，最新在下） */
   toasts: Toast[]
   pushToast: (text: string, kind?: ToastKind) => void
   dismissToast: (id: string) => void
@@ -243,11 +243,17 @@ export const useStore = create<AppState>((set) => ({
   closeSettings: () => set({ showSettings: false }),
 
   toasts: [],
-  // 最多堆叠 5 条，超出丢弃最旧的
+  // 最多堆叠 5 条，超出丢弃最旧的；同文本 5s 内只弹一次（监听重复/事件重复 emit 兜底）
   pushToast: (text, kind = 'info') =>
-    set((state) => ({
-      toasts: [...state.toasts, { id: uid(), text, kind: kind as ToastKind }].slice(-5),
-    })),
+    set((state) => {
+      const now = Date.now()
+      if (state.toasts.some((t) => t.text === text && now - t.bornAt < 5000)) return {}
+      return {
+        toasts: [...state.toasts, { id: uid(), text, kind: kind as ToastKind, bornAt: now }].slice(
+          -5,
+        ),
+      }
+    }),
   dismissToast: (id) => set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
   mapNames: {},
   setMapNames: (m) => set({ mapNames: m }),

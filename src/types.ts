@@ -1,12 +1,14 @@
 // 与 src-tauri 后端事件/命令对应的前端类型定义（Rust 侧 rename_all = "camelCase"）
 export type QuestStatus = 'in_progress' | 'completed'
 
-/** 全局通知（右下角堆叠，3s 自动关闭） */
+/** 全局通知（顶部居中堆叠，3s 自动关闭） */
 export type ToastKind = 'info' | 'accept' | 'done' | 'map'
 export interface Toast {
   id: string
   text: string
   kind: ToastKind
+  /** 弹出时刻（ms），用于同文本短窗口去重 */
+  bornAt: number
 }
 
 export interface Reward {
