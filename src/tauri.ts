@@ -14,36 +14,47 @@ import type {
   MapInfo,
 } from './types'
 
-/** 幂等守卫：只允许注册一次全局监听。StrictMode 双挂载 / HMR 重入时避免重复注册导致通知重复弹出 */
-let tauriInited = false
-
+/**
+ * 注册全局监听，返回统一清理函数。
+ * 每次调用独立注册一组监听；清理可能在某条 listen 尚未完成时发生（异步 IPC），
+ * disposed 标记保证「清理后才完成的注册」立即自行注销，既避免重复监听泄漏，
+ * 也保证重挂载后能重新注册（不能用模块级布尔守卫——那会让清理后的重挂载
+ * 永远不再注册监听，表现为实时活动 / 任务状态 / 地图 / 模式事件全部失效）。
+ */
 export async function initTauri(): Promise<UnlistenFn> {
-  if (tauriInited) return () => {}
-  tauriInited = true
+  const offs: UnlistenFn[] = []
+  let disposed = false
+  const track = (off: UnlistenFn) => {
+    if (disposed) off()
+    else offs.push(off)
+  }
   const { applyEvent, setWatcher, pushToast } = useStore.getState()
 
   // 任务接取 / 完成 → 全局通知
-  const offQuest = await listen<QuestEventPayload>('quest-event', (e) => {
-    const p = e.payload
-    applyEvent(p)
-    if (p.type === 'accept') pushToast(`接取任务：${p.name} · ${p.traderName}`, 'accept')
-    else if (p.type === 'complete') pushToast(`完成任务：${p.name}`, 'done')
-  })
-  const offState = await listen<WatcherStatePayload>('watcher-state', (e) => {
-    setWatcher(e.payload)
-  })
+  track(
+    await listen<QuestEventPayload>('quest-event', (e) => {
+      const p = e.payload
+      applyEvent(p)
+      if (p.type === 'accept') pushToast(`接取任务：${p.name} · ${p.traderName}`, 'accept')
+      else if (p.type === 'complete') pushToast(`完成任务：${p.name}`, 'done')
+    }),
+  )
+  track(
+    await listen<WatcherStatePayload>('watcher-state', (e) => {
+      setWatcher(e.payload)
+    }),
+  )
 
   // 全局监听当前地图变化：任何页面（含非地图页）收到 map-changed 都写入 store，
   // 保证在别的页面进入某张地图时全局当前地图被更新，切回地图页即默认切换到对应地图。
   const { setCurrentMapId, setMapNames } = useStore.getState()
-  const offMap = await listen<{ locationId: string; timestamp?: string }>(
-    'map-changed',
-    (e) => {
+  track(
+    await listen<{ locationId: string; timestamp?: string }>('map-changed', (e) => {
       setCurrentMapId(e.payload.locationId)
       // 进入地图 → 全局通知（名称取启动时缓存的地图名表）
       const name = useStore.getState().mapNames[e.payload.locationId]
       pushToast(`进入地图：${name ?? e.payload.locationId}`, 'map')
-    },
+    }),
   )
   // 启动时拉取后端已记录的当前地图（历史值），避免等到下一次地图变化事件
   getCurrentMap()
@@ -60,9 +71,11 @@ export async function initTauri(): Promise<UnlistenFn> {
 
   // 全局监听会话模式（pve/pvp）：游戏以某模式启动时，任务图谱自动跟随切换
   const { applyDetectedMode } = useStore.getState()
-  const offMode = await listen<{ mode: string; timestamp?: string }>('session-mode', (e) => {
-    applyDetectedMode(e.payload.mode)
-  })
+  track(
+    await listen<{ mode: string; timestamp?: string }>('session-mode', (e) => {
+      applyDetectedMode(e.payload.mode)
+    }),
+  )
   getSessionMode()
     .then((m) => {
       if (m) applyDetectedMode(m)
@@ -83,6 +96,7 @@ export async function initTauri(): Promise<UnlistenFn> {
     'questMode',
     'autoZoomMap',
     'untrackedQuests',
+    'uiScale',
   ] as const
   const snapState = (s: ReturnType<typeof useStore.getState>) =>
     JSON.stringify(Object.fromEntries(prefFields.map((k) => [k, s[k]])))
@@ -104,12 +118,12 @@ export async function initTauri(): Promise<UnlistenFn> {
     }, 400)
   })
 
+  track(offPrefs)
+
   return () => {
-    offQuest()
-    offState()
-    offMap()
-    offMode()
-    offPrefs?.()
+    disposed = true
+    offs.forEach((off) => off())
+    offs.length = 0
   }
 }
 

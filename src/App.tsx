@@ -34,6 +34,11 @@ export default function App() {
   const setSettings = useStore((s) => s.setSettings)
   const seedPlayerQuests = useStore((s) => s.seedPlayerQuests)
   const setUnlockedQuests = useStore((s) => s.setUnlockedQuests)
+  // 界面缩放（类显示器缩放）：作用于根节点 CSS zoom，固定浮层一并等比缩放
+  const uiScale = useStore((s) => s.uiScale)
+  useEffect(() => {
+    document.documentElement.style.zoom = String(uiScale)
+  }, [uiScale])
 
   useEffect(() => {
     let off: (() => void) | undefined

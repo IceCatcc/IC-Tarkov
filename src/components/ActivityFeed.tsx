@@ -1,5 +1,6 @@
 import { useStore } from '../store'
 import { getActivity } from '../tauri'
+import type { ActivityItem } from '../types'
 
 export function ActivityFeed() {
   const activities = useStore((s) => s.activities)
@@ -10,9 +11,11 @@ export function ActivityFeed() {
   const color = (k: string) =>
     k === 'complete' ? 'text-ok' : k === 'accept' ? 'text-amber' : 'text-muted'
 
-  // 历史活动若与实时活动重复（同一 类型+文本+时间戳）则不重复显示
-  const liveKeys = new Set(activities.map((a) => `${a.kind}|${a.text}|${a.ts}`))
-  const histShown = historical.filter((a) => !liveKeys.has(`${a.kind}|${a.text}|${a.ts}`))
+  // 历史活动若与实时活动重复（同类型 + 同任务）则不重复显示；
+  // 后端文本（接取任务：X）与实时文本（接取 X · 商人）措辞不同，必须按任务 id 匹配
+  const keyOf = (a: ActivityItem) => `${a.kind}|${a.questId ?? a.text}`
+  const liveKeys = new Set(activities.map(keyOf))
+  const histShown = historical.filter((a) => !liveKeys.has(keyOf(a)))
 
   const onLoadMore = async () => {
     try {

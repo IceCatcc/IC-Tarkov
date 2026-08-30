@@ -73,6 +73,8 @@ export default function SettingsModal() {
   const closeSettings = useStore((s) => s.closeSettings)
   const seedPlayerQuests = useStore((s) => s.seedPlayerQuests)
   const clearHistorical = useStore((s) => s.clearHistorical)
+  const uiScale = useStore((s) => s.uiScale)
+  const setUiScale = useStore((s) => s.setUiScale)
 
   const [logDir, setLogDir] = useState(settings.logDir)
   const [shotDir, setShotDir] = useState(settings.screenshotDir)
@@ -212,6 +214,27 @@ export default function SettingsModal() {
               </span>
             </span>
           </label>
+
+          {/* 界面缩放（类显示器缩放） */}
+          <div>
+            <label className="text-[14px] text-muted block mb-1">界面缩放</label>
+            <div className="flex items-center gap-2">
+              {[1, 1.25, 1.5, 2].map((v) => (
+                <button
+                  key={v}
+                  onClick={() => setUiScale(v)}
+                  className={`px-3 py-1.5 rounded border text-[14px] ${
+                    uiScale === v
+                      ? 'border-amber bg-ink-700 text-[#e6edf3]'
+                      : 'border-line text-muted hover:text-[#e6edf3] hover:bg-ink-700'
+                  }`}
+                >
+                  {v}x
+                </button>
+              ))}
+              <span className="text-[13px] text-muted ml-1">等效显示器缩放，立即生效并持久化</span>
+            </div>
+          </div>
 
           {error && (
             <div className="text-[14px] text-red-400 border border-red-400/40 rounded px-3 py-2">

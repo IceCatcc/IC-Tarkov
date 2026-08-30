@@ -611,8 +611,11 @@ fn get_maps() -> Vec<data::MapInfo> {
 fn open_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &url])
+        // 用 explorer 打开 URL（走默认浏览器）。
+        // 不用 `cmd /c start`：应用派生 cmd.exe 是杀软行为启发式的常见扣分项，
+        // 未签名 + debug 符号 + 派生 cmd 容易被 360 等判定为可疑。
+        std::process::Command::new("explorer")
+            .arg(&url)
             .spawn()
             .map_err(|e| e.to_string())?;
     }

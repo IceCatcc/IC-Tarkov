@@ -119,6 +119,9 @@ interface AppState {
   /** 任务图谱模式过滤：'pvp' | 'pve'（localStorage 持久化；日志检测到会话模式时自动跟随） */
   questMode: 'pvp' | 'pve'
   setQuestMode: (v: 'pvp' | 'pve') => void
+  /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2，作用于根节点 CSS zoom */
+  uiScale: number
+  setUiScale: (v: number) => void
   /** 日志检测到会话模式时调用：自动切换 questMode 并持久化 */
   applyDetectedMode: (m: string) => void
   /** 用后端 settings.json 的 uiPrefs 批量恢复 UI 偏好（仅启动时调用，不回写） */
@@ -217,12 +220,15 @@ export function collectUiPrefs(): Record<string, unknown> {
       autoZoom: s.autoZoomMap,
       untrackedQuests: s.untrackedQuests,
     },
+    uiScale: s.uiScale,
   }
 }
 
 interface UiPrefsShape {
   graphPrefs?: Partial<GraphPrefs>
   mapPrefs?: { autoZoom?: boolean; untrackedQuests?: string[] }
+  /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2 */
+  uiScale?: number
 }
 
 const prefs0 = loadGraphPrefs()
@@ -351,6 +357,7 @@ export const useStore = create<AppState>((set) => ({
           ts: e.timestamp,
           kind: 'accept',
           text: acceptText,
+          questId: e.questId,
         })
         return { playerQuests, activities: activities.slice(0, 20) }
       }
@@ -391,6 +398,7 @@ export const useStore = create<AppState>((set) => ({
         ts: e.timestamp,
         kind: 'complete',
         text: completeText,
+        questId: e.questId,
       })
       return { playerQuests, activities: activities.slice(0, 20) }
     }),
@@ -472,6 +480,8 @@ export const useStore = create<AppState>((set) => ({
     set({ questMode: v })
     persistGraphPrefs()
   },
+  uiScale: 1,
+  setUiScale: (v) => set({ uiScale: v }),
   applyDetectedMode: (m) => {
     const mode = m === 'pve' ? 'pve' : 'pvp'
     const cur = useStore.getState().questMode
@@ -505,6 +515,9 @@ export const useStore = create<AppState>((set) => ({
       if (typeof mp.autoZoom === 'boolean') patch.autoZoomMap = mp.autoZoom
       if (Array.isArray(mp.untrackedQuests))
         patch.untrackedQuests = mp.untrackedQuests.filter((x) => typeof x === 'string')
+    }
+    if (typeof u.uiScale === 'number') {
+      patch.uiScale = [1, 1.25, 1.5, 2].includes(u.uiScale) ? u.uiScale : 1
     }
     if (Object.keys(patch).length > 0) set(patch)
   },

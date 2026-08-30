@@ -25,3 +25,10 @@ chrono = "0.4"
 # rustc 1.98 在 Windows 上增量编译会触发 ICE（metadata encoder panic），禁用之
 [profile.dev]
 incremental = false
+
+# 发布构建：裁剪符号 + LTO，缩小体积并降低杀软（360 等）对未签名 exe 的启发式误报面。
+# 分发给他人时务必用 release 构建，不要用 target/debug 下的 exe。
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

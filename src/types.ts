@@ -37,6 +37,8 @@ export interface ActivityItem {
   ts: string
   kind: ActivityKind
   text: string
+  /** 关联任务 id：实时事件由 quest-event 带入；后端活动行自带，用于实时/历史按任务去重 */
+  questId?: string
 }
 
 export interface WatcherState {
