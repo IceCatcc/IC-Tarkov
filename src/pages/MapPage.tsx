@@ -912,9 +912,10 @@ export function MapPage() {
       playerMarkerRef.current = L.marker(ll, {
         icon: L.divIcon({
           className: 'map-player',
-          html: `<img src="${ICON_BASE}player-position.png" style="transform:rotate(${deg.toFixed(
+          // 纯三角箭头（无尾部条），尖朝上（0deg=北），整体随 rotation 旋转
+          html: `<svg viewBox="0 0 24 24" width="44" height="44" style="transform:rotate(${deg.toFixed(
             1,
-          )}deg)">`,
+          )}deg)"><path d="M12 2 L21 22 L12 16 L3 22 Z" fill="#27e0c0" stroke="#0a1f1b" stroke-width="1.2" stroke-linejoin="round"/></svg>`,
           iconSize: [44, 44],
           iconAnchor: [22, 22],
         }),
@@ -923,10 +924,10 @@ export function MapPage() {
       }).addTo(map)
     } else {
       playerMarkerRef.current.setLatLng(ll)
-      const img = playerMarkerRef.current
+      const svg = playerMarkerRef.current
         .getElement()
-        ?.querySelector<HTMLImageElement>('img')
-      if (img) img.style.transform = `rotate(${deg.toFixed(1)}deg)`
+        ?.querySelector<SVGSVGElement>('svg')
+      if (svg) svg.style.transform = `rotate(${deg.toFixed(1)}deg)`
     }
     // 每次截图都平移跟随玩家；「自动缩放」开启时每次都缩放到聚焦级别，
     // 关闭时保持用户当前缩放。animate:false——无平移动画，截图一到立即到位
