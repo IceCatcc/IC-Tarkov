@@ -1,18 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { useStore, useTopPad } from '../store'
 import { saveSettings, getMaps } from '../tauri'
 import { traderImage } from '../traderImages'
 import { TRADERS } from '../traderMeta'
 import type { PlayerProfile, MapInfo } from '../types'
 
-// 地图解锁里需要合并显示/统一切换的变体组（同组任一勾选即视为已解锁）
-// 工厂：白天工厂 + 夜间工厂；实验室：实验室 + 实验室 (Dark)；中心区：中心区 + 中心区 21+
-const MAP_GROUPS: { label: string; ids: string[] }[] = [
-  { label: '工厂', ids: ['55f2d3fd4bdc2d5f408b4567', '59fc81d786f774390775787e'] },
-  { label: '实验室', ids: ['5b0fc42d86f7744a585f9105', '6a294a5b5eb5f9a1700417b7'] },
-  { label: '中心区', ids: ['653e6760052c01c1c805532f', '65b8d6f5cdde2479cb2a3125'] },
+// 地图解锁展示顺序（中心区 / 工厂 / 实验室 含变体合并为一组统一切换；
+// Ground Zero 教程不列出）；同组任一勾选即视为已解锁
+type MapRow = { type: 'group' | 'single'; label: string; ids: string[] }
+const MAP_DISPLAY_ORDER: MapRow[] = [
+  { type: 'group', label: '中心区', ids: ['653e6760052c01c1c805532f', '65b8d6f5cdde2479cb2a3125'] },
+  { type: 'single', label: '立交桥', ids: ['5714dbc024597771384a510d'] },
+  { type: 'single', label: '海关', ids: ['56f40101d2720b2a4d8b45d6'] },
+  { type: 'group', label: '工厂', ids: ['55f2d3fd4bdc2d5f408b4567', '59fc81d786f774390775787e'] },
+  { type: 'single', label: '森林', ids: ['5704e3c2d2720bac5b8b4567'] },
+  { type: 'single', label: '海岸线', ids: ['5704e554d2720bac5b8b456e'] },
+  { type: 'single', label: '街区', ids: ['5714dc692459777137212e12'] },
+  { type: 'single', label: '储备站', ids: ['5704e5fad2720bc05b8b4567'] },
+  { type: 'single', label: '灯塔', ids: ['5704e4dad2720bb55b8b4567'] },
+  { type: 'group', label: '实验室', ids: ['5b0fc42d86f7744a585f9105', '6a294a5b5eb5f9a1700417b7'] },
+  { type: 'single', label: '迷宫', ids: ['6733700029c367a3d40b02af'] },
+  { type: 'single', label: '破冰船', ids: ['69af492a4819ea4ba10a69c5'] },
+  { type: 'single', label: '码头', ids: ['65cc8f81a9aac3e77d0cfd3e'] },
 ]
-const GROUPED_IDS = new Set(MAP_GROUPS.flatMap((g) => g.ids))
 
 export function ProfilePage() {
   const settings = useStore((s) => s.settings)
@@ -87,27 +97,27 @@ export function ProfilePage() {
           角色管理
         </div>
 
-        <label className="text-[14px] text-muted block mb-1.5">玩家等级</label>
-        <input
-          type="number"
-          min={1}
-          max={80}
-          value={profile.level}
-          onChange={(e) => {
-            applyLevel(Math.max(1, Math.min(80, Number(e.target.value) || 1)))
-          }}
-          className="w-28 bg-ink-700 border border-line rounded px-2 py-1.5 text-[15px] text-[#e6edf3]"
-        />
+        {/* 角色 + 商人好感：卡片网格，从左向右排列、排不下自动换行（尺寸一致） */}
+        <div className="mt-6 grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))' }}>
+          {/* 角色等级卡片 */}
+          <div className="rounded-lg border border-line bg-ink-800/60 px-3 py-2.5">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[15px] text-[#e6edf3]">玩家</span>
+              <span className="px-2 py-[1px] rounded-full bg-amber/10 border border-amber/40 text-amber text-[13px] tabular-nums">
+                Lv.{profile.level}
+              </span>
+            </div>
+            <div className="text-[13px] text-muted mb-1">当前等级：</div>
+            <HorizontalNumberScroller min={1} max={80} value={profile.level} onChange={applyLevel} />
+          </div>
 
-        {/* 商人好感：卡片网格，从左向右排列、排不下自动换行 */}
-        <div className="mt-6 grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))' }}>
           {TRADERS.map((t) => {
             const av = traderImage(t.id)
             const cur = profile.loyalty[t.id] ?? 1
             return (
               <div
                 key={t.id}
-                className={`flex flex-col gap-2 rounded-lg border px-3 py-2.5 ${
+                className={`flex flex-col gap-2 rounded-lg border px-3 py-2.5 min-h-[116px] justify-between ${
                   t.special ? 'border-dashed' : ''
                 } ${cur === 0 ? 'border-red-500/40 bg-red-500/5' : 'border-line bg-ink-800/60'}`}
               >
@@ -175,50 +185,39 @@ export function ProfilePage() {
             <div className="text-[14px] text-muted">加载地图列表…</div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
-              {/* 合并后的变体组（工厂 / 实验室 / 中心区），统一切换 */}
-              {MAP_GROUPS.map((g) => {
+              {MAP_DISPLAY_ORDER.map((row) => {
                 const lockedList = profile.lockedMaps ?? []
-                // 组内任一未锁定即视为已解锁
-                const unlocked = g.ids.some((id) => !lockedList.includes(id))
-                const variants = maps
-                  .filter((m) => g.ids.includes(m.id))
-                  .map((m) => m.name)
+                const unlocked =
+                  row.type === 'group'
+                    ? row.ids.some((id) => !lockedList.includes(id))
+                    : !lockedList.includes(row.ids[0])
+                const title =
+                  row.type === 'group'
+                    ? `包含：${maps
+                        .filter((m) => row.ids.includes(m.id))
+                        .map((m) => m.name)
+                        .join('、')}`
+                    : ''
                 return (
                   <label
-                    key={g.label}
-                    title={`包含：${variants.join('、')}`}
+                    key={row.label}
+                    title={title}
                     className="flex items-center gap-2 text-[14px] text-[#e6edf3] bg-ink-800/60 border border-line rounded px-2 py-1.5 cursor-pointer select-none hover:border-amber/60"
                   >
                     <input
                       type="checkbox"
                       checked={unlocked}
-                      onChange={(e) => toggleMapGroup(g.ids, !e.target.checked)}
+                      onChange={(e) =>
+                        row.type === 'group'
+                          ? toggleMapGroup(row.ids, !e.target.checked)
+                          : toggleMapLocked(row.ids[0], !e.target.checked)
+                      }
                       className="accent-[#ef9f27]"
                     />
-                    {g.label}
+                    {row.label}
                   </label>
                 )
               })}
-              {/* 其余地图（不含已合并的变体） */}
-              {maps
-                .filter((m) => !GROUPED_IDS.has(m.id))
-                .map((m) => {
-                  const locked = (profile.lockedMaps ?? []).includes(m.id)
-                  return (
-                    <label
-                      key={m.id}
-                      className="flex items-center gap-2 text-[14px] text-[#e6edf3] bg-ink-800/60 border border-line rounded px-2 py-1.5 cursor-pointer select-none hover:border-amber/60"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={!locked}
-                        onChange={(e) => toggleMapLocked(m.id, !e.target.checked)}
-                        className="accent-[#ef9f27]"
-                      />
-                      {m.name}
-                    </label>
-                  )
-                })}
             </div>
           )}
         </div>
@@ -226,6 +225,133 @@ export function ProfilePage() {
         <div className="flex items-center gap-3 mt-6 mb-4">
           <span className="text-[14px] text-muted">改动自动保存</span>
           {flash && <span className="text-[14px] text-ok">✓ 已保存</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 横向数字滚轮选择器：数字从左到右排列，按住左右拖拽滚动，
+ * 中间高亮当前值，前后各显示 2 个数字（视窗共 5 个），松手吸附选中。
+ */
+function HorizontalNumberScroller({
+  min,
+  max,
+  value,
+  onChange,
+  itemW = 46,
+}: {
+  min: number
+  max: number
+  value: number
+  onChange: (v: number) => void
+  itemW?: number
+}) {
+  const count = max - min + 1
+  const visible = 5
+  const viewportW = visible * itemW
+  const centerX = (visible / 2) * itemW
+  const clamp = (v: number) => Math.max(min, Math.min(max, v))
+  // 让值 sel 居中时的轨道偏移（轨道索引 = sel - min）
+  const baseTranslate = (sel: number) => centerX - ((sel - min) * itemW + itemW / 2)
+  // 由偏移反推选中下标（0-based）
+  const indexFromTranslate = (t: number) =>
+    Math.round((visible / 2 - 0.5) - t / itemW)
+
+  const [display, setDisplay] = useState(value)
+  const [translate, setTranslate] = useState(() => baseTranslate(value))
+  const [dragging, setDragging] = useState(false)
+  const drag = useRef<{ startX: number; startTranslate: number; moved: boolean } | null>(null)
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+
+  // 外部值变化（且非拖拽中）时同步
+  useEffect(() => {
+    if (!dragging) {
+      setDisplay(value)
+      setTranslate(baseTranslate(value))
+    }
+  }, [value, dragging])
+
+  const onPointerDown = (e: ReactPointerEvent) => {
+    ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+    drag.current = { startX: e.clientX, startTranslate: translate, moved: false }
+    setDragging(true)
+  }
+
+  const onPointerMove = (e: ReactPointerEvent) => {
+    if (!drag.current) return
+    const dx = e.clientX - drag.current.startX
+    if (Math.abs(dx) > 3) drag.current.moved = true
+    const next = drag.current.startTranslate + dx
+    setTranslate(next)
+    setDisplay(clamp(min + indexFromTranslate(next)))
+  }
+
+  const onPointerUp = (e: ReactPointerEvent) => {
+    if (!drag.current) return
+    const moved = drag.current.moved
+    drag.current = null
+    setDragging(false)
+
+    let target = display
+    // 未拖动（视为点击）：按点击位置相对中心偏移选择附近数字
+    if (!moved) {
+      const rect = viewportRef.current?.getBoundingClientRect()
+      if (rect) {
+        const offset = e.clientX - (rect.left + rect.width / 2)
+        target = clamp(display + Math.round(offset / itemW))
+      }
+    }
+    target = clamp(target)
+    setTranslate(baseTranslate(target))
+    setDisplay(target)
+    onChange(target)
+  }
+
+  return (
+    <div className="select-none">
+      <div
+        ref={viewportRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        className={`relative overflow-hidden mx-auto ${dragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        style={{ width: viewportW, height: 56, touchAction: 'none' }}
+      >
+        {/* 居中高亮选中框（前后各 2 个数字，共 5 个可见） */}
+        <div
+          className="absolute top-1 bottom-1 left-1/2 -translate-x-1/2 rounded-lg border border-amber/60 bg-amber/10 pointer-events-none"
+          style={{ width: itemW }}
+        />
+        {/* 数字轨道 */}
+        <div
+          className="flex h-full items-center"
+          style={{
+            transform: `translateX(${translate}px)`,
+            transition: dragging ? 'none' : 'transform 0.18s ease-out',
+          }}
+        >
+          {Array.from({ length: count }, (_, i) => {
+            const n = min + i
+            const active = n === display
+            return (
+              <div
+                key={n}
+                className="flex items-center justify-center shrink-0"
+                style={{ width: itemW, height: '100%' }}
+              >
+                <span
+                  className={`text-[15px] tabular-nums transition-all ${
+                    active ? 'text-amber font-semibold scale-125' : 'text-muted'
+                  }`}
+                >
+                  {n}
+                </span>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
