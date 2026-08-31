@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
+import { getVersion } from '@tauri-apps/api/app'
 import { useStore } from '../store'
 import {
   saveSettings,
@@ -95,6 +96,13 @@ export default function SettingsModal() {
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [appVersion, setAppVersion] = useState('')
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => {})
+  }, [])
 
   /* ---------- 游戏数据（tarkov.dev 原始 API JSON 缓存） ---------- */
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null)
@@ -395,14 +403,14 @@ export default function SettingsModal() {
               >
                 取消
               </button>
+              <button
+                onClick={onSave}
+                disabled={saving}
+                className="px-4 py-1.5 rounded bg-amber text-black text-[14px] font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                {saving ? '保存中…' : '保存'}
+              </button>
             </div>
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="px-4 py-1.5 rounded bg-amber text-black text-[14px] font-medium hover:opacity-90 disabled:opacity-50"
-            >
-              {saving ? '保存中…' : '保存'}
-            </button>
           </div>
         </div>
       </div>
@@ -413,22 +421,40 @@ export default function SettingsModal() {
           onClick={() => setAboutOpen(false)}
         >
           <div
-            className="w-[440px] max-w-[calc(100vw-32px)] rounded-xl border border-line bg-ink-800 shadow-xl p-5 space-y-3"
+            className="w-[440px] max-w-[calc(100vw-32px)] rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between">
-              <div className="text-[16px] font-semibold text-[#e6edf3]">关于 IC Tarkov</div>
+            {/* 头部：图标 + 标题 + 版本 */}
+            <div className="relative px-5 pt-6 pb-5 flex flex-col items-center text-center border-b border-line bg-gradient-to-b from-ink-700/60 to-transparent">
               <button
                 onClick={() => setAboutOpen(false)}
-                className="px-2 py-1 rounded text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+                className="absolute top-3 right-3 w-7 h-7 flex items-center justify-center rounded-md text-[15px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+                aria-label="关闭"
               >
                 ✕
               </button>
+              <img
+                src="/icons/icon.png"
+                alt=""
+                className="w-14 h-14 rounded-xl shadow-lg ring-1 ring-line mb-3"
+              />
+              <div className="text-[18px] font-semibold text-[#e6edf3]">IC Tarkov</div>
+              <div className="mt-1 flex items-center gap-2">
+                {appVersion && (
+                  <span className="text-[11px] text-muted px-2 py-[1px] rounded-full bg-ink-700 border border-line">
+                    v{appVersion}
+                  </span>
+                )}
+                <span className="text-[11px] text-muted">逃离塔科夫 任务与地图助手</span>
+              </div>
             </div>
 
-            <div className="text-[14px] text-[#c9d1d9] leading-relaxed space-y-3">
-              <div>
-                <div className="text-[13px] text-muted mb-1">数据来源</div>
+            {/* 内容 */}
+            <div className="px-5 py-4 text-[14px] text-[#c9d1d9] leading-relaxed space-y-3">
+              <div className="rounded-lg bg-ink-700/50 border border-line px-3 py-2.5">
+                <div className="text-[12px] uppercase tracking-wide text-muted mb-1">
+                  数据来源
+                </div>
                 <div>
                   全部游戏数据（任务、地图、物品、商人、本地化等）均来自{' '}
                   <a
@@ -442,8 +468,11 @@ export default function SettingsModal() {
                   提供的开放接口。
                 </div>
               </div>
-              <div>
-                <div className="text-[13px] text-muted mb-1">项目参考</div>
+
+              <div className="rounded-lg bg-ink-700/50 border border-line px-3 py-2.5">
+                <div className="text-[12px] uppercase tracking-wide text-muted mb-1">
+                  项目参考
+                </div>
                 <div>
                   本项目的设计与数据解析参考了{' '}
                   <a
@@ -457,37 +486,45 @@ export default function SettingsModal() {
                   的社区成果，向其贡献者致谢。
                 </div>
               </div>
-              <div>
-                <div className="text-[13px] text-muted mb-1">开发者</div>
-                <div>
-                  icecat · 主页{' '}
-                  <a
-                    className="text-[#d4a174] hover:underline"
-                    href="https://icecat.cc"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    icecat.cc
-                  </a>
-                </div>
-              </div>
-              <div>
-                <div className="text-[13px] text-muted mb-1">开源仓库</div>
-                <div>
-                  {GITHUB_URL ? (
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-ink-700/50 border border-line px-3 py-2.5">
+                  <div className="text-[12px] uppercase tracking-wide text-muted mb-1">
+                    开发者
+                  </div>
+                  <div>
+                    icecat · 主页{' '}
                     <a
                       className="text-[#d4a174] hover:underline"
-                      href={GITHUB_URL}
+                      href="https://icecat.cc"
                       target="_blank"
                       rel="noreferrer"
                     >
-                      GitHub
+                      icecat.cc
                     </a>
-                  ) : (
-                    <span className="text-muted">即将上线</span>
-                  )}
+                  </div>
+                </div>
+                <div className="rounded-lg bg-ink-700/50 border border-line px-3 py-2.5">
+                  <div className="text-[12px] uppercase tracking-wide text-muted mb-1">
+                    开源仓库
+                  </div>
+                  <div>
+                    {GITHUB_URL ? (
+                      <a
+                        className="text-[#d4a174] hover:underline"
+                        href={GITHUB_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        GitHub
+                      </a>
+                    ) : (
+                      <span className="text-muted">即将上线</span>
+                    )}
+                  </div>
                 </div>
               </div>
+
               <div className="border-t border-line pt-3 text-[13px] text-muted">
                 本项目在开发过程中深度使用 AI 辅助编程（代码生成、重构与调试）。
               </div>
