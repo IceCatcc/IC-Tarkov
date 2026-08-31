@@ -7,9 +7,9 @@ const win = getCurrentWindow()
 
 const NAV_ITEMS: { key: 'monitor' | 'graph' | 'profile' | 'map'; label: string }[] = [
   { key: 'monitor', label: '监控' },
-  { key: 'graph', label: '任务图谱' },
-  { key: 'profile', label: '角色' },
   { key: 'map', label: '地图' },
+  { key: 'graph', label: '任务' },
+  { key: 'profile', label: '档案' },
 ]
 
 function WinButton({
