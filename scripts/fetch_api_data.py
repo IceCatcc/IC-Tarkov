@@ -48,7 +48,7 @@ def fetch(path: str) -> bytes:
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "eft-spy/1.0 (+https://github.com/)",
+            "User-Agent": "ic-tarkov/1.0 (+https://github.com/)",
             # 不接受压缩，落盘即为可直接解析的明文 JSON
             "Accept-Encoding": "identity",
         },

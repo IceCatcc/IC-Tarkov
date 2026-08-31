@@ -94,6 +94,7 @@ export default function SettingsModal() {
   const [busy, setBusy] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [aboutOpen, setAboutOpen] = useState(false)
 
   /* ---------- 游戏数据（tarkov.dev 原始 API JSON 缓存） ---------- */
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null)
@@ -380,13 +381,21 @@ export default function SettingsModal() {
             )}
           </div>
 
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex justify-between items-center gap-2 pt-1">
             <button
-              onClick={closeSettings}
-              className="px-4 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+              onClick={() => setAboutOpen(true)}
+              className="px-3 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
             >
-              取消
+              关于
             </button>
+            <div className="flex gap-2">
+              <button
+                onClick={closeSettings}
+                className="px-4 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+              >
+                取消
+              </button>
+            </div>
             <button
               onClick={onSave}
               disabled={saving}
@@ -397,6 +406,98 @@ export default function SettingsModal() {
           </div>
         </div>
       </div>
+
+      {aboutOpen && (
+        <div
+          className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60"
+          onClick={() => setAboutOpen(false)}
+        >
+          <div
+            className="w-[440px] max-w-[calc(100vw-32px)] rounded-xl border border-line bg-ink-800 shadow-xl p-5 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-[16px] font-semibold text-[#e6edf3]">关于 IC Tarkov</div>
+              <button
+                onClick={() => setAboutOpen(false)}
+                className="px-2 py-1 rounded text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-[14px] text-[#c9d1d9] leading-relaxed space-y-3">
+              <div>
+                <div className="text-[13px] text-muted mb-1">数据来源</div>
+                <div>
+                  全部游戏数据（任务、地图、物品、商人、本地化等）均来自{' '}
+                  <a
+                    className="text-[#d4a174] hover:underline"
+                    href="https://tarkov.dev"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    tarkov.dev
+                  </a>{' '}
+                  提供的开放接口。
+                </div>
+              </div>
+              <div>
+                <div className="text-[13px] text-muted mb-1">项目参考</div>
+                <div>
+                  本项目的设计与数据解析参考了{' '}
+                  <a
+                    className="text-[#d4a174] hover:underline"
+                    href="https://tarkov.dev"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    tarkov.dev
+                  </a>{' '}
+                  的社区成果，向其贡献者致谢。
+                </div>
+              </div>
+              <div>
+                <div className="text-[13px] text-muted mb-1">开发者</div>
+                <div>
+                  icecat · 主页{' '}
+                  <a
+                    className="text-[#d4a174] hover:underline"
+                    href="https://icecat.cc"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    icecat.cc
+                  </a>
+                </div>
+              </div>
+              <div>
+                <div className="text-[13px] text-muted mb-1">开源仓库</div>
+                <div>
+                  {GITHUB_URL ? (
+                    <a
+                      className="text-[#d4a174] hover:underline"
+                      href={GITHUB_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      GitHub
+                    </a>
+                  ) : (
+                    <span className="text-muted">即将上线</span>
+                  )}
+                </div>
+              </div>
+              <div className="border-t border-line pt-3 text-[13px] text-muted">
+                本项目在开发过程中深度使用 AI 辅助编程（代码生成、重构与调试）。
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
+// GitHub 仓库地址（预留：上线后填入真实链接即可启用「GitHub」入口）
+const GITHUB_URL = ''

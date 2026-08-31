@@ -145,7 +145,7 @@ function uid(): string {
 
 // —— 任务图谱筛选偏好持久化（localStorage）——
 // 好感达标 / 等级达标 / 地图解锁 / 专注模式 / 商人隐藏 的勾选状态跨启动保留。
-const GRAPH_PREFS_KEY = 'eft-spy.graphPrefs.v1'
+const GRAPH_PREFS_KEY = 'ic-tarkov.graphPrefs.v1'
 // 默认不勾选（即隐藏）的特殊商人：竞技场裁判、BTR 司机、灯塔守护者
 const DEFAULT_DISABLED_TRADERS = [
   '6617beeaa9cfa777ca915b7c', // 竞技场裁判

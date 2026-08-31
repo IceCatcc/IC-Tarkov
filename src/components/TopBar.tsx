@@ -56,7 +56,7 @@ export function TopBar() {
       {/* 左侧：品牌 + 导航（空白处可拖动窗口） */}
       <div className="flex items-center gap-2 pl-3">
         <img src="/icons/icon.png" alt="" className="w-5 h-5 rounded shrink-0" />
-        <span className="font-medium text-[15px]">EFT Spy</span>
+        <span className="font-medium text-[15px]">IC Tarkov</span>
         {version && (
           <span className="text-[11px] text-muted px-1.5 py-[1px] rounded bg-ink-700 border border-line">
             v{version}

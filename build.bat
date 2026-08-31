@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 
-rem ==== EFT Spy release build script (release-only) ====
+rem ==== IC Tarkov release build script (release-only) ====
 rem 分发统一走本脚本：tauri build 恒为 release 构建（strip+LTO，见 Cargo.toml），
 rem 且禁止透传 --debug，避免误把 debug 构建分发出去（debug 符号会被杀软误报）。
 
@@ -27,7 +27,7 @@ set "ARGS="
 :parse
 if "%~1"=="" goto parsed
 if /i "%~1"=="--debug" (
-    echo [EFT Spy] ERROR: --debug 不允许用于分发构建，本脚本仅出 release。
+    echo [IC Tarkov] ERROR: --debug 不允许用于分发构建，本脚本仅出 release。
     exit /b 1
 )
 set "ARGS=!ARGS! %~1"
@@ -40,27 +40,27 @@ set "APPVER="
 for /f "usebackq delims=" %%v in (`powershell -NoProfile -Command "(Get-Content -Raw 'src-tauri\tauri.conf.json' | ConvertFrom-Json).version"`) do set "APPVER=%%v"
 if "!APPVER!"=="" set "APPVER=unknown"
 
-echo [EFT Spy] building release bundle (v!APPVER!) ...
+echo [IC Tarkov] building release bundle (v!APPVER!) ...
 call npm run tauri build !ARGS!
 set EXITCODE=%ERRORLEVEL%
 
 if "!EXITCODE!"=="0" (
     rem -- copy exe with version in filename --
-    set "SRC_EXE=src-tauri\target\release\EFT Spy.exe"
-    set "DST_EXE=src-tauri\target\release\EFT-Spy-!APPVER!.exe"
+    set "SRC_EXE=src-tauri\target\release\IC Tarkov.exe"
+    set "DST_EXE=src-tauri\target\release\IC-Tarkov-!APPVER!.exe"
     if exist "!SRC_EXE!" (
         copy /y "!SRC_EXE!" "!DST_EXE!" >nul
         echo.
-        echo [EFT Spy] release build OK. Outputs:
+        echo [IC Tarkov] release build OK. Outputs:
         echo   app exe : !SRC_EXE!
         echo   named   : !DST_EXE!
         echo   nsis    : src-tauri\target\release\bundle\nsis\
         echo   msi     : src-tauri\target\release\bundle\msi\
     ) else (
-        echo [EFT Spy] build OK but exe not found: !SRC_EXE!
+        echo [IC Tarkov] build OK but exe not found: !SRC_EXE!
     )
 ) else (
-    echo [EFT Spy] build FAILED with exit code !EXITCODE!
+    echo [IC Tarkov] build FAILED with exit code !EXITCODE!
 )
 
 exit /b !EXITCODE!

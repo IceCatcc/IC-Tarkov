@@ -441,7 +441,7 @@ export function MapPage() {
 
   /* ---------- Leaflet 构建（每张地图重建实例，保证状态干净） ---------- */
 
-  const mapDivId = 'eft-spy-map'
+  const mapDivId = 'ic-tarkov-map'
   const mapRef = useRef<L.Map | null>(null)
   const imapRef = useRef<SkeletonMap | undefined>(imap)
   imapRef.current = imap

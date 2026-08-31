@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "EFT Spy 默认窗口能力（允许对话框等插件）",
+  "description": "IC Tarkov 默认窗口能力（允许对话框等插件）",
   "windows": ["main"],
   "permissions": [
     "core:default",

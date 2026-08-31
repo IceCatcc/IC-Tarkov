@@ -1,12 +1,12 @@
 [package]
-name = "eft-spy"
+name = "ic-tarkov"
 version = "0.1.4"
-description = "EFT log task monitor"
+description = "IC Tarkov log task monitor"
 edition = "2021"
 rust-version = "1.70"
 
 [lib]
-name = "eft_spy_lib"
+name = "ic_tarkov_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

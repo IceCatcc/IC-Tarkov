@@ -295,7 +295,7 @@ fn fetch_one(agent: &ureq::Agent, ep: &Endpoint) -> Result<Vec<u8>, String> {
     let url = format!("{BASE_URL}/{}", ep.path);
     let resp = agent
         .get(&url)
-        .set("User-Agent", "eft-spy/1.0")
+        .set("User-Agent", "ic-tarkov/1.0")
         // 明文返回，落盘即可直接解析
         .set("Accept-Encoding", "identity")
         .call()
