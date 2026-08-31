@@ -456,7 +456,7 @@ export default function SettingsModal() {
                   数据来源
                 </div>
                 <div>
-                  全部游戏数据（任务、地图、物品、商人、本地化等）均来自{' '}
+                  游戏数据（任务、地图、物品、商人、本地化等）均来自{' '}
                   <a
                     className="text-[#d4a174] hover:underline"
                     href="https://tarkov.dev"
@@ -465,7 +465,20 @@ export default function SettingsModal() {
                   >
                     tarkov.dev
                   </a>{' '}
-                  提供的开放接口。
+                  提供的开放接口；
+                  <p>
+                  中文Wiki使用{' '}
+                  <a
+                    className="text-[#d4a174] hover:underline"
+                    href="https://www.eftarkov.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    eftarkov.com
+                  </a>
+                  ，特此致谢。
+                  </p>
+                  
                 </div>
               </div>
 
@@ -526,7 +539,7 @@ export default function SettingsModal() {
               </div>
 
               <div className="border-t border-line pt-3 text-[13px] text-muted">
-                本项目在开发过程中深度使用 AI 辅助编程（代码生成、重构与调试）。
+                本项目在开发过程中深度使用 AI 编程（特此说明）。
               </div>
             </div>
           </div>
