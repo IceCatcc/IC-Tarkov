@@ -68,12 +68,15 @@ export function TopBar() {
             <button
               key={it.key}
               onClick={() => setPage(it.key)}
-              className={`px-2.5 h-7 rounded text-[13px] leading-none transition-colors ${
+              className={`flex items-center gap-1.5 px-5 h-7 rounded text-[13px] leading-none transition-colors ${
                 page === it.key
                   ? 'bg-amber/15 text-[#d4a174] border border-amber/60'
                   : 'text-muted hover:text-[#e6edf3] border border-transparent'
               }`}
             >
+              {it.key === 'monitor' && (
+                <span className={`w-1.5 h-1.5 rounded-full ${live ? 'bg-ok' : 'bg-red-500'}`} />
+              )}
               {it.label}
             </button>
           ))}
@@ -83,15 +86,8 @@ export function TopBar() {
       {/* 中间：可拖动窗口的空白区域 */}
       <div data-tauri-drag-region className="flex-1 self-stretch min-w-0" />
 
-      {/* 右侧：监控状态显示 + 设置 + 窗口控制 */}
+      {/* 右侧：错误提示 + 设置 + 窗口控制 */}
       <div className="flex items-center gap-2 pr-2">
-        <span className={`w-2 h-2 rounded-full ${live ? 'bg-ok' : 'bg-red-500'}`} />
-        <span className={`text-[12px] ${live ? 'text-ok' : 'text-red-400'}`}>
-          {live ? '监控中' : '未监控'}
-        </span>
-        <span className="text-[11px] text-muted truncate max-w-[220px]">
-          {watcher.logDir || '未设置日志目录'}
-        </span>
         {watcher.error && (
           <span className="text-[11px] text-red-400 truncate max-w-[180px]" title={watcher.error}>
             {watcher.error}
