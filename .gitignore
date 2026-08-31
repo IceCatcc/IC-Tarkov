@@ -9,3 +9,5 @@ check-tauri.bat
 vite.config.ts.timestamp-*.mjs
 .workbuddy
 quest_analysis
+# tarkov.dev 原始 API 种子数据下的运行时缓存清单（每次同步重写，不入库）
+src-tauri/resources/api/manifest.json

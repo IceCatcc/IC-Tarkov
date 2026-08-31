@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../store'
 import {
@@ -9,7 +10,17 @@ import {
   exportData,
   importData,
   openDataDir,
+  getDataStatus,
+  refreshGameData,
 } from '../tauri'
+import type { DataStatus, DataSyncProgress, DataSyncReport } from '../types'
+
+const fmtTime = (epochSecs: number): string => {
+  if (!epochSecs) return '从未更新'
+  const d = new Date(epochSecs * 1000)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
 
 async function pickDirectory(current: string): Promise<string | null> {
   const selected = await open({
@@ -83,6 +94,65 @@ export default function SettingsModal() {
   const [busy, setBusy] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  /* ---------- 游戏数据（tarkov.dev 原始 API JSON 缓存） ---------- */
+  const [dataStatus, setDataStatus] = useState<DataStatus | null>(null)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const [syncing, setSyncing] = useState(false)
+
+  const loadDataStatus = useCallback(() => {
+    getDataStatus()
+      .then((s) => {
+        setDataStatus(s)
+        setSyncing(s.syncing)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    loadDataStatus()
+    const offs: UnlistenFn[] = []
+    let disposed = false
+    const track = (p: Promise<UnlistenFn>) => {
+      p.then((f) => {
+        if (disposed) f()
+        else offs.push(f)
+      }).catch(() => {})
+    }
+    track(
+      listen<DataSyncProgress>('data-sync-progress', (e) => {
+        const p = e.payload
+        setSyncing(p.running)
+        setSyncMsg(p.running ? `正在更新：${p.label}（${p.done + 1}/${p.total}）` : null)
+      }),
+    )
+    track(
+      listen<DataSyncReport>('data-synced', (e) => {
+        setSyncing(false)
+        setSyncMsg(e.payload.message)
+        loadDataStatus()
+      }),
+    )
+    // 后端重建完派生索引后刷新计数
+    track(listen('data-reloaded', () => loadDataStatus()))
+    return () => {
+      disposed = true
+      offs.forEach((f) => f())
+    }
+  }, [loadDataStatus])
+
+  const onUpdateData = async () => {
+    setError(null)
+    setFeedback(null)
+    setSyncMsg(null)
+    setSyncing(true)
+    try {
+      await refreshGameData(true)
+    } catch (e) {
+      setSyncing(false)
+      setError(String(e))
+    }
+  }
 
   const onSave = async () => {
     if (!logDir.trim()) {
@@ -241,6 +311,31 @@ export default function SettingsModal() {
               {error}
             </div>
           )}
+
+          {/* 游戏数据（tarkov.dev） */}
+          <div className="border-t border-line pt-4">
+            <div className="text-[14px] text-muted mb-2">游戏数据（tarkov.dev）</div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onUpdateData}
+                disabled={syncing}
+                className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
+              >
+                {syncing ? '更新中…' : '更新数据'}
+              </button>
+              <span className="text-[13px] text-muted">
+                {dataStatus
+                  ? `${fmtTime(dataStatus.updatedAt)} · ${dataStatus.questCount} 个任务 / ${dataStatus.mapCount} 张地图`
+                  : '读取中…'}
+              </span>
+            </div>
+            {syncMsg && <div className="text-[13px] text-muted mt-2">{syncMsg}</div>}
+            <div className="text-[13px] text-muted mt-2">
+              数据直接来自 json.tarkov.dev 的原始接口，缓存于应用数据目录；
+              更新会重新拉取全部端点并重建任务索引与地图数据，版本更新或赛季重置后点一次即可。
+              {dataStatus && !dataStatus.cached && ' 当前缓存不完整，需联网更新。'}
+            </div>
+          </div>
 
           {/* 数据管理 */}
           <div className="border-t border-line pt-4">

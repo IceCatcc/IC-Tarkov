@@ -12,6 +12,11 @@ import type {
   PlayerProfile,
   PlayerPositionPayload,
   MapInfo,
+  MapMarkersDoc,
+  QuestZonesDoc,
+  MapBossesDoc,
+  SkeletonDoc,
+  DataStatus,
 } from './types'
 
 /**
@@ -254,4 +259,36 @@ export async function getSessionMode(): Promise<string | null> {
 
 export async function getMaps(): Promise<MapInfo[]> {
   return await invoke<MapInfo[]>('get_maps')
+}
+
+/* ================= 游戏数据（tarkov.dev 原始 API JSON） ================= */
+
+/** 缓存状态：是否完整、更新时间、是否过期、派生出的任务/地图数量 */
+export async function getDataStatus(): Promise<DataStatus> {
+  return await invoke<DataStatus>('get_data_status')
+}
+
+/**
+ * 触发数据更新：后端重新请求 tarkov.dev 的原始端点并刷新缓存，
+ * 完成后重建派生索引并发出 data-reloaded 事件。
+ * @param force true = 忽略 7 天过期判断，全部重下
+ */
+export async function refreshGameData(force = true): Promise<void> {
+  await invoke('refresh_game_data', { force })
+}
+
+export async function getMapMarkers(): Promise<MapMarkersDoc> {
+  return await invoke<MapMarkersDoc>('get_map_markers')
+}
+
+export async function getQuestZones(): Promise<QuestZonesDoc> {
+  return await invoke<QuestZonesDoc>('get_quest_zones')
+}
+
+export async function getMapBosses(): Promise<MapBossesDoc | null> {
+  return await invoke<MapBossesDoc | null>('get_map_bosses')
+}
+
+export async function getMapsSkeleton(): Promise<SkeletonDoc> {
+  return await invoke<SkeletonDoc>('get_maps_skeleton')
 }

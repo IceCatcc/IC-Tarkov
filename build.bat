@@ -19,6 +19,9 @@ where cargo >nul 2>nul || set "PATH=C:\Users\lsscf\.cargo\bin;%PATH%"
 
 cd /d "%~dp0"
 
+rem -- clean previous frontend build (vite emptyOutDir disabled to avoid safe-delete bulk confirm) --
+if exist dist rmdir /s /q dist
+
 rem -- parse args: reject --debug (distribution must be release) --
 set "ARGS="
 :parse

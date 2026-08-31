@@ -159,7 +159,7 @@ function dedupeItems(items: ItemRef[]): ItemRef[] {
   return Array.from(m.values())
 }
 
-// 地图展示名：后端已由缓存 map_meta.json 解析为官方中文（node.mapName）
+// 地图展示名：后端已由 tarkov.dev 地图中文本地化解析为官方中文（node.mapName）
 function mapLabel(n: GraphNode): string {
   return n.mapName || n.map || ''
 }

@@ -17,6 +17,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# 拉取 tarkov.dev 原始 API JSON（Windows 走 schannel，无需额外 TLS 依赖）
+ureq = { version = "2", default-features = false, features = ["native-tls"] }
 regex = "1"
 notify = "6"
 once_cell = "1"

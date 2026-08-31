@@ -1,154 +1,30 @@
-use once_cell::sync::Lazy;
-use serde::Deserialize;
-use std::collections::HashMap;
+//! 任务图谱 / 任务详情的对外接口。
+//!
+//! 数据不再来自离线生成的 quest_index.json，而是由 dataset 模块从
+//! tarkov.dev 原始 API JSON 在运行时构建（可被软件端刷新替换）。
 
-// —— 索引原始结构（来自 resources/quest_index.json）——
-#[derive(Deserialize)]
-struct RawNode {
-    name: String,
-    trader_id: String,
-    trader_name: String,
-    prereqs: Vec<String>,
-    /// PVE 模式下的前置（与 prereqs 不同时才存在，如 收视灵药）
-    #[serde(default)]
-    prereqs_pve: Vec<String>,
-    #[allow(dead_code)]
-    trader_reqs: Vec<RawTraderReq>,
-    min_level: Option<u32>,
-    map: Option<String>,
-    #[serde(default)]
-    maps: Vec<String>,
-    wiki: String,
-    objectives: Vec<RawObjective>,
-    rewards: Vec<RawReward>,
-    #[serde(default)]
-    legacy: bool,
-    #[serde(default)]
-    special: bool,
-    /// 任务可用模式：pvp / pve / 两者
-    #[serde(default)]
-    modes: Vec<String>,
-}
+use serde::Serialize;
+use std::collections::HashSet;
+use std::sync::Arc;
 
-#[derive(Deserialize)]
-struct RawObjective {
-    #[serde(default)]
-    description: String,
-    #[allow(dead_code)]
-    #[serde(default)]
-    r#type: String,
-    #[serde(default)]
-    items: Vec<RawItem>,
-}
+use crate::dataset;
 
-#[derive(Deserialize)]
-struct RawItem {
-    id: String,
-    name: String,
-    #[serde(default)]
-    count: Option<i64>,
-}
-
-#[derive(Deserialize)]
-struct RawTraderReq {
-    #[allow(dead_code)]
-    trader_id: Option<String>,
-    #[allow(dead_code)]
-    req_type: Option<String>,
-    value: Option<i64>,
-}
-
-#[derive(Deserialize)]
-struct RawReward {
-    name: String,
-    count: i64,
-}
-
-static INDEX: Lazy<HashMap<String, RawNode>> = Lazy::new(load_index);
-
-// 地图元数据（缓存自 /regular/maps 与 /regular/maps_zh 端点，见 quest_analysis/gen_maps_meta.py）
-#[derive(Deserialize)]
-struct MapMetaFile {
-    maps: HashMap<String, RawMapEntry>,
-}
-
-#[derive(Deserialize)]
-struct RawMapEntry {
-    nn: String,
-    zh: String,
-}
-
-static MAP_META: Lazy<HashMap<String, RawMapEntry>> = Lazy::new(|| {
-    match serde_json::from_str::<MapMetaFile>(include_str!("../resources/map_meta.json")) {
-        Ok(f) => f.maps,
-        Err(e) => {
-            eprintln!("map_meta parse error: {e}");
-            Default::default()
+/// 启动时装载数据集；返回失败时数据集为空（界面仍可用，只是没有任务名）
+pub fn init(app: &tauri::AppHandle) {
+    match dataset::rebuild(app) {
+        Ok((quests, maps)) => {
+            println!("[data] 数据集已装载：{quests} 个任务 / {maps} 张地图");
         }
+        Err(e) => eprintln!("[data] 数据集装载失败：{e}"),
     }
-});
-
-/// 地图展示名：优先官方中文，缺失时回退 normalizedName
-pub fn map_display_name(map_id: &str) -> Option<String> {
-    MAP_META.get(map_id).map(|m| {
-        if m.zh.is_empty() {
-            m.nn.clone()
-        } else {
-            m.zh.clone()
-        }
-    })
 }
 
-/// 供前端「角色」页管理地图解锁用的全部地图列表（id + 展示名）
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MapInfo {
-    pub id: String,
-    pub name: String,
-}
-
-pub fn get_maps() -> Vec<MapInfo> {
-    let mut v: Vec<MapInfo> = MAP_META
-        .iter()
-        .map(|(id, m)| MapInfo {
-            id: id.clone(),
-            name: if m.zh.is_empty() { m.nn.clone() } else { m.zh.clone() },
-        })
-        .collect();
-    v.sort_by(|a, b| a.name.cmp(&b.name));
-    v
-}
-
-/// trader_id -> trader_name（取索引中该商人的第一个任务的名字）
-static TRADER_NAMES: Lazy<HashMap<String, String>> = Lazy::new(|| {
-    let mut m = HashMap::new();
-    for n in INDEX.values() {
-        m.entry(n.trader_id.clone())
-            .or_insert_with(|| n.trader_name.clone());
-    }
-    m
-});
-
-fn trader_reqs_payload(n: &RawNode) -> Vec<TraderReqPayload> {
-    n.trader_reqs
-        .iter()
-        .filter_map(|r| {
-            let tid = r.trader_id.clone()?;
-            Some(TraderReqPayload {
-                trader_name: TRADER_NAMES
-                    .get(&tid)
-                    .cloned()
-                    .unwrap_or_else(|| tid.clone()),
-                trader_id: tid,
-                req_type: r.req_type.clone().unwrap_or_else(|| "level".into()),
-                value: r.value.unwrap_or(0),
-            })
-        })
-        .collect()
+fn store() -> Arc<dataset::Store> {
+    dataset::store()
 }
 
 // —— 给前端用的结构 ——
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemPayload {
     pub id: String,
@@ -156,14 +32,14 @@ pub struct ItemPayload {
     pub count: Option<i64>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectivePayload {
     pub description: String,
     pub items: Vec<ItemPayload>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RewardPayload {
     pub name: String,
@@ -171,7 +47,7 @@ pub struct RewardPayload {
 }
 
 /// 商人贸易条件（level=忠诚等级 LL / reputation=好感值）
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraderReqPayload {
     pub trader_id: String,
@@ -180,7 +56,7 @@ pub struct TraderReqPayload {
     pub value: i64,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphNode {
     pub id: String,
@@ -207,28 +83,28 @@ pub struct GraphNode {
     pub turn_ins: Vec<ItemPayload>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphEdge {
     pub from: String,
     pub to: String,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuestGraph {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrereqInfo {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Clone, serde::Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuestDetail {
     pub id: String,
@@ -261,23 +137,58 @@ pub struct AcceptInfo {
     pub min_level: Option<u32>,
 }
 
-fn load_index() -> HashMap<String, RawNode> {
-    let json = include_str!("../resources/quest_index.json");
-    match serde_json::from_str(json) {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("quest_index parse error: {e}");
-            HashMap::new()
+/// 地图展示名：优先官方中文，缺失时回退 normalizedName
+pub fn map_display_name(map_id: &str) -> Option<String> {
+    store().maps.get(map_id).map(|m| {
+        if m.zh.is_empty() {
+            m.nn.clone()
+        } else {
+            m.zh.clone()
         }
-    }
+    })
 }
 
-/// 启动时强制初始化索引（尽早暴露解析错误）
-pub fn load() {
-    let _ = &*INDEX;
+/// 供前端「角色」页管理地图解锁用的全部地图列表（id + 展示名）
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MapInfo {
+    pub id: String,
+    pub name: String,
 }
 
-fn flatten_turn_ins(n: &RawNode) -> Vec<ItemPayload> {
+pub fn get_maps() -> Vec<MapInfo> {
+    let s = store();
+    let mut v: Vec<MapInfo> = s
+        .maps
+        .iter()
+        .map(|(id, m)| MapInfo {
+            id: id.clone(),
+            name: if m.zh.is_empty() { m.nn.clone() } else { m.zh.clone() },
+        })
+        .collect();
+    v.sort_by(|a, b| a.name.cmp(&b.name));
+    v
+}
+
+fn trader_reqs_payload(n: &dataset::QuestNode, trader_names: &std::collections::HashMap<String, String>) -> Vec<TraderReqPayload> {
+    n.trader_reqs
+        .iter()
+        .filter_map(|r| {
+            let tid = r.trader_id.clone()?;
+            Some(TraderReqPayload {
+                trader_name: trader_names
+                    .get(&tid)
+                    .cloned()
+                    .unwrap_or_else(|| tid.clone()),
+                trader_id: tid,
+                req_type: r.req_type.clone().unwrap_or_else(|| "level".into()),
+                value: r.value.unwrap_or(0),
+            })
+        })
+        .collect()
+}
+
+fn flatten_turn_ins(n: &dataset::QuestNode) -> Vec<ItemPayload> {
     let mut out = Vec::new();
     for o in &n.objectives {
         for it in &o.items {
@@ -291,7 +202,7 @@ fn flatten_turn_ins(n: &RawNode) -> Vec<ItemPayload> {
     out
 }
 
-fn objectives_payload(n: &RawNode) -> Vec<ObjectivePayload> {
+fn objectives_payload(n: &dataset::QuestNode) -> Vec<ObjectivePayload> {
     n.objectives
         .iter()
         .map(|o| ObjectivePayload {
@@ -311,11 +222,16 @@ fn objectives_payload(n: &RawNode) -> Vec<ObjectivePayload> {
 
 /// 任务涉及的地图 id 列表
 pub fn quest_maps(quest_id: &str) -> Vec<String> {
-    INDEX.get(quest_id).map(|n| n.maps.clone()).unwrap_or_default()
+    store()
+        .quests
+        .get(quest_id)
+        .map(|n| n.maps.clone())
+        .unwrap_or_default()
 }
 
 pub fn resolve_accept(quest_id: &str) -> AcceptInfo {
-    match INDEX.get(quest_id) {
+    let s = store();
+    match s.quests.get(quest_id) {
         Some(n) => AcceptInfo {
             name: n.name.clone(),
             trader_id: n.trader_id.clone(),
@@ -336,7 +252,8 @@ pub fn resolve_accept(quest_id: &str) -> AcceptInfo {
 }
 
 pub fn resolve_name(quest_id: &str) -> String {
-    INDEX
+    store()
+        .quests
         .get(quest_id)
         .map(|n| n.name.clone())
         .unwrap_or_else(|| quest_id.to_string())
@@ -345,9 +262,11 @@ pub fn resolve_name(quest_id: &str) -> String {
 /// 返回某任务的所有「传递性前置任务」（不含自身），已做环路保护。
 /// 用于手动「接取 / 解锁」时沿任务链递归处理前置。
 pub fn prereqs_closure(quest_id: &str) -> Vec<String> {
+    let s = store();
     let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    let mut stack: Vec<String> = INDEX
+    let mut seen = HashSet::new();
+    let mut stack: Vec<String> = s
+        .quests
         .get(quest_id)
         .map(|n| n.prereqs.clone())
         .unwrap_or_default();
@@ -356,7 +275,7 @@ pub fn prereqs_closure(quest_id: &str) -> Vec<String> {
             continue;
         }
         out.push(id.clone());
-        if let Some(n) = INDEX.get(&id) {
+        if let Some(n) = s.quests.get(&id) {
             for p in &n.prereqs {
                 stack.push(p.clone());
             }
@@ -368,9 +287,10 @@ pub fn prereqs_closure(quest_id: &str) -> Vec<String> {
 /// 全量任务图谱（不含玩家状态，前端按 id 合并）。
 /// 边取 pvp/pve 两套前置的并集：模式专属边的一端节点会被前端按模式隐藏，绘制时自动跳过。
 pub fn get_graph() -> QuestGraph {
-    let mut nodes = Vec::with_capacity(INDEX.len());
+    let s = store();
+    let mut nodes = Vec::with_capacity(s.quests.len());
     let mut edges = Vec::new();
-    for (id, n) in INDEX.iter() {
+    for (id, n) in s.quests.iter() {
         nodes.push(GraphNode {
             id: id.clone(),
             name: n.name.clone(),
@@ -381,7 +301,7 @@ pub fn get_graph() -> QuestGraph {
             map: n.map.clone(),
             map_name: n.map.as_deref().and_then(map_display_name),
             maps: n.maps.clone(),
-            trader_reqs: trader_reqs_payload(n),
+            trader_reqs: trader_reqs_payload(n, &s.trader_names),
             legacy: n.legacy,
             special: n.special,
             prereqs_pve: n.prereqs_pve.clone(),
@@ -408,7 +328,8 @@ pub fn get_graph() -> QuestGraph {
 }
 
 pub fn get_detail(quest_id: &str) -> Option<QuestDetail> {
-    let n = INDEX.get(quest_id)?;
+    let s = store();
+    let n = s.quests.get(quest_id)?;
     Some(QuestDetail {
         id: quest_id.to_string(),
         name: n.name.clone(),
@@ -434,7 +355,7 @@ pub fn get_detail(quest_id: &str) -> Option<QuestDetail> {
                 name: resolve_name(p),
             })
             .collect(),
-        trader_reqs: trader_reqs_payload(n),
+        trader_reqs: trader_reqs_payload(n, &s.trader_names),
         legacy: n.legacy,
         special: n.special,
         prereqs_pve: n.prereqs_pve.clone(),

@@ -30,6 +30,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "resources/api": "api",
+      "resources/maps-skeleton.json": "maps-skeleton.json"
+    },
     "icon": [
       "icons/icon.png",
       "icons/icon.ico"

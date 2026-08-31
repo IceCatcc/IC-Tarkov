@@ -1,119 +1,32 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './map.css'
-import { getPlayerPosition, fetchTarkovTime } from '../tauri'
-import type { PlayerPositionPayload } from '../types'
+import {
+  getPlayerPosition,
+  fetchTarkovTime,
+  getMapMarkers,
+  getQuestZones,
+  getMapBosses,
+  getMapsSkeleton,
+} from '../tauri'
+import type {
+  PlayerPositionPayload,
+  MarkerPosition as Position,
+  MarkerEntry,
+  MapMarkersDoc,
+  SkeletonLayer,
+  SkeletonMap,
+  SkeletonGroup,
+  SkeletonDoc,
+  QuestZone,
+  QuestZoneObjective,
+  QuestZonesDoc,
+  MapBossesDoc,
+} from '../types'
 import { useStore, useTopPad } from '../store'
 import { QuestCard } from '../components/QuestCard'
-
-/* ================= 类型（对应 public/data/*.json 生成脚本输出） ================= */
-
-interface Position {
-  x: number
-  y?: number
-  z: number
-}
-
-interface MarkerEntry {
-  id?: string
-  name?: string
-  nameZh?: string | null
-  position?: Position | null
-  top?: number | null
-  bottom?: number | null
-  faction?: string | null
-  categories?: string[]
-  kind?: string | null
-  icon?: string | null
-  /** 撤离要求（合作撤离/信号弹/付费…），来自 tarkov.dev，缺失时为空 */
-  requirements?: {
-    type: string
-    value?: string | null
-    /** 物品类要求（itemRequired/payment）携带，用于 popup 显示图标 */
-    itemId?: string
-    name?: string
-    count?: number | null
-  }[] | null
-}
-
-interface MapMarkersDoc {
-  version: number
-  maps: Record<string, Record<string, MarkerEntry[]>>
-  /** 游戏 nameId -> normalizedName（来自 json.tarkov.dev） */
-  nameIds?: Record<string, string>
-  /** 无独立地图的变体 location id 归并规则 */
-  nameIdFallback?: Record<string, string>
-}
-
-interface SkeletonLayer {
-  name: string
-  svgLayer?: string
-  tilePath?: string
-  show?: boolean
-  /** 楼层高度范围（y 轴区间），用于标记自动分层；bounds 区域约束暂不参与判定 */
-  extents?: { height?: [number, number] }[]
-}
-
-interface SkeletonMap {
-  key: string
-  projection: string
-  minZoom?: number
-  maxZoom?: number
-  tileSize?: number
-  transform?: number[]
-  coordinateRotation?: number
-  bounds: [[number, number], [number, number]]
-  svgPath?: string
-  svgLayer?: string
-  tilePath?: string
-  layers?: SkeletonLayer[]
-  labels?: { position: [number, number]; text: string; rotation?: number; size?: number }[]
-}
-
-interface SkeletonGroup {
-  normalizedName: string
-  nameZh?: string
-  primaryPath?: string
-  maps: SkeletonMap[]
-}
-
-interface SkeletonDoc {
-  version: number
-  groups: SkeletonGroup[]
-}
-
-/** quest-zones.json：进行中任务的目标位置（zones 带坐标） */
-interface QuestZone {
-  nn: string
-  position: Position
-  top?: number | null
-  bottom?: number | null
-  /** 区域多边形（游戏坐标 x/z），用于绘制半透明黄色区块 */
-  outline?: { x: number; z: number }[]
-}
-interface QuestZoneObjective {
-  type?: string | null
-  optional?: boolean
-  descZh?: string | null
-  maps: string[]
-  zones: QuestZone[]
-}
-interface QuestZonesDoc {
-  version: number
-  tasks: Record<
-    string,
-    { name?: string; nameZh?: string; objectives: QuestZoneObjective[] }
-  >
-}
-
-/** 地图 Boss 刷新率（按 normalizedName 索引） */
-interface MapBossesDoc {
-  version: number
-  source?: string
-  maps: Record<string, { id: string; name: string; nameZh: string; chance: number; locations: number }[]>
-}
 
 /* ================= 常量 ================= */
 
@@ -429,25 +342,32 @@ export function MapPage() {
   const currentMapId = useStore((s) => s.currentMapId)
   const page = useStore((s) => s.page)
 
-  useEffect(() => {
-    const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+  // 地图数据由后端从 tarkov.dev 原始 API JSON 派生后下发（不再依赖 public/data/*.json）
+  const loadMapData = useCallback(() => {
     Promise.all([
-      fetch(`${base}/data/maps-skeleton.json`).then((r) => r.json()),
-      fetch(`${base}/data/map-markers.json`).then((r) => r.json()),
-      fetch(`${base}/data/quest-zones.json`).then((r) => r.json()),
+      getMapsSkeleton(),
+      getMapMarkers(),
+      getQuestZones(),
       // Boss 刷新率：加载失败不影响地图，仅面板显示为空
-      fetch(`${base}/data/map-bosses.json`)
-        .then((r) => r.json())
-        .catch(() => null),
+      getMapBosses().catch(() => null),
     ])
       .then(([sk, mk, qz, bs]) => {
-        setSkeleton(sk as SkeletonDoc)
-        setMarkers(mk as MapMarkersDoc)
-        setQzDoc(qz as QuestZonesDoc)
-        setBossDoc((bs as MapBossesDoc) ?? null)
+        setSkeleton(sk)
+        setMarkers(mk)
+        setQzDoc(qz)
+        setBossDoc(bs ?? null)
+        setLoadErr('')
       })
       .catch((e) => setLoadErr(String(e)))
   }, [])
+
+  useEffect(() => {
+    loadMapData()
+    // 后端更新完数据后会重建索引并广播，这里重新取一次即可
+    let un: (() => void) | undefined
+    listen('data-reloaded', () => loadMapData()).then((u) => (un = u))
+    return () => un?.()
+  }, [loadMapData])
 
   const selectable = useMemo(
     () => (skeleton?.groups ?? []).filter((g) => g.maps.some((m) => m.projection === 'interactive')),

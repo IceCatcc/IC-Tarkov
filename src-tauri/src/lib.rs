@@ -1,4 +1,6 @@
+mod apidata;
 mod data;
+mod dataset;
 mod parser;
 mod persist;
 mod screenshots;
@@ -607,6 +609,77 @@ fn get_maps() -> Vec<data::MapInfo> {
     data::get_maps()
 }
 
+/* ---------------- 游戏数据（tarkov.dev 原始 API JSON） ---------------- */
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DataStatusPayload {
+    #[serde(flatten)]
+    base: apidata::DataStatus,
+    quest_count: usize,
+    map_count: usize,
+}
+
+/// 后台同步：拉取全部端点 -> 重建派生索引 -> 通知前端刷新
+fn spawn_sync(app: tauri::AppHandle, force: bool) {
+    std::thread::spawn(move || match apidata::sync(&app, force) {
+        Ok(report) => {
+            if !report.updated.is_empty() {
+                match dataset::rebuild(&app) {
+                    Ok((q, m)) => println!("[data] 数据集已刷新：{q} 个任务 / {m} 张地图"),
+                    Err(e) => eprintln!("[data] 刷新后重建数据集失败：{e}"),
+                }
+                let _ = app.emit("data-reloaded", report.updated_at);
+            }
+        }
+        Err(e) => eprintln!("[apidata] 数据更新失败：{e}"),
+    });
+}
+
+#[tauri::command]
+fn get_data_status(app: tauri::AppHandle) -> DataStatusPayload {
+    let s = dataset::store();
+    DataStatusPayload {
+        base: apidata::status(&app),
+        quest_count: s.quests.len(),
+        map_count: s.maps.len(),
+    }
+}
+
+/// 触发数据更新（异步执行，进度通过 data-sync-progress / data-synced 事件下发）
+#[tauri::command]
+fn refresh_game_data(app: tauri::AppHandle, force: Option<bool>) -> Result<(), String> {
+    if apidata::status(&app).syncing {
+        return Err("数据更新正在进行中".to_string());
+    }
+    spawn_sync(app, force.unwrap_or(true));
+    Ok(())
+}
+
+/// 地图标记（原 public/data/map-markers.json，现由原始 API 数据派生）
+#[tauri::command]
+fn get_map_markers() -> serde_json::Value {
+    dataset::store().markers.clone()
+}
+
+/// 任务目标区域（原 public/data/quest-zones.json）
+#[tauri::command]
+fn get_quest_zones() -> serde_json::Value {
+    dataset::store().zones.clone()
+}
+
+/// 地图 Boss 刷新率（原 public/data/map-bosses.json）
+#[tauri::command]
+fn get_map_bosses() -> serde_json::Value {
+    dataset::store().bosses.clone()
+}
+
+/// 地图骨架（随包分发的静态几何数据，中文名由原始 API 数据注入）
+#[tauri::command]
+fn get_maps_skeleton() -> serde_json::Value {
+    dataset::store().skeleton.clone()
+}
+
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -734,7 +807,12 @@ pub fn run() {
                 offsets: Mutex::new(HashMap::new()),
                 unlocked: Mutex::new(std::collections::HashSet::new()),
             });
-            data::load();
+            // 装载 tarkov.dev 原始数据的派生索引；缓存缺失/过期时后台静默拉取
+            let handle = app.handle().clone();
+            data::init(&handle);
+            if apidata::status(&handle).stale {
+                spawn_sync(handle, false);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -758,7 +836,13 @@ pub fn run() {
             export_data,
             import_data,
             get_unlocked,
-            set_quest_status
+            set_quest_status,
+            get_data_status,
+            refresh_game_data,
+            get_map_markers,
+            get_quest_zones,
+            get_map_bosses,
+            get_maps_skeleton
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
