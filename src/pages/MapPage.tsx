@@ -303,6 +303,10 @@ export function MapPage() {
   const [selected, setSelected] = useState<string>(() => useStore.getState().currentMap ?? 'factory')
   const autoZoomMap = useStore((s) => s.autoZoomMap)
   const setAutoZoomMap = useStore((s) => s.setAutoZoomMap)
+  const autoCenter = useStore((s) => s.autoCenter)
+  const setAutoCenter = useStore((s) => s.setAutoCenter)
+  const focusZoom = useStore((s) => s.focusZoom)
+  const setFocusZoom = useStore((s) => s.setFocusZoom)
   const untrackedQuests = useStore((s) => s.untrackedQuests)
   const toggleQuestTracked = useStore((s) => s.toggleQuestTracked)
   const [chips, setChips] = useState<Record<ChipKey, boolean>>({
@@ -325,6 +329,7 @@ export function MapPage() {
   const [mapMenuOpen, setMapMenuOpen] = useState(false) // 左下角地图选单浮层
   const [tasksOpen, setTasksOpen] = useState(false) // 右下角任务浮窗
   const [infoOpen, setInfoOpen] = useState(false) // 右下角地图信息浮窗
+  const [focusOpen, setFocusOpen] = useState(false) // 工具栏「自动聚焦」展开面板
   // 塔科夫游戏内时间：{ serverMs: 同步到的服务器时间, localMs: 同步时的本地时间 }
   // 同步失败时保持 null（顶部时间显示隐藏）
   const [tarkovClock, setTarkovClock] = useState<{ serverMs: number; localMs: number } | null>(
@@ -337,6 +342,7 @@ export function MapPage() {
   const tasksRef = useRef<HTMLDivElement | null>(null)
   const infoRef = useRef<HTMLDivElement | null>(null)
   const floorRef = useRef<HTMLDivElement | null>(null)
+  const focusRef = useRef<HTMLDivElement | null>(null)
   // 截图解析出的玩家位置 + 全局当前地图（location id），由 tauri 全局监听写入，任何页面生效
   const [shotPos, setShotPos] = useState<PlayerPositionPayload | null>(null)
   const currentMapId = useStore((s) => s.currentMapId)
@@ -447,9 +453,13 @@ export function MapPage() {
   // 楼层选择 ref：标记灰显的 syncAll 闭包在构建 effect 内创建，通过 ref 读最新值
   const floorSelRef = useRef(floorSel)
   floorSelRef.current = floorSel
-  // 自动缩放 / 任务跟踪 ref：地图构建 effect 与跟随 effect 通过 ref 读最新值
+  // 自动缩放 / 自动居中 / 任务跟踪 ref：地图构建 effect 与跟随 effect 通过 ref 读最新值
   const autoZoomRef = useRef(false)
   autoZoomRef.current = autoZoomMap
+  const autoCenterRef = useRef(true)
+  autoCenterRef.current = autoCenter
+  const focusZoomRef = useRef(4)
+  focusZoomRef.current = focusZoom
   const untrackedRef = useRef<Set<string>>(new Set())
   untrackedRef.current = new Set(untrackedQuests)
   // keepAlive 适配：页面隐藏（display:none）时容器尺寸为 0，需记录可见状态并在切回时重算
@@ -457,20 +467,26 @@ export function MapPage() {
   pageRef.current = page
   const rawBoundsRef = useRef<L.LatLngBounds | null>(null)
 
+  // 切换地图时重置首次定位标志，使新地图第一次定位能居中/缩放
+  useEffect(() => {
+    panOnceRef.current = false
+  }, [imap])
+
   // 点击浮窗外部自动关闭（容器内 onMouseDown 已 stopPropagation，不会误触发）
   // 注意：「地图信息」面板不在此列——它只由按钮点击切换显隐，点外部不关闭
   useEffect(() => {
-    if (!mapMenuOpen && !tasksOpen && !floorOpen) return
+    if (!mapMenuOpen && !tasksOpen && !floorOpen && !focusOpen) return
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node
       if (mapMenuOpen && mapMenuRef.current && !mapMenuRef.current.contains(t))
         setMapMenuOpen(false)
       if (tasksOpen && tasksRef.current && !tasksRef.current.contains(t)) setTasksOpen(false)
       if (floorOpen && floorRef.current && !floorRef.current.contains(t)) setFloorOpen(false)
+      if (focusOpen && focusRef.current && !focusRef.current.contains(t)) setFocusOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
-  }, [mapMenuOpen, tasksOpen, floorOpen])
+  }, [mapMenuOpen, tasksOpen, floorOpen, focusOpen])
 
   // 进行中任务（仅用于地图上标注目标位置）
   const playerQuests = useStore((s) => s.playerQuests)
@@ -899,8 +915,16 @@ export function MapPage() {
     const sp = shotRef.current
     if (!sp || !imap) return
     const ll = L.latLng(pos(sp.position))
-    // 玩家坐标不在当前地图范围内则不显示（截图未按图过滤时的兜底）
-    if (!map.getBounds().pad(0.35).contains(ll)) {
+    // 玩家坐标不在当前地图的世界范围内则不显示（按地图真实范围判断，与用户缩放无关）
+    const mb = imap.bounds
+    const inMap =
+      mb && mb.length === 2
+        ? L.latLngBounds(
+            L.latLng(mb[0][1], mb[0][0]),
+            L.latLng(mb[1][1], mb[1][0]),
+          ).contains(ll)
+        : true
+    if (!inMap) {
       if (playerMarkerRef.current && map.hasLayer(playerMarkerRef.current)) {
         map.removeLayer(playerMarkerRef.current)
         playerMarkerRef.current = null
@@ -929,9 +953,14 @@ export function MapPage() {
         ?.querySelector<SVGSVGElement>('svg')
       if (svg) svg.style.transform = `rotate(${deg.toFixed(1)}deg)`
     }
-    // 每次截图都平移跟随玩家；「自动缩放」开启时每次都缩放到聚焦级别，
+    // 自动居中关闭：完全不跟随（用户自由浏览地图），只更新箭头方向
+    if (!autoCenterRef.current) return
+    // 目标缩放级别来自工具栏「自动聚焦」进度条；自动缩放开启时每次定位都缩到该级别，
     // 关闭时保持用户当前缩放。animate:false——无平移动画，截图一到立即到位
-    const targetZoom = Math.max(imap.minZoom ?? 1, Math.min(imap.maxZoom ?? 6, 4))
+    const targetZoom = Math.max(
+      imap.minZoom ?? 1,
+      Math.min(imap.maxZoom ?? 6, focusZoomRef.current),
+    )
     if (!panOnceRef.current) {
       panOnceRef.current = true
       map.setView(ll, targetZoom, { animate: false })
@@ -1073,31 +1102,101 @@ export function MapPage() {
           ))}
         </div>
         <div className="flex-1" />
-        {/* 自动缩放：截图定位后是否每次都缩放聚焦（关闭则只平移、保持当前缩放） */}
-        <button
-          onClick={() => setAutoZoomMap(!autoZoomMap)}
-          title={
-            autoZoomMap
-              ? '自动缩放已开启：每次截图定位都会缩放到聚焦级别'
-              : '自动缩放已关闭：截图定位只平移，保持你当前的缩放级别'
-          }
-          className={`shrink-0 flex items-center gap-1.5 px-2 py-[3px] rounded text-[13px] border ${
-            autoZoomMap
-              ? 'border-amber text-[#d4a174] bg-amber/10'
-              : 'border-line text-muted hover:text-[#e6edf3]'
-          }`}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <circle cx="11" cy="11" r="6.4" stroke="currentColor" strokeWidth="1.8" />
-            <path
-              d="M20 20l-4.4-4.4M11 8.4v5.2M8.4 11h5.2"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-            />
-          </svg>
-          自动缩放
-        </button>
+        {/* 自动聚焦：展开后可开关「自动居中」「自动缩放」，并用进度条调节聚焦缩放级别 */}
+        <div className="relative shrink-0" ref={focusRef} onMouseDown={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setFocusOpen((v) => !v)}
+            title="自动聚焦：定位后自动居中 / 缩放地图"
+            className={`flex items-center gap-1.5 px-2 py-[3px] rounded text-[13px] border ${
+              autoCenter || autoZoomMap
+                ? 'border-amber text-[#d4a174] bg-amber/10'
+                : 'border-line text-muted hover:text-[#e6edf3]'
+            }`}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="11" cy="11" r="6.4" stroke="currentColor" strokeWidth="1.8" />
+              <path
+                d="M20 20l-4.4-4.4M11 8.4v5.2M8.4 11h5.2"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              />
+            </svg>
+            自动聚焦
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden className={`transition-transform ${focusOpen ? 'rotate-180' : ''}`}>
+              <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {focusOpen && (
+            <div className="absolute right-0 top-[calc(100%+6px)] z-[700] w-60 rounded-md border border-line bg-ink-800 p-3 shadow-lg shadow-black/40">
+              <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1">
+                <span>自动居中</span>
+                <input
+                  type="checkbox"
+                  checked={autoCenter}
+                  onChange={(e) => setAutoCenter(e.target.checked)}
+                  className="accent-amber"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1">
+                <span>自动缩放</span>
+                <input
+                  type="checkbox"
+                  checked={autoZoomMap}
+                  onChange={(e) => setAutoZoomMap(e.target.checked)}
+                  className="accent-amber"
+                />
+              </label>
+              <div className="pt-2 mt-1 border-t border-line">
+                <div className="flex items-center justify-between text-[13px] text-muted mb-1">
+                  <span>聚焦缩放</span>
+                  <span className="text-[#d4a174]">{focusZoom.toFixed(1)}×</span>
+                </div>
+                <input
+                  type="range"
+                  min={imap?.minZoom ?? 1}
+                  max={imap?.maxZoom ?? 6}
+                  step={0.5}
+                  value={focusZoom}
+                  onChange={(e) => setFocusZoom(Number(e.target.value))}
+                  className="w-full accent-amber"
+                />
+              </div>
+              <button
+                onClick={() => {
+                  // 测试：绕过截图监控服务，直接构造一个虚拟玩家位置，走与真实截图一致的后续渲染
+                  // 重置首次定位标志，确保每次测试都重新居中/缩放（不受上次 panOnce 影响）
+                  panOnceRef.current = false
+                  const b = imap?.bounds
+                  let x = 100,
+                    z = 100
+                  if (b && b.length === 2) {
+                    x = (b[0][0] + b[1][0]) / 2
+                    z = (b[0][1] + b[1][1]) / 2
+                    const jx = Math.abs(b[1][0] - b[0][0]) * 0.12
+                    const jz = Math.abs(b[1][1] - b[0][1]) * 0.12
+                    x += (Math.random() * 2 - 1) * jx
+                    z += (Math.random() * 2 - 1) * jz
+                  }
+                  const now = new Date()
+                  const p2 = (n: number) => String(n).padStart(2, '0')
+                  const ts = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(
+                    now.getDate(),
+                  )}[${p2(now.getHours())}-${p2(now.getMinutes())}]`
+                  setShotPos({
+                    position: { x, y: 12, z },
+                    rotation: Math.random() * 360,
+                    timestamp: ts,
+                    file: 'simulated',
+                  })
+                }}
+                className="w-full text-right px-1 pt-2 text-[12px] text-muted/70 hover:text-[#d4a174]"
+              >
+                测试
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 地图区 */}
@@ -1187,8 +1286,8 @@ export function MapPage() {
                     {g.nameZh || g.normalizedName}
                   </button>
                 ))}
-            </div>
-          )}
+              </div>
+            )}
           <button
             onClick={() => setMapMenuOpen((o) => !o)}
             title="选择地图"
@@ -1252,12 +1351,6 @@ export function MapPage() {
           </button>
           {tasksOpen && (
             <div className="w-[380px] max-w-[calc(100vw-24px)] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm p-2.5 space-y-2">
-              <div className="text-[13px] text-muted px-0.5">
-                本图进行中任务 · {mapInProgressQuests.length}
-                <span className="ml-1 opacity-70">
-                  （◉ 跟踪/○ 不跟踪，不跟踪的任务不在地图绘制）
-                </span>
-              </div>
               {mapInProgressQuests.length === 0 ? (
                 <div className="text-[13px] text-muted px-0.5 py-3 text-center">
                   本地图暂无进行中任务

@@ -43,6 +43,12 @@ interface AppState {
   /** 地图：截图定位后是否每次都缩放聚焦（关闭则只平移、保持用户缩放） */
   autoZoomMap: boolean
   setAutoZoomMap: (v: boolean) => void
+  /** 地图：截图定位后是否自动将玩家平移到视图中心（关闭则完全不跟随，用户自由看地图） */
+  autoCenter: boolean
+  setAutoCenter: (v: boolean) => void
+  /** 地图：自动聚焦（居中+缩放）时的目标缩放级别，由工具栏进度条调节 */
+  focusZoom: number
+  setFocusZoom: (v: number) => void
   /** 地图：不跟踪的任务 id（不跟踪=不在地图绘制其目标图标）；缺省视为全部跟踪 */
   untrackedQuests: string[]
   toggleQuestTracked: (id: string) => void
@@ -218,6 +224,8 @@ export function collectUiPrefs(): Record<string, unknown> {
     } satisfies GraphPrefs,
     mapPrefs: {
       autoZoom: s.autoZoomMap,
+      autoCenter: s.autoCenter,
+      focusZoom: s.focusZoom,
       untrackedQuests: s.untrackedQuests,
     },
     uiScale: s.uiScale,
@@ -226,7 +234,7 @@ export function collectUiPrefs(): Record<string, unknown> {
 
 interface UiPrefsShape {
   graphPrefs?: Partial<GraphPrefs>
-  mapPrefs?: { autoZoom?: boolean; untrackedQuests?: string[] }
+  mapPrefs?: { autoZoom?: boolean; autoCenter?: boolean; focusZoom?: number; untrackedQuests?: string[] }
   /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2 */
   uiScale?: number
 }
@@ -266,6 +274,10 @@ export const useStore = create<AppState>((set) => ({
 
   autoZoomMap: false,
   setAutoZoomMap: (v) => set({ autoZoomMap: v }),
+  autoCenter: true,
+  setAutoCenter: (v) => set({ autoCenter: v }),
+  focusZoom: 4,
+  setFocusZoom: (v) => set({ focusZoom: v }),
   untrackedQuests: [],
   toggleQuestTracked: (id) =>
     set((s) => ({
@@ -513,6 +525,8 @@ export const useStore = create<AppState>((set) => ({
     const mp = u.mapPrefs
     if (mp && typeof mp === 'object') {
       if (typeof mp.autoZoom === 'boolean') patch.autoZoomMap = mp.autoZoom
+      if (typeof mp.autoCenter === 'boolean') patch.autoCenter = mp.autoCenter
+      if (typeof mp.focusZoom === 'number') patch.focusZoom = mp.focusZoom
       if (Array.isArray(mp.untrackedQuests))
         patch.untrackedQuests = mp.untrackedQuests.filter((x) => typeof x === 'string')
     }
