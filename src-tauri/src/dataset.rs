@@ -960,6 +960,25 @@ fn build_zones(raw: &Raw) -> Value {
                     "outline": Value::Array(outline),
                 }));
             }
+            // possibleLocations：另一批目标位置来源（如『在 X 找到物品』的多个可能刷新点）。
+            // 结构 {map, positions:[{x,y,z},...]}，map 为地图 id。每个 position 派生为一个 zone 点。
+            for pl in arr(o, "possibleLocations") {
+                let Some(plnn) = s(pl, "map").and_then(&nn_of_loc).map(|n| merge(&n)) else {
+                    continue;
+                };
+                for p in arr(pl, "positions") {
+                    if !p.is_object() {
+                        continue;
+                    }
+                    zones.push(serde_json::json!({
+                        "nn": plnn,
+                        "position": pos_val(Some(p)),
+                        "top": Value::Null,
+                        "bottom": Value::Null,
+                        "outline": Value::Array(vec![]),
+                    }));
+                }
+            }
             let mut obj_maps: Vec<String> = Vec::new();
             for loc in arr(o, "maps") {
                 let Some(loc) = loc.as_str() else { continue };

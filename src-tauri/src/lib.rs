@@ -1,6 +1,6 @@
 mod apidata;
 mod data;
-mod dataset;
+pub mod dataset;
 mod parser;
 mod persist;
 mod screenshots;
