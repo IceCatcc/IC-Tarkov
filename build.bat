@@ -5,17 +5,27 @@ rem ==== IC Tarkov release build script (release-only) ====
 rem 分发统一走本脚本：tauri build 恒为 release 构建（strip+LTO，见 Cargo.toml），
 rem 且禁止透传 --debug，避免误把 debug 构建分发出去（debug 符号会被杀软误报）。
 
-rem -- MSVC env for cargo linker --
-if exist "D:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" (
-    call "D:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat" >nul
+rem -- MSVC env for cargo linker (搜索常见安装位置) --
+if defined VSINSTALLDIR goto have_vs
+for %%D in (
+  "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+  "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat"
+  "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+  "C:\Program Files\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
+  "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Auxiliary\Build\vcvars64.bat"
+) do (
+  if exist %%D (
+    call %%D >nul
+    goto have_vs
+  )
 )
+:have_vs
 
-rem -- proxy for crates.io / npm --
-set HTTP_PROXY=http://127.0.0.1:7897
-set HTTPS_PROXY=http://127.0.0.1:7897
-
-rem -- ensure cargo is reachable --
-where cargo >nul 2>nul || set "PATH=C:\Users\lsscf\.cargo\bin;%PATH%"
+rem -- ensure cargo is reachable (通过 PATH，不再硬编码用户目录) --
+where cargo >nul 2>nul || (
+  echo [IC Tarkov] ERROR: 未找到 cargo，请先安装 Rust 并加入 PATH。
+  exit /b 1
+)
 
 cd /d "%~dp0"
 

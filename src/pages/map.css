@@ -66,10 +66,22 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     font-weight: 700;
     margin-bottom: 6px;
 }
+.map-popup-title-link {
+    color: #d4a174;
+    cursor: pointer;
+}
+.map-popup-title-link:hover {
+    text-decoration: underline;
+}
 .map-popup-meta {
     font-size: 16.5px;
-    color: #8b949e;
+    color: #c9d1d9;
     line-height: 1.5;
+}
+.map-popup-coord {
+    font-size: 13.5px;
+    color: #6e7681;
+    line-height: 1.45;
 }
 
 /* 撤离要求：物品类（图片 + 中文名），对齐任务 tooltip 风格 */

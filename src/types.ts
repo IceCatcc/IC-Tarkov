@@ -305,7 +305,7 @@ export interface QuestZonesDoc {
   version: number
   tasks: Record<
     string,
-    { name?: string; nameZh?: string; objectives: QuestZoneObjective[] }
+    { name?: string; nameZh?: string; wiki?: string; objectives: QuestZoneObjective[] }
   >
 }
 

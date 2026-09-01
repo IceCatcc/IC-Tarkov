@@ -284,9 +284,20 @@ function escapeHtml(s: string): string {
 }
 
 /** 标记弹窗内容 */
-function popupHtml(title: string, meta: string[]) {
-  return `<div><div class="map-popup-title">${title}</div>${meta
+function popupHtml(
+  title: string,
+  meta: string[],
+  wikiUrl?: string | null,
+  coordMeta?: string[],
+) {
+  const titleCls = wikiUrl ? 'map-popup-title map-popup-title-link' : 'map-popup-title'
+  const titleAttr = wikiUrl
+    ? ` data-wiki="${encodeURIComponent(wikiUrl)}" title="点击查看 Wiki"`
+    : ''
+  return `<div><div class="map-popup-title${wikiUrl ? ' map-popup-title-link' : ''}"${titleAttr}>${title}</div>${meta
     .map((m) => `<div class="map-popup-meta">${m}</div>`)
+    .join('')}${(coordMeta ?? [])
+    .map((m) => `<div class="map-popup-coord">${m}</div>`)
     .join('')}</div>`
 }
 
@@ -530,6 +541,21 @@ export function MapPage() {
     })
     container.on('mouseout', () => setCursorCoord(null))
 
+    // 弹窗内任务名称：点击打开 Wiki 抽屉（事件委托到地图容器）
+    const openWiki = useStore.getState().openWiki
+    const onMapClick = (ev: MouseEvent) => {
+      const target = ev.target as HTMLElement
+      const btn = target.closest('[data-wiki]') as HTMLElement | null
+      if (!btn) return
+      ev.preventDefault()
+      const url = decodeURIComponent(btn.getAttribute('data-wiki') ?? '')
+      if (url) {
+        container.closePopup()
+        openWiki(url)
+      }
+    }
+    container.getContainer().addEventListener('click', onMapClick)
+
     /* ---- 底图与楼层 ---- */
     let cancelled = false
 
@@ -717,10 +743,12 @@ export function MapPage() {
         if (!en.position) continue
         const title = en.nameZh || en.name || (fallback && fallback(en)) || '未命名'
         const mk = L.marker(pos(en.position), { icon: makeIcon(iconFile(en)) }).bindPopup(
-          popupHtml(title, [
-            ...(en.faction ? [`阵营 ${en.faction}`] : []),
-            ...coordMeta(en),
-          ]),
+          popupHtml(
+            title,
+            [...(en.faction ? [`阵营 ${en.faction}`] : [])],
+            undefined,
+            coordMeta(en),
+          ),
         )
         floorMarkers.push({ m: mk, idx: markerFloorIdx(en) })
         lg.addLayer(mk)
@@ -825,11 +853,15 @@ export function MapPage() {
       m.setZIndexOffset(EXTRACT_ZINDEX[fac] ?? 500)
       floorMarkers.push({ m, idx: markerFloorIdx(en) })
       m.bindPopup(
-        popupHtml(en.nameZh ?? en.name ?? '未命名', [
-          ...(en.faction ? [`阵营 ${en.faction}`] : []),
-          ...reqs.map((r) => `撤离要求：${reqHtml(r)}`),
-          ...coordMeta(en),
-        ]),
+        popupHtml(
+          en.nameZh ?? en.name ?? '未命名',
+          [
+            ...(en.faction ? [`阵营 ${en.faction}`] : []),
+            ...reqs.map((r) => `撤离要求：${reqHtml(r)}`),
+          ],
+          undefined,
+          coordMeta(en),
+        ),
       )
       // 永久标签：名称（按阵营配色）+ 撤离要求小标签，无需点击即可见
       const wrap = document.createElement('div')
@@ -876,6 +908,7 @@ export function MapPage() {
 
     return () => {
       cancelled = true
+      container.getContainer().removeEventListener('click', onMapClick)
       container.remove()
       mapRef.current = null
       playerMarkerRef.current = null
@@ -1014,14 +1047,20 @@ export function MapPage() {
           })
           lg.addLayer(
             L.marker(pos(z.position), { icon, zIndexOffset: 600 }).bindPopup(
-              popupHtml(`◎ ${t.nameZh ?? t.name ?? '任务'}`, [
-                ...(o.descZh ? [o.descZh] : []),
-                ...(o.optional ? ['可选目标'] : []),
-                ...(typeof z.top === 'number' || typeof z.bottom === 'number'
-                  ? [`高度 ${fmtNum(z.top)} ~ ${fmtNum(z.bottom)}`]
-                  : []),
-                `坐标 X ${z.position.x.toFixed(1)} · Z ${z.position.z.toFixed(1)}`,
-              ]),
+              popupHtml(
+                `◎ ${t.nameZh ?? t.name ?? '任务'}`,
+                [
+                  ...(o.descZh ? [o.descZh] : []),
+                  ...(o.optional ? ['可选目标'] : []),
+                ],
+                t.wiki,
+                [
+                  ...(typeof z.top === 'number' || typeof z.bottom === 'number'
+                    ? [`高度 ${fmtNum(z.top)} ~ ${fmtNum(z.bottom)}`]
+                    : []),
+                  `坐标 X ${z.position.x.toFixed(1)} · Z ${z.position.z.toFixed(1)}`,
+                ],
+              ),
             ),
           )
         }

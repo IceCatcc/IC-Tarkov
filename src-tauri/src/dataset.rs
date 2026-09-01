@@ -1016,6 +1016,7 @@ fn build_zones(raw: &Raw) -> Value {
             serde_json::json!({
                 "name": name_key,
                 "nameZh": raw.zh_tasks.get(name_key).cloned().unwrap_or_else(|| name_key.to_string()),
+                "wiki": format!("https://www.eftarkov.com/news/id/{}.html", tid),
                 "objectives": Value::Array(objs_out),
             }),
         );

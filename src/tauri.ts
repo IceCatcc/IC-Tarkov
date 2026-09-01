@@ -75,7 +75,7 @@ export async function initTauri(): Promise<UnlistenFn> {
     .catch(() => {})
 
   // 全局监听会话模式（pve/pvp）：游戏以某模式启动时，任务图谱自动跟随切换并触发通知
-  const { applyDetectedMode, pushToast } = useStore.getState()
+  const { applyDetectedMode } = useStore.getState()
   track(
     await listen<{ mode: string; timestamp?: string }>('session-mode', (e) => {
       const mode = e.payload.mode === 'pve' ? 'pve' : 'pvp'
