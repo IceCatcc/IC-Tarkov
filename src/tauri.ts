@@ -74,11 +74,14 @@ export async function initTauri(): Promise<UnlistenFn> {
     })
     .catch(() => {})
 
-  // 全局监听会话模式（pve/pvp）：游戏以某模式启动时，任务图谱自动跟随切换
-  const { applyDetectedMode } = useStore.getState()
+  // 全局监听会话模式（pve/pvp）：游戏以某模式启动时，任务图谱自动跟随切换并触发通知
+  const { applyDetectedMode, pushToast } = useStore.getState()
   track(
     await listen<{ mode: string; timestamp?: string }>('session-mode', (e) => {
-      applyDetectedMode(e.payload.mode)
+      const mode = e.payload.mode === 'pve' ? 'pve' : 'pvp'
+      if (applyDetectedMode(mode)) {
+        pushToast(`检测到进入模式：${mode === 'pve' ? 'PvE 赛季' : 'PvP 赛季'}`, 'info')
+      }
     }),
   )
   getSessionMode()

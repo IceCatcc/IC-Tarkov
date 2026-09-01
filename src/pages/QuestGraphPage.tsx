@@ -1318,7 +1318,11 @@ export function QuestGraphPage() {
         )
       }
       if (n.legacy) drawChip('旧', '#8b949e', '#30363d', '#ffffff1a')
-      if (n.legacy) drawChip('仅PvP', '#ffb3b3', '#8b3a3a', '#2a1518')
+      // 模式专属标记：与隐藏逻辑一致，基于 modes 判定（而非 legacy）
+      if (n.modes && n.modes.length > 0 && !n.modes.includes('pve'))
+        drawChip('仅PvP', '#ffb3b3', '#8b3a3a', '#2a1518')
+      if (n.modes && n.modes.length > 0 && !n.modes.includes('pvp'))
+        drawChip('仅PvE', '#ffd9a3', '#8b6b3a', '#2a2418')
       if ((loyalty[n.traderId] ?? 1) === 0) drawChip('商人未解锁', '#ffb3b3', '#8b3a3a', '#2a1518')
       ctx.textBaseline = 'alphabetic'
     }
@@ -1765,9 +1769,14 @@ export function QuestGraphPage() {
                       旧任务
                     </span>
                   )}
-                  {detail.legacy && (
+                  {detail.modes && detail.modes.length > 0 && !detail.modes.includes('pve') && (
                     <span className="px-1.5 rounded border border-red-500/40 bg-red-500/15 text-red-300 text-[12px]">
                       仅 PvP
+                    </span>
+                  )}
+                  {detail.modes && detail.modes.length > 0 && !detail.modes.includes('pvp') && (
+                    <span className="px-1.5 rounded border border-amber/40 bg-amber/15 text-amber text-[12px]">
+                      仅 PvE
                     </span>
                   )}
                   {detail.special && (

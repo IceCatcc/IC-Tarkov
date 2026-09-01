@@ -128,8 +128,8 @@ interface AppState {
   /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2，作用于根节点 CSS zoom */
   uiScale: number
   setUiScale: (v: number) => void
-  /** 日志检测到会话模式时调用：自动切换 questMode 并持久化 */
-  applyDetectedMode: (m: string) => void
+  /** 日志检测到会话模式时调用：自动切换 questMode 并持久化；返回是否发生了切换 */
+  applyDetectedMode: (m: string) => boolean
   /** 用后端 settings.json 的 uiPrefs 批量恢复 UI 偏好（仅启动时调用，不回写） */
   applyUiPrefs: (p: Record<string, unknown>) => void
 }
@@ -497,9 +497,10 @@ export const useStore = create<AppState>((set) => ({
   applyDetectedMode: (m) => {
     const mode = m === 'pve' ? 'pve' : 'pvp'
     const cur = useStore.getState().questMode
-    if (cur === mode) return
+    if (cur === mode) return false
     set({ questMode: mode })
     persistGraphPrefs()
+    return true
   },
   applyUiPrefs: (p) => {
     const u = p as UiPrefsShape
