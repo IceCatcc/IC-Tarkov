@@ -42,9 +42,9 @@ npm run tauri:build   # 构建桌面应用（仅 NSIS 安装包）
 ```powershell
 git add RELEASE_NOTES.md
 git commit -m "docs: 更新发布说明"
-git tag v0.1.5        # 必须与 tauri.conf.json 的 version 一致
+git tag v0.1.6        # 必须与 tauri.conf.json 的 version 一致
 git push origin main
-git push origin v0.1.5
+git push origin v0.1.6
 ```
 
 4. **CI 自动完成**：`.github/workflows/release.yml` 在 `windows-latest` 构建 NSIS 包，创建 GitHub Release，说明取自 `RELEASE_NOTES.md`。

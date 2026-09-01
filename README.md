@@ -92,7 +92,7 @@ npm run tauri:build
 
 项目配置了 `.github/workflows/release.yml`，在 Windows runner 上构建并自动发布 Release：
 
-- **触发方式**：推送 `v*` 格式的 tag（如 `git tag v0.1.5`），或在 Actions 面板手动触发
+- **触发方式**：推送 `v*` 格式的 tag（如 `git tag v0.1.6`），或在 Actions 面板手动触发
 - **构建内容**：仅 NSIS 安装包（见 `tauri.conf.json` 的 `bundle.targets`）
 - **发布结果**：自动创建 GitHub Release，并上传 `src-tauri/target/release/bundle/nsis/` 下的安装程序；同时留存 workflow artifacts
 - **版本说明**：取自仓库根目录的 `RELEASE_NOTES.md`，发布前在本地维护好该文件即可
@@ -102,14 +102,14 @@ npm run tauri:build
 ```powershell
 # 1. 更新 RELEASE_NOTES.md，写下本次版本的更新内容
 
-# 2. 确认版本号与 tauri.conf.json 的 version 一致（当前 0.1.5）
+# 2. 确认版本号与 tauri.conf.json 的 version 一致（当前 0.1.6）
 
 # 3. 提交后打 tag 并推送
 git add RELEASE_NOTES.md
 git commit -m "docs: 更新发布说明"
-git tag v0.1.5
+git tag v0.1.6
 git push origin main
-git push origin v0.1.5
+git push origin v0.1.6
 ```
 
 > 若 `RELEASE_NOTES.md` 不存在或为空，Release 仍会正常创建，只是说明部分为空。
