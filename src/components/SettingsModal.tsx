@@ -282,8 +282,8 @@ export default function SettingsModal() {
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60">
-      <div className="w-[560px] bg-ink-800 border border-line rounded-xl p-5 shadow-2xl">
-        <div className="flex items-center mb-4">
+      <div className="w-[560px] max-h-[90vh] flex flex-col bg-ink-800 border border-line rounded-xl p-5 shadow-2xl">
+        <div className="flex items-center mb-4 shrink-0">
           <span className="text-[17px] font-medium">设置</span>
           <button
             onClick={closeSettings}
@@ -293,7 +293,7 @@ export default function SettingsModal() {
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-4 overflow-y-auto pr-1 flex-1 min-h-0">
           <DirField label="日志监控目录" value={logDir} onChange={setLogDir} />
           <DirField
             label="截图监控目录（地图页玩家定位）"
@@ -310,9 +310,6 @@ export default function SettingsModal() {
             />
             <span className="text-[15px] text-[#e6edf3]">
               读取坐标后删除截图
-              <span className="block text-[13px] text-muted">
-                关闭后截图会保留在目录中（可能重复定位到同一张）
-              </span>
             </span>
           </label>
 
@@ -362,8 +359,7 @@ export default function SettingsModal() {
             </div>
             {syncMsg && <div className="text-[13px] text-muted mt-2">{syncMsg}</div>}
             <div className="text-[13px] text-muted mt-2">
-              数据直接来自 json.tarkov.dev 的原始接口，缓存于应用数据目录；
-              更新会重新拉取全部端点并重建任务索引与地图数据，版本更新或赛季重置后点一次即可。
+              数据来自 tarkov.dev，缓存于应用数据目录；
               {dataStatus && !dataStatus.cached && ' 当前缓存不完整，需联网更新。'}
             </div>
           </div>
@@ -400,11 +396,6 @@ export default function SettingsModal() {
               >
                 打开数据目录
               </button>
-            </div>
-            <div className="text-[13px] text-muted mt-2">
-              重新读取日志：清空任务持久化文件，从零全量扫描日志重新生成。
-              导出 / 导入：备份或恢复任务进度与扫描记录（quest_state.json）。
-              打开数据目录：查看持久化配置与任务进度文件。
             </div>
             {feedback && (
               <div className="text-[14px] text-ok mt-2">{feedback}</div>
@@ -446,29 +437,29 @@ export default function SettingsModal() {
               <div className="text-[14px] text-ok mt-2">{dataLocMsg}</div>
             )}
           </div>
+        </div>
 
-          <div className="flex justify-between items-center gap-2 pt-1">
+        <div className="flex justify-between items-center gap-2 pt-3 mt-3 border-t border-line shrink-0">
+          <button
+            onClick={() => setAboutOpen(true)}
+            className="px-3 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+          >
+            关于
+          </button>
+          <div className="flex gap-2">
             <button
-              onClick={() => setAboutOpen(true)}
-              className="px-3 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+              onClick={closeSettings}
+              className="px-4 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
             >
-              关于
+              取消
             </button>
-            <div className="flex gap-2">
-              <button
-                onClick={closeSettings}
-                className="px-4 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
-              >
-                取消
-              </button>
-              <button
-                onClick={onSave}
-                disabled={saving}
-                className="px-4 py-1.5 rounded bg-amber text-black text-[14px] font-medium hover:opacity-90 disabled:opacity-50"
-              >
-                {saving ? '保存中…' : '保存'}
-              </button>
-            </div>
+            <button
+              onClick={onSave}
+              disabled={saving}
+              className="px-4 py-1.5 rounded bg-amber text-black text-[14px] font-medium hover:opacity-90 disabled:opacity-50"
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
           </div>
         </div>
       </div>
