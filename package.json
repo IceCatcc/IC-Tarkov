@@ -4,10 +4,11 @@
   "version": "0.1.5",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "react:dev": "vite",
+    "react:build": "tsc && vite build",
+    "react:preview": "vite preview"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

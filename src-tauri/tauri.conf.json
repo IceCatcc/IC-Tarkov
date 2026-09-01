@@ -2,12 +2,12 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "IC Tarkov",
   "version": "0.1.5",
-  "identifier": "com.ictarkov.app",
+  "identifier": "com.icecat.ictarkov",
   "build": {
-    "frontendDist": "../dist",
+    "frontendDist": "../src-react/dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeDevCommand": "npm run react:dev",
+    "beforeBuildCommand": "npm run react:build"
   },
   "app": {
     "windows": [

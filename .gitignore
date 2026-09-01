@@ -1,5 +1,6 @@
 node_modules
 dist
+src-react/dist
 dist-verify*
 src-tauri/target
 src-tauri/gen

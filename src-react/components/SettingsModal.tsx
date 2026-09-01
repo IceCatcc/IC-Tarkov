@@ -601,5 +601,5 @@ export default function SettingsModal() {
   )
 }
 
-// GitHub 仓库地址（预留：上线后填入真实链接即可启用「GitHub」入口）
-const GITHUB_URL = ''
+// GitHub 仓库地址
+const GITHUB_URL = 'https://github.com/IceCatcc/IC-Tarkov'
