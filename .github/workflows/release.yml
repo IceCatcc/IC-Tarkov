@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      # 构建 Tauri 应用（前端由 beforeBuildCommand 自动构建到 src-react/dist），
+      # 并自动创建 GitHub Release，上传 NSIS 安装包。
+      # __VERSION__ 会被替换为 tauri.conf.json 中的应用版本。
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: 'IC Tarkov v__VERSION__'
+          releaseDraft: false
+          prerelease: false
+          generateReleaseNotes: true
+          uploadWorkflowArtifacts: true

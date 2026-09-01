@@ -57,12 +57,11 @@ npm run tauri:dev    # 以 Tauri 壳启动开发模式
 .\build.bat
 ```
 
-构建产物位置（Rust 使用 Tauri 默认目录，前端输出到 `src-react/dist`）：
+构建产物位置（Rust 使用 Tauri 默认目录，前端输出到 `src-react/dist`；打包目标仅 NSIS）：
 
 - 应用可执行文件：`src-tauri/target/release/IC Tarkov.exe`
 - 带版本号文件：`src-tauri/target/release/IC-Tarkov-<version>.exe`
 - NSIS 安装包：`src-tauri/target/release/bundle/nsis/`
-- MSI 安装包：`src-tauri/target/release/bundle/msi/`
 - 前端构建产物：`src-react/dist/`
 
 ### 仅构建 Rust 后端
@@ -88,6 +87,23 @@ npm run tauri:build
 - `productName` / `version` / `identifier`：应用元信息
 - `bundle.resources`：打包时携带的本地资源（`resources/api`、`maps-skeleton.json`）
 - 窗口默认尺寸 1100×720，最小 880×560，深色主题，无边框
+
+## 持续集成（GitHub Actions）
+
+项目配置了 `.github/workflows/release.yml`，在 Windows runner 上构建并自动发布 Release：
+
+- **触发方式**：推送 `v*` 格式的 tag（如 `git tag v0.1.5 && git push origin v0.1.5`），或在 Actions 面板手动触发
+- **构建内容**：仅 NSIS 安装包（见 `tauri.conf.json` 的 `bundle.targets`）
+- **发布结果**：自动创建 GitHub Release，并上传 `src-tauri/target/release/bundle/nsis/` 下的安装程序；同时留存 workflow artifacts
+
+使用方式：
+
+```powershell
+git tag v0.1.5
+git push origin v0.1.5
+```
+
+> 注意：Windows runner 按 2 倍分钟数计费，且 release 构建开启了 LTO，单次耗时较长，建议仅在打 tag 时触发。
 
 ## 关于
 
