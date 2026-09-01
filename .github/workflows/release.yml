@@ -32,6 +32,22 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      # 读取 RELEASE_NOTES.md 作为 Release 说明（发布前在本地维护好该文件）。
+      # 文件不存在或为空时，说明留空，不会中断构建。
+      - name: Read release notes
+        id: notes
+        shell: bash
+        run: |
+          if [ -s RELEASE_NOTES.md ]; then
+            {
+              echo 'body<<RELEASE_NOTES_EOF'
+              cat RELEASE_NOTES.md
+              echo 'RELEASE_NOTES_EOF'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "body=" >> "$GITHUB_OUTPUT"
+          fi
+
       # 构建 Tauri 应用（前端由 beforeBuildCommand 自动构建到 src-react/dist），
       # 并自动创建 GitHub Release，上传 NSIS 安装包。
       # __VERSION__ 会被替换为 tauri.conf.json 中的应用版本。
@@ -42,7 +58,9 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: 'IC Tarkov v__VERSION__'
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
-          generateReleaseNotes: true
+          # 使用 RELEASE_NOTES.md 作为说明，不再由 GitHub 生成 commit 列表
+          generateReleaseNotes: false
           uploadWorkflowArtifacts: true
