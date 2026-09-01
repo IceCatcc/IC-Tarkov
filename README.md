@@ -4,6 +4,24 @@
 
 > 地图骨架与标记参考 [tarkov-dev](https://github.com/the-hideout/tarkov-dev)（MIT 协议）。
 
+## 关于
+
+本项目的设计与数据解析参考社区成果，以下信息同步自软件内「设置 → 关于」：
+
+- **数据来源**：游戏数据（任务、地图、物品、商人、本地化等）均来自 [tarkov.dev](https://tarkov.dev) 提供的开放接口；中文 Wiki 使用 [eftarkov.com](https://www.eftarkov.com/)，特此致谢。
+- **项目参考**：本项目的设计与数据解析参考了 [tarkov.dev](https://tarkov.dev) 的社区成果，向其贡献者致谢。
+- **开发者**：icecat · 主页 [icecat.cc](https://icecat.cc)
+- **开源仓库**：[github.com/IceCatcc/IC-Tarkov](https://github.com/IceCatcc/IC-Tarkov)
+
+> **Vibe Coding 声明**：本项目在开发过程中深度使用 AI 编程（Vibe Coding）辅助生成与迭代，特此说明。代码可能未经充分人工审查，使用风险自负。
+
+## 应用截图
+![alt text](imgs/1.png)
+![alt text](imgs/2.png)
+![alt text](imgs/3.png)
+![alt text](imgs/4.png)
+
+
 ## 技术栈
 
 - **前端**：React 18 + TypeScript + Vite + Tailwind CSS
@@ -115,17 +133,6 @@ git push origin v0.1.6
 > 若 `RELEASE_NOTES.md` 不存在或为空，Release 仍会正常创建，只是说明部分为空。
 
 > 注意：Windows runner 按 2 倍分钟数计费，且 release 构建开启了 LTO，单次耗时较长，建议仅在打 tag 时触发。
-
-## 关于
-
-本项目的设计与数据解析参考社区成果，以下信息同步自软件内「设置 → 关于」：
-
-- **数据来源**：游戏数据（任务、地图、物品、商人、本地化等）均来自 [tarkov.dev](https://tarkov.dev) 提供的开放接口；中文 Wiki 使用 [eftarkov.com](https://www.eftarkov.com/)，特此致谢。
-- **项目参考**：本项目的设计与数据解析参考了 [tarkov.dev](https://tarkov.dev) 的社区成果，向其贡献者致谢。
-- **开发者**：icecat · 主页 [icecat.cc](https://icecat.cc)
-- **开源仓库**：[github.com/IceCatcc/IC-Tarkov](https://github.com/IceCatcc/IC-Tarkov)
-
-> **Vibe Coding 声明**：本项目在开发过程中深度使用 AI 编程（Vibe Coding）辅助生成与迭代，特此说明。代码可能未经充分人工审查，使用风险自负。
 
 ## 许可
 
