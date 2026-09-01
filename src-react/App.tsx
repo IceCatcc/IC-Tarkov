@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   initTauri,
   startWatching,
@@ -24,6 +24,9 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(
     () => typeof localStorage !== 'undefined' && localStorage.getItem('ic-tarkov.helpSeen.v1') !== '1',
   )
+  // 帮助窗口展示期间暂缓打开设置（缺日志目录时），待其关闭后再补上，
+  // 避免两个浮层同时出现、设置窗口盖住帮助窗口。
+  const pendingOpenSettings = useRef(false)
   const closeHelp = () => {
     try {
       localStorage.setItem('ic-tarkov.helpSeen.v1', '1')
@@ -31,8 +34,13 @@ export default function App() {
       /* ignore */
     }
     setShowHelp(false)
+    if (pendingOpenSettings.current) {
+      pendingOpenSettings.current = false
+      openSettings()
+    }
   }
   const goToSettings = () => {
+    pendingOpenSettings.current = false
     closeHelp()
     openSettings()
   }
@@ -70,9 +78,15 @@ export default function App() {
         if (st.uiPrefs && Object.keys(st.uiPrefs).length > 0) {
           useStore.getState().applyUiPrefs(st.uiPrefs)
         }
-        // 日志目录未配置：不启动监控，打开设置引导用户选择
+        // 日志目录未配置：不启动监控，引导用户到设置里选择。
+        // 若首次启动的帮助窗口正在展示，则先挂起，等帮助关闭后再打开设置，
+        // 避免两个浮层叠放（设置窗口层级更高会盖住帮助窗口）。
         if (!st.logDir) {
-          useStore.getState().openSettings()
+          const helpSeen =
+            typeof localStorage !== 'undefined' &&
+            localStorage.getItem('ic-tarkov.helpSeen.v1') === '1'
+          if (helpSeen) useStore.getState().openSettings()
+          else pendingOpenSettings.current = true
           return undefined
         }
         return startWatching(st.logDir)
@@ -114,7 +128,7 @@ export default function App() {
 
   return (
     <div className="h-full flex flex-col">
-      <TopBar />
+      <TopBar onShowHelp={() => setShowHelp(true)} />
       <main className="flex-1 min-w-0 overflow-hidden">
         {page === 'monitor' && <MonitorPage />}
         {questAlive && (
@@ -141,8 +155,8 @@ export default function App() {
           >
             {/* 头部 */}
             <div className="relative px-5 pt-5 pb-4 border-b border-line bg-gradient-to-b from-ink-700/60 to-transparent text-center">
-              <div className="text-[18px] font-semibold text-[#e6edf3]">欢迎使用 IC Tarkov</div>
-              <div className="mt-1 text-[13px] text-muted">首次启动，请按以下步骤完成配置</div>
+              <div className="text-[18px] font-semibold text-[#e6edf3]">使用帮助</div>
+              <div className="mt-1 text-[13px] text-muted">请按以下步骤完成配置</div>
             </div>
 
             {/* 步骤 */}
@@ -154,7 +168,7 @@ export default function App() {
                 },
                 {
                   t: '2. 配置截图目录',
-                  d: '配置截图目录，指向「我的文档\\Escape from Tarkov\\Screenshots\\」。若该目录不存在，请进入「地图」页面后按 PrintScreen 键（默认）进行截图。',
+                  d: '配置截图目录，指向「文档\\Escape from Tarkov\\Screenshots\\」。若该目录不存在，请进入游戏后按 PrintScreen 键（默认）进行截图后再配置。',
                 },
                 {
                   t: '3. 设置游戏档',

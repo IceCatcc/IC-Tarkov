@@ -36,7 +36,7 @@ function WinButton({
   )
 }
 
-export function TopBar() {
+export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
   const page = useStore((s) => s.page)
   const setPage = useStore((s) => s.setPage)
   const watcher = useStore((s) => s.watcher)
@@ -99,6 +99,13 @@ export function TopBar() {
           className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
         >
           ⚙ 设置
+        </button>
+        <button
+          onClick={onShowHelp}
+          title="帮助 / 使用说明"
+          className="px-1 text-[14px] text-muted hover:text-[#e6edf3] transition-colors"
+        >
+          ?
         </button>
       </div>
 
