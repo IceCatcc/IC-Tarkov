@@ -14,6 +14,7 @@ import { QuestGraphPage } from './pages/QuestGraphPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { MapPage } from './pages/MapPage'
 import SettingsModal from './components/SettingsModal'
+import AboutModal from './components/AboutModal'
 import { WikiDrawer } from './components/WikiDrawer'
 import { Toasts } from './components/Toasts'
 
@@ -27,6 +28,7 @@ export default function App() {
   // 帮助窗口展示期间暂缓打开设置（缺日志目录时），待其关闭后再补上，
   // 避免两个浮层同时出现、设置窗口盖住帮助窗口。
   const pendingOpenSettings = useRef(false)
+  const [showAbout, setShowAbout] = useState(false)
   const closeHelp = () => {
     try {
       localStorage.setItem('ic-tarkov.helpSeen.v1', '1')
@@ -194,6 +196,12 @@ export default function App() {
                 我知道了
               </button>
               <button
+                onClick={() => setShowAbout(true)}
+                className="px-4 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+              >
+                关于
+              </button>
+              <button
                 onClick={goToSettings}
                 className="px-4 py-1.5 rounded bg-amber text-black text-[14px] font-medium hover:opacity-90"
               >
@@ -203,6 +211,7 @@ export default function App() {
           </div>
         </div>
       )}
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       <WikiDrawer />
       <Toasts />
     </div>

@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVersion } from '@tauri-apps/api/app'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useStore } from '../store'
 import { checkLatestRelease, isNewer, RELEASES_PAGE, type ReleaseInfo } from '../updater'
+import { openUrl } from '../tauri'
 
 const win = getCurrentWindow()
 
@@ -178,9 +181,33 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
 
             <div className="px-5 py-4 overflow-y-auto flex-1 min-h-0">
               {latest ? (
-                <div className="text-[13px] text-[#c9d1d9] leading-relaxed whitespace-pre-wrap break-words">
-                  {latest.notes || '（该版本未提供更新说明）'}
-                </div>
+                latest.notes ? (
+                  <div className="text-[13px] text-[#c9d1d9] leading-relaxed break-words release-notes">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        a: ({ href, children }) => (
+                          <a
+                            href={href}
+                            className="text-[#d4a174] hover:underline"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              if (href) openUrl(href)
+                            }}
+                          >
+                            {children}
+                          </a>
+                        ),
+                      }}
+                    >
+                      {latest.notes}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="text-[13px] text-muted leading-relaxed">
+                    （该版本未提供更新说明）
+                  </div>
+                )
               ) : (
                 <div className="text-[13px] text-muted leading-relaxed">
                   未能获取版本信息（可能未联网）。可前往 Releases 页面查看更新记录。
@@ -195,14 +222,12 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
               >
                 关闭
               </button>
-              <a
-                href={latest?.url || RELEASES_PAGE}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                onClick={() => openUrl(latest?.url || RELEASES_PAGE)}
                 className="px-3 py-1.5 rounded bg-amber text-black text-[13px] font-medium hover:opacity-90"
               >
                 前往下载
-              </a>
+              </button>
             </div>
           </div>
         </div>

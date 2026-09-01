@@ -51,3 +51,54 @@ body {
 .animate-toast-in {
     animation: toast-in 0.18s ease-out;
 }
+
+/* 版本说明（markdown 渲染）基础排版 */
+.release-notes h1,
+.release-notes h2,
+.release-notes h3,
+.release-notes h4 {
+  margin: 0.6em 0 0.3em;
+  font-weight: 600;
+  color: #e6edf3;
+  line-height: 1.35;
+}
+.release-notes h1 { font-size: 17px; }
+.release-notes h2 { font-size: 15px; }
+.release-notes h3,
+.release-notes h4 { font-size: 14px; }
+.release-notes p { margin: 0.5em 0; }
+.release-notes ul,
+.release-notes ol { margin: 0.5em 0; padding-left: 1.4em; }
+.release-notes ul { list-style: disc; }
+.release-notes ol { list-style: decimal; }
+.release-notes li { margin: 0.2em 0; }
+.release-notes a { color: #d4a174; text-decoration: none; }
+.release-notes a:hover { text-decoration: underline; }
+.release-notes code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.release-notes pre {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.release-notes pre code { background: transparent; border: 0; padding: 0; }
+.release-notes blockquote {
+  margin: 0.6em 0;
+  padding-left: 10px;
+  border-left: 3px solid #30363d;
+  color: #8b949e;
+}
+.release-notes strong { color: #e6edf3; }
+.release-notes hr { border: 0; border-top: 1px solid #30363d; margin: 0.8em 0; }
+.release-notes table { border-collapse: collapse; margin: 0.6em 0; }
+.release-notes th,
+.release-notes td { border: 1px solid #30363d; padding: 4px 8px; }
