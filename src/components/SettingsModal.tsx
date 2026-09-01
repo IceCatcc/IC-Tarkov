@@ -13,6 +13,9 @@ import {
   openDataDir,
   getDataStatus,
   refreshGameData,
+  getDataLocation,
+  setDataLocation,
+  type DataLocation,
 } from '../tauri'
 import type { DataStatus, DataSyncProgress, DataSyncReport } from '../types'
 
@@ -97,12 +100,31 @@ export default function SettingsModal() {
   const [error, setError] = useState<string | null>(null)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [appVersion, setAppVersion] = useState('')
+  const [dataLoc, setDataLoc] = useState<DataLocation>('appdata')
+  const [dataLocBusy, setDataLocBusy] = useState(false)
+  const [dataLocMsg, setDataLocMsg] = useState<string | null>(null)
 
   useEffect(() => {
     getVersion()
       .then(setAppVersion)
       .catch(() => {})
+    getDataLocation()
+      .then(setDataLoc)
+      .catch(() => {})
   }, [])
+
+  const onSetDataLoc = async (loc: DataLocation) => {
+    if (loc === dataLoc || dataLocBusy) return
+    setDataLocBusy(true)
+    setDataLocMsg('正在迁移数据并重启应用…')
+    try {
+      await setDataLocation(loc)
+      // 命令会触发应用重启，成功响应后稍候即重启
+    } catch (e) {
+      setDataLocMsg(`切换失败：${String(e)}`)
+      setDataLocBusy(false)
+    }
+  }
 
   /* ---------- 游戏数据（tarkov.dev 原始 API JSON 缓存） ---------- */
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null)
@@ -386,6 +408,42 @@ export default function SettingsModal() {
             </div>
             {feedback && (
               <div className="text-[14px] text-ok mt-2">{feedback}</div>
+            )}
+          </div>
+
+          {/* 数据目录位置 */}
+          <div className="border-t border-line pt-4">
+            <div className="text-[14px] text-muted mb-2">数据目录位置</div>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-[14px] text-[#e6edf3] cursor-pointer">
+                <input
+                  type="radio"
+                  name="dataloc"
+                  checked={dataLoc === 'appdata'}
+                  onChange={() => onSetDataLoc('appdata')}
+                  className="accent-[#ef9f27]"
+                />
+                应用数据目录（AppData）
+              </label>
+              <label className="flex items-center gap-2 text-[14px] text-[#e6edf3] cursor-pointer">
+                <input
+                  type="radio"
+                  name="dataloc"
+                  checked={dataLoc === 'portable'}
+                  onChange={() => onSetDataLoc('portable')}
+                  className="accent-[#ef9f27]"
+                />
+                程序目录（便携 / 可移动）
+              </label>
+            </div>
+            <div className="text-[13px] text-muted mt-2">
+              切换位置会自动迁移全部数据（配置、任务进度、缓存）到对应目录，并重启应用生效。
+            </div>
+            {dataLocBusy && (
+              <div className="text-[14px] text-amber mt-2">{dataLocMsg}</div>
+            )}
+            {!dataLocBusy && dataLocMsg && (
+              <div className="text-[14px] text-ok mt-2">{dataLocMsg}</div>
             )}
           </div>
 

@@ -5,7 +5,8 @@
 //!
 //! 目录约定：
 //!   resources/api/*.json          随安装包分发的种子（由 scripts/fetch_api_data.py 抓取）
-//!   <app_data_dir>/tarkov-api/    运行时缓存，软件端联网刷新时直接覆盖这里的文件
+//!   <data_root>/tarkov-api/       运行时缓存，软件端联网刷新时直接覆盖这里的文件
+//!                                    （data_root 由数据目录位置决定：AppData 或程序目录/data）
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -76,13 +77,9 @@ fn now_secs() -> i64 {
 
 // ---------------- 路径 ----------------
 
-/// 运行时缓存目录：<app_data_dir>/tarkov-api
+/// 运行时缓存目录：<data_root>/tarkov-api（data_root 由数据目录位置决定）
 pub fn cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法定位应用数据目录：{e}"))?
-        .join("tarkov-api");
+    let dir = crate::data_root(app)?.join("tarkov-api");
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建缓存目录失败：{e}"))?;
     Ok(dir)
 }

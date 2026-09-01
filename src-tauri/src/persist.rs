@@ -23,7 +23,7 @@ pub struct Persisted {
 }
 
 pub fn state_path(app: &tauri::AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join("quest_state.json"))
+    crate::data_root(app).ok().map(|d| d.join("quest_state.json"))
 }
 
 /// 读取上次持久化的状态；文件不存在/损坏则返回空（等效首次启动）

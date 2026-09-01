@@ -227,6 +227,16 @@ export async function openDataDir(): Promise<void> {
   await invoke('open_data_dir')
 }
 
+export type DataLocation = 'appdata' | 'portable'
+
+export async function getDataLocation(): Promise<DataLocation> {
+  return (await invoke<string>('get_data_location')) as DataLocation
+}
+
+export async function setDataLocation(location: DataLocation): Promise<void> {
+  await invoke('set_data_location', { location })
+}
+
 /**
  * 从 tarkov.dev API 同步服务器时间（用于推算塔科夫游戏内左右局时间）。
  * 取不到（离线 / 接口不可用时）返回 null，前端据此隐藏时间显示。
