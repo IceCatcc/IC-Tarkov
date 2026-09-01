@@ -104,6 +104,10 @@ export default function SettingsModal() {
   const [dataLocBusy, setDataLocBusy] = useState(false)
   const [dataLocMsg, setDataLocMsg] = useState<string | null>(null)
 
+  // 设置项分组视觉：标题(白亮加粗) / 选项(主色) / 说明(灰小字) 三级层级
+  const TITLE_CLS = 'text-[14px] font-semibold text-[#e6edf3]'
+  const DESC_CLS = 'text-[13px] text-muted leading-relaxed'
+
   useEffect(() => {
     getVersion()
       .then(setAppVersion)
@@ -294,29 +298,30 @@ export default function SettingsModal() {
         </div>
 
         <div className="space-y-4 overflow-y-auto pr-1 flex-1 min-h-0">
-          <DirField label="日志监控目录" value={logDir} onChange={setLogDir} />
-          <DirField
-            label="截图监控目录（地图页玩家定位）"
-            value={shotDir}
-            onChange={setShotDir}
-          />
-
-          <label className="flex items-center gap-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={deleteShots}
-              onChange={(e) => setDeleteShots(e.target.checked)}
-              className="w-4 h-4 accent-amber"
-            />
-            <span className="text-[15px] text-[#e6edf3]">
-              读取坐标后删除截图
-            </span>
-          </label>
-
-          {/* 界面缩放（类显示器缩放） */}
+          {/* 监控目录 */}
           <div>
-            <label className="text-[14px] text-muted block mb-1">界面缩放</label>
-            <div className="flex items-center gap-2">
+            <div className={`${TITLE_CLS} mb-2`}>监控目录</div>
+            <DirField label="日志监控目录" value={logDir} onChange={setLogDir} />
+            <DirField
+              label="截图监控目录（地图页玩家定位）"
+              value={shotDir}
+              onChange={setShotDir}
+            />
+            <label className="flex items-center gap-3 cursor-pointer select-none pt-1">
+              <input
+                type="checkbox"
+                checked={deleteShots}
+                onChange={(e) => setDeleteShots(e.target.checked)}
+                className="w-4 h-4 accent-amber"
+              />
+              <span className="text-[15px] text-[#e6edf3]">读取坐标后删除截图</span>
+            </label>
+          </div>
+
+          {/* 界面缩放 */}
+          <div className="border-t border-line pt-4">
+            <div className={`${TITLE_CLS} mb-2`}>界面缩放</div>
+            <div className="flex items-center gap-2 flex-wrap">
               {[1, 1.25, 1.5, 2].map((v) => (
                 <button
                   key={v}
@@ -330,7 +335,6 @@ export default function SettingsModal() {
                   {v}x
                 </button>
               ))}
-              <span className="text-[13px] text-muted ml-1">等效显示器缩放，立即生效并持久化</span>
             </div>
           </div>
 
@@ -342,7 +346,7 @@ export default function SettingsModal() {
 
           {/* 游戏数据（tarkov.dev） */}
           <div className="border-t border-line pt-4">
-            <div className="text-[14px] text-muted mb-2">游戏数据（tarkov.dev）</div>
+            <div className={`${TITLE_CLS} mb-2`}>游戏数据（tarkov.dev）</div>
             <div className="flex items-center gap-2">
               <button
                 onClick={onUpdateData}
@@ -351,22 +355,21 @@ export default function SettingsModal() {
               >
                 {syncing ? '更新中…' : '更新数据'}
               </button>
-              <span className="text-[13px] text-muted">
+              <span className={DESC_CLS}>
                 {dataStatus
                   ? `${fmtTime(dataStatus.updatedAt)} · ${dataStatus.questCount} 个任务 / ${dataStatus.mapCount} 张地图`
                   : '读取中…'}
               </span>
             </div>
-            {syncMsg && <div className="text-[13px] text-muted mt-2">{syncMsg}</div>}
-            <div className="text-[13px] text-muted mt-2">
-              数据来自 tarkov.dev，缓存于应用数据目录；
+            {syncMsg && <div className={`${DESC_CLS} mt-2`}>{syncMsg}</div>}
+            <div className={`${DESC_CLS} mt-2`}>
               {dataStatus && !dataStatus.cached && ' 当前缓存不完整，需联网更新。'}
             </div>
           </div>
 
           {/* 数据管理 */}
           <div className="border-t border-line pt-4">
-            <div className="text-[14px] text-muted mb-2">数据管理</div>
+            <div className={`${TITLE_CLS} mb-2`}>数据管理</div>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={onRescan}
@@ -404,7 +407,7 @@ export default function SettingsModal() {
 
           {/* 数据目录位置 */}
           <div className="border-t border-line pt-4">
-            <div className="text-[14px] text-muted mb-2">数据目录位置</div>
+            <div className={`${TITLE_CLS} mb-2`}>数据目录位置</div>
             <div className="flex flex-col gap-2">
               <label className="flex items-center gap-2 text-[14px] text-[#e6edf3] cursor-pointer">
                 <input
@@ -427,7 +430,7 @@ export default function SettingsModal() {
                 程序目录（便携 / 可移动）
               </label>
             </div>
-            <div className="text-[13px] text-muted mt-2">
+            <div className={`${DESC_CLS} mt-2`}>
               切换位置会自动迁移全部数据（配置、任务进度、缓存）到对应目录，并重启应用生效。
             </div>
             {dataLocBusy && (
