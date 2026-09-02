@@ -27,6 +27,7 @@ import type {
 } from '../types'
 import { useStore, useTopPad } from '../store'
 import { QuestCard } from '../components/QuestCard'
+import { bossImage } from '../bossImages'
 
 /* ================= 常量 ================= */
 
@@ -1450,7 +1451,20 @@ export function MapPage() {
                         key={b.id}
                         className="flex items-center justify-between gap-2 text-[14px]"
                       >
-                        <span className="text-[#c9d1d9] truncate">{b.nameZh}</span>
+                        <span className="flex items-center gap-1.5 min-w-0">
+                          {bossImage(b.id) && (
+                            <img
+                              src={bossImage(b.id)!}
+                              alt=""
+                              loading="lazy"
+                              draggable={false}
+                              className="w-[18px] h-[18px] shrink-0 rounded-full object-cover bg-ink-700/60"
+                            />
+                          )}
+                          <span className="text-[#c9d1d9] truncate" title={b.nameZh}>
+                            {b.nameZh}
+                          </span>
+                        </span>
                         <span className="shrink-0 tabular-nums text-amber">
                           {Math.round(b.chance * 100)}%
                         </span>
