@@ -97,32 +97,33 @@ export default function SettingsModal() {
   const [busy, setBusy] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [dataLoc, setDataLoc] = useState<DataLocation>('appdata')
-  const [dataLocBusy, setDataLocBusy] = useState(false)
-  const [dataLocMsg, setDataLocMsg] = useState<string | null>(null)
+  const [dataLoc, setDataLoc] = useState<DataLocation | null>(null)
+  // 用户点选的目标位置（null = 跟随当前生效位置）
+  const [selLoc, setSelLoc] = useState<DataLocation['kind'] | null>(null)
+  const [migrating, setMigrating] = useState(false)
 
   // 设置项分组视觉：标题(白亮加粗) / 选项(主色) / 说明(灰小字) 三级层级
   const TITLE_CLS = 'text-[14px] font-semibold text-[#e6edf3]'
   const DESC_CLS = 'text-[13px] text-muted leading-relaxed'
+
+  const LOC_OPTIONS: { kind: DataLocation['kind']; name: string; desc: string }[] = [
+    {
+      kind: 'portable',
+      name: '程序目录 data（便携）',
+      desc: '数据放在程序安装目录旁的 data 里，整包拷贝即可带走',
+    },
+    {
+      kind: 'appdata',
+      name: '应用数据目录（AppData）',
+      desc: '数据放在系统用户数据目录，卸载或更换程序位置不丢数据',
+    },
+  ]
 
   useEffect(() => {
     getDataLocation()
       .then(setDataLoc)
       .catch(() => {})
   }, [])
-
-  const onSetDataLoc = async (loc: DataLocation) => {
-    if (loc === dataLoc || dataLocBusy) return
-    setDataLocBusy(true)
-    setDataLocMsg('正在迁移数据并重启应用…')
-    try {
-      await setDataLocation(loc)
-      // 命令会触发应用重启，成功响应后稍候即重启
-    } catch (e) {
-      setDataLocMsg(`切换失败：${String(e)}`)
-      setDataLocBusy(false)
-    }
-  }
 
   /* ---------- 游戏数据（tarkov.dev 原始 API JSON 缓存） ---------- */
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null)
@@ -231,6 +232,27 @@ export default function SettingsModal() {
       await openDataDir()
     } catch (e) {
       setError(String(e))
+    }
+  }
+
+  const onMigrateLoc = async () => {
+    if (!dataLoc || !selLoc || selLoc === dataLoc.kind) return
+    setMigrating(true)
+    setError(null)
+    setFeedback(null)
+    try {
+      const info = await setDataLocation(selLoc)
+      setDataLoc(info)
+      setSelLoc(null)
+      setFeedback(
+        info.kind === 'portable'
+          ? '数据已迁移到程序目录 data（便携），设置与缓存均已一并搬走'
+          : '数据已迁移到应用数据目录（AppData），设置与缓存均已一并搬走',
+      )
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setMigrating(false)
     }
   }
 
@@ -356,9 +378,11 @@ export default function SettingsModal() {
               </span>
             </div>
             {syncMsg && <div className={`${DESC_CLS} mt-2`}>{syncMsg}</div>}
-            <div className={`${DESC_CLS} mt-2`}>
-              {dataStatus && !dataStatus.cached && ' 当前缓存不完整，需联网更新。'}
-            </div>
+            {dataStatus && !dataStatus.cached && (
+              <div className="text-[14px] text-amber mt-2">
+                缓存为空或不完整：请点击上方「更新数据」联网获取（首次使用需联网）。
+              </div>
+            )}
           </div>
 
           {/* 数据管理 */}
@@ -397,41 +421,57 @@ export default function SettingsModal() {
             {feedback && (
               <div className="text-[14px] text-ok mt-2">{feedback}</div>
             )}
-          </div>
-
-          {/* 数据目录位置 */}
-          <div className="border-t border-line pt-4">
-            <div className={`${TITLE_CLS} mb-2`}>数据目录位置</div>
-            <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-2 text-[14px] text-[#e6edf3] cursor-pointer">
-                <input
-                  type="radio"
-                  name="dataloc"
-                  checked={dataLoc === 'appdata'}
-                  onChange={() => onSetDataLoc('appdata')}
-                  className="accent-[#ef9f27]"
-                />
-                应用数据目录（AppData）
-              </label>
-              <label className="flex items-center gap-2 text-[14px] text-[#e6edf3] cursor-pointer">
-                <input
-                  type="radio"
-                  name="dataloc"
-                  checked={dataLoc === 'portable'}
-                  onChange={() => onSetDataLoc('portable')}
-                  className="accent-[#ef9f27]"
-                />
-                程序目录（便携 / 可移动）
-              </label>
-            </div>
-            <div className={`${DESC_CLS} mt-2`}>
-              切换位置会自动迁移全部数据（配置、任务进度、缓存）到对应目录，并重启应用生效。
-            </div>
-            {dataLocBusy && (
-              <div className="text-[14px] text-amber mt-2">{dataLocMsg}</div>
-            )}
-            {!dataLocBusy && dataLocMsg && (
-              <div className="text-[14px] text-ok mt-2">{dataLocMsg}</div>
+            {dataLoc && (
+              <div className="border-t border-line pt-3 mt-3">
+                <div className={`${TITLE_CLS} mb-1.5`}>数据目录位置</div>
+                <div className="space-y-1.5">
+                  {LOC_OPTIONS.map((o) => {
+                    const active = (selLoc ?? dataLoc.kind) === o.kind
+                    return (
+                      <button
+                        key={o.kind}
+                        type="button"
+                        onClick={() => setSelLoc(o.kind)}
+                        disabled={migrating}
+                        className={`w-full text-left flex items-start gap-2.5 px-3 py-2 rounded border transition-colors disabled:opacity-60 ${
+                          active
+                            ? 'border-amber bg-ink-700'
+                            : 'border-line hover:bg-ink-700'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          readOnly
+                          checked={active}
+                          className="w-4 h-4 mt-0.5 accent-amber pointer-events-none"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[14px] text-[#e6edf3]">
+                            {o.name}
+                          </span>
+                          <span className="block text-[13px] text-muted mt-0.5">
+                            {o.desc}
+                          </span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    onClick={onMigrateLoc}
+                    disabled={
+                      !selLoc || selLoc === dataLoc.kind || migrating
+                    }
+                    className="px-3 py-1.5 rounded bg-amber text-black text-[14px] font-medium hover:opacity-90 disabled:opacity-40"
+                  >
+                    {migrating ? '迁移中…' : '迁移'}
+                  </button>
+                </div>
+                <div className={`${DESC_CLS} mt-1.5`}>
+                  启动时自动定位：程序目录 data 优先，无数据再找 AppData；两边都没有数据时自动在程序目录创建。目标位置已有另一份数据时会拒绝迁移。
+                </div>
+              </div>
             )}
           </div>
         </div>

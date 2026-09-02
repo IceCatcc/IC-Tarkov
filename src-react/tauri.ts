@@ -230,14 +230,30 @@ export async function openDataDir(): Promise<void> {
   await invoke('open_data_dir')
 }
 
-export type DataLocation = 'appdata' | 'portable'
-
-export async function getDataLocation(): Promise<DataLocation> {
-  return (await invoke<string>('get_data_location')) as DataLocation
+/** 数据根目录自动探测结果（后端 get_data_location） */
+export interface DataLocation {
+  /** 实际生效的根：portable = 程序目录 data；appdata = AppData */
+  kind: 'appdata' | 'portable'
+  /** 实际生效根目录的完整路径 */
+  root: string
+  /** 程序目录 data 里是否已有数据 */
+  portableHasData: boolean
+  /** AppData 里是否已有数据 */
+  appdataHasData: boolean
 }
 
-export async function setDataLocation(location: DataLocation): Promise<void> {
-  await invoke('set_data_location', { location })
+export async function getDataLocation(): Promise<DataLocation> {
+  return await invoke<DataLocation>('get_data_location')
+}
+
+/** 迁移数据目录到目标位置（后端 set_data_location）：
+ * 写入 settings.json 的数据位置记录，并把 settings / 任务进度 / tarkov-api 缓存整体搬过去。
+ * @param kind 目标位置：portable = 程序目录 data；appdata = AppData
+ */
+export async function setDataLocation(
+  kind: DataLocation['kind'],
+): Promise<DataLocation> {
+  return await invoke<DataLocation>('set_data_location', { kind })
 }
 
 /**

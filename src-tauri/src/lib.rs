@@ -79,46 +79,193 @@ impl Default for AppSettings {
     }
 }
 
-// ---------------- 数据目录位置（AppData / 便携程序目录） ----------------
+// ---------------- 数据根目录（自动探测，不再使用位置标记文件） ----------------
 
-/// 位置标记固定放在 AppData（无论当前模式），用于启动时确定数据根，避免「鸡生蛋」
-fn marker_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    app.path().app_config_dir().map_err(|e| e.to_string())
+/// 程序目录下的数据目录（默认/优先，即可移动的「便携目录」）
+fn portable_data_root() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok(exe
+        .parent()
+        .ok_or_else(|| "无法确定程序目录".to_string())?
+        .join("data"))
 }
 
-fn read_data_location(app: &tauri::AppHandle) -> String {
-    match marker_dir(app) {
-        Ok(d) => std::fs::read_to_string(d.join("data_location.txt"))
-            .map(|s| s.trim().to_string())
-            .unwrap_or_else(|_| "appdata".into()),
-        Err(_) => "appdata".into(),
+/// 目录里是否已有「实质数据」：配置文件、任务进度，或 tarkov-api 缓存内已有 JSON。
+/// 仅被自动创建的空目录不算有数据，避免误导探测。
+fn root_has_data(p: &Path) -> bool {
+    if !p.is_dir() {
+        return false;
+    }
+    if p.join("settings.json").is_file() || p.join("quest_state.json").is_file() {
+        return true;
+    }
+    let api = p.join("tarkov-api");
+    if api.is_dir() {
+        if let Ok(rd) = std::fs::read_dir(&api) {
+            for e in rd.flatten() {
+                if e.path().extension().map_or(false, |x| x == "json") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// 数据根目录：程序目录 data 优先，无数据再找 AppData；
+/// 两侧都没有数据时在程序目录 data 下新建（若不可写则退回 AppData 新建）。
+/// 完全以「数据实际在哪」为准，不依赖任何标记文件 —— 手工搬目录 / 早期迁移错位都能自愈。
+pub fn data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let portable = portable_data_root()?;
+    if root_has_data(&portable) {
+        return Ok(portable);
+    }
+    let app_root = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    if root_has_data(&app_root) {
+        return Ok(app_root);
+    }
+    match std::fs::create_dir_all(&portable) {
+        Ok(()) => Ok(portable),
+        Err(_) => {
+            // 程序目录不可写（例如安装到受系统保护的位置）时退回 AppData
+            std::fs::create_dir_all(&app_root).map_err(|e| e.to_string())?;
+            Ok(app_root)
+        }
     }
 }
 
-fn write_data_location(app: &tauri::AppHandle, loc: &str) -> Result<(), String> {
-    let dir = marker_dir(app)?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join("data_location.txt"), loc).map_err(|e| e.to_string())
+/// 数据目录探测结果（供前端展示）
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DataLocationInfo {
+    /// 实际生效的根：portable = 程序目录 data；appdata = AppData
+    kind: String,
+    /// 实际生效根目录的完整路径
+    root: String,
+    /// 程序目录 data 里是否已有数据（说明当前为何选到这一侧）
+    portable_has_data: bool,
+    /// AppData 里是否已有数据
+    appdata_has_data: bool,
 }
 
-/// 当前数据根目录：appdata 模式用 AppData，portable 模式用程序目录下的 data/
-pub fn data_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let root = if read_data_location(app) == "portable" {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        exe.parent()
-            .ok_or_else(|| "无法确定程序目录".to_string())?
-            .join("data")
-    } else {
-        app.path().app_config_dir().map_err(|e| e.to_string())?
-    };
-    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-    Ok(root)
+/// 把「数据位置选择」记入 settings.json（ui_prefs.dataLocation）。
+/// 该记录是用户上次选择/生效的位置，供前端回显与排障；
+/// 运行期定位仍由 data_root() 按「数据实际在哪」自动探测，迁移成功后两者保持一致。
+fn record_data_location(root: &Path, kind: &str) {
+    let path = root.join("settings.json");
+    let mut s = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<AppSettings>(&t).ok())
+        .unwrap_or_default();
+    let val = serde_json::json!({
+        "kind": kind,
+        "root": root.to_string_lossy(),
+    });
+    let changed = s.ui_prefs.get("dataLocation").map_or(true, |v| v != &val);
+    if changed {
+        s.ui_prefs.insert("dataLocation".to_string(), val);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&s) {
+            let _ = std::fs::write(&path, json);
+        }
+    }
 }
 
-/// 读取当前数据目录位置（供前端展示）
+fn make_location_info(portable: &Path, app_root: &Path, root: &Path) -> DataLocationInfo {
+    let kind = if root == portable { "portable" } else { "appdata" };
+    DataLocationInfo {
+        kind: kind.to_string(),
+        root: root.to_string_lossy().into_owned(),
+        portable_has_data: root_has_data(portable),
+        appdata_has_data: root_has_data(app_root),
+    }
+}
+
+/// 读取当前生效的数据根目录（自动探测结果，供前端展示）
 #[tauri::command]
-fn get_data_location(app: tauri::AppHandle) -> String {
-    read_data_location(&app)
+fn get_data_location(app: tauri::AppHandle) -> Result<DataLocationInfo, String> {
+    let portable = portable_data_root()?;
+    let app_root = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let root = data_root(&app)?;
+    // 清理旧版本遗留的标记文件（已不再使用）
+    let _ = std::fs::remove_file(app_root.join("data_location.txt"));
+    let info = make_location_info(&portable, &app_root, &root);
+    record_data_location(&root, &info.kind);
+    Ok(info)
+}
+
+/// 递归把 src 目录内容复制到 dst（不含 src 本身），同名文件被覆盖
+fn copy_dir_contents(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            copy_dir_contents(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to).map_err(|e| format!("复制 {} 失败：{e}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// 删除目录内的全部顶层内容（目录本身保留）
+fn remove_dir_contents(dir: &Path) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            std::fs::remove_dir_all(entry.path()).map_err(|e| e.to_string())?;
+        } else {
+            std::fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// 数据目录迁移（设置页「数据目录位置」切换时调用）：
+/// 写 settings.json 记录并把 settings.json / 任务进度 / tarkov-api 缓存整体搬到目标根，
+/// 复制全部成功后才清空原根，保证运行期自动探测稳定落在新位置。
+/// 目标根已存在数据时拒绝（避免两份数据互相覆盖）；复制中途失败会尽量回滚目标侧。
+#[tauri::command]
+fn set_data_location(app: tauri::AppHandle, kind: String) -> Result<DataLocationInfo, String> {
+    if apidata::status(&app).syncing {
+        return Err("数据更新正在进行中，请稍后再迁移".to_string());
+    }
+    let portable = portable_data_root()?;
+    let app_root = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let source = data_root(&app)?;
+    let target = match kind.as_str() {
+        "portable" => portable.clone(),
+        "appdata" => app_root.clone(),
+        other => return Err(format!("未知的数据位置：{other}")),
+    };
+    if source == target {
+        // 选中的就是当前生效位置：仅补写一次记录
+        record_data_location(&source, kind.as_str());
+        return Ok(make_location_info(&portable, &app_root, &source));
+    }
+    if root_has_data(&target) {
+        return Err(
+            "目标位置已存在另一份数据，为避免相互覆盖，请先在目标位置打开一次本应用确认内容，或手动整理后再迁移。"
+                .to_string(),
+        );
+    }
+    if let Err(e) = copy_dir_contents(&source, &target) {
+        // 复制中途失败：尽量回滚已复制到目标的内容，原根数据保持不动
+        let _ = remove_dir_contents(&target);
+        return Err(format!("迁移失败：{e}"));
+    }
+    // 数据已完整复制到目标，清空原根内容
+    if let Err(e) = remove_dir_contents(&source) {
+        return Err(format!(
+            "数据已复制到目标位置，但清理原位置失败（{e}）。重启后应用会自动以数据所在目录为准，无需重复迁移。"
+        ));
+    }
+    record_data_location(&target, kind.as_str());
+    Ok(make_location_info(&portable, &app_root, &target))
 }
 
 fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -169,7 +316,9 @@ fn save_settings(
         s.profile = p;
     }
     if let Some(u) = ui_prefs {
-        s.ui_prefs = u;
+        // 合并而非整表替换：UI 偏好只回传 graphPrefs/mapPrefs/uiScale，
+        // 保留后端写入的内部字段（如数据位置记录 dataLocation）。
+        s.ui_prefs.extend(u);
     }
     let p = settings_path(&app)?;
     if let Some(parent) = p.parent() {
@@ -766,66 +915,6 @@ fn open_data_dir(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// ---------------- 数据目录迁移 ----------------
-
-/// 递归复制目录内容并在复制成功后删除源（实现跨盘安全移动）
-fn copy_dir_recursive(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for entry in std::fs::read_dir(from)? {
-        let entry = entry?;
-        let path = entry.path();
-        let dest = to.join(entry.file_name());
-        if path.is_dir() {
-            copy_dir_recursive(&path, &dest)?;
-            let _ = std::fs::remove_dir_all(&path);
-        } else {
-            let _ = std::fs::copy(&path, &dest);
-            let _ = std::fs::remove_file(&path);
-        }
-    }
-    Ok(())
-}
-
-/// 把 old 目录下的全部内容迁移到 new 目录（文件级复制+删除，跨盘也安全）
-fn move_dir_contents(old: &Path, new: &Path) -> Result<(), String> {
-    if !old.exists() {
-        return Ok(());
-    }
-    std::fs::create_dir_all(new).map_err(|e| e.to_string())?;
-    copy_dir_recursive(old, new).map_err(|e| format!("迁移数据失败：{e}"))?;
-    let _ = std::fs::remove_dir_all(old);
-    Ok(())
-}
-
-/// 切换数据目录位置：写入位置标记 → 迁移旧数据 → 重启应用生效
-#[tauri::command]
-fn set_data_location(app: tauri::AppHandle, location: String) -> Result<AppSettings, String> {
-    if location != "appdata" && location != "portable" {
-        return Err("无效的数据目录位置".to_string());
-    }
-    let old_root = data_root(&app)?;
-    let new_root = if location == "portable" {
-        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        exe.parent()
-            .ok_or_else(|| "无法确定程序目录".to_string())?
-            .join("data")
-    } else {
-        app.path().app_config_dir().map_err(|e| e.to_string())?
-    };
-    // 先写位置标记（决定后续 data_root 解析），再迁移文件
-    write_data_location(&app, &location)?;
-    if old_root != new_root {
-        move_dir_contents(&old_root, &new_root)?;
-    }
-    // 迁移完成后重启应用以加载新位置的数据
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        let _ = handle.restart();
-    });
-    Ok(read_settings(&app))
-}
-
 pub(crate) fn emit_state(app: &tauri::AppHandle) {
     let st = app.state::<AppState>();
     let w = st.watcher.lock().unwrap();
@@ -898,6 +987,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // 数据根目录在每次需要时按「程序目录 data → AppData → 新建程序目录 data」自动探测，
+            // 不依赖任何标记文件，此处无需提前设置，直接进入状态初始化。
             app.manage(AppState {
                 store: Mutex::new(store::QuestStore::new()),
                 watcher: Mutex::new(None),
@@ -905,10 +996,15 @@ pub fn run() {
                 offsets: Mutex::new(HashMap::new()),
                 unlocked: Mutex::new(std::collections::HashSet::new()),
             });
-            // 装载 tarkov.dev 原始数据的派生索引；缓存缺失/过期时后台静默拉取
+            // 装载 tarkov.dev 原始数据的派生索引。
+            // 仅当缓存里已有部分数据且已过期时才后台静默拉取；
+            // 缓存为空（没有任何 JSON）时不自动联网下载，避免离线/首次启动空转与误报，
+            // 首次数据由用户在设置页点击「更新数据」获取。
             let handle = app.handle().clone();
             data::init(&handle);
-            if apidata::status(&handle).stale {
+            let st = apidata::status(&handle);
+            let has_cache = st.files.iter().any(|f| f.bytes > 0);
+            if st.stale && has_cache {
                 spawn_sync(handle, false);
             }
             Ok(())
