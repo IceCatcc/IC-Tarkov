@@ -48,16 +48,30 @@ jobs:
             echo "body=" >> "$GITHUB_OUTPUT"
           fi
 
+      # 版本号统一以 src-tauri/Cargo.toml 的 [package].version 为唯一来源
+      # （tauri.conf.json 不写 version，构建时自动回退读 Cargo.toml）。
+      # tauri-action 的 __VERSION__ 占位依赖 conf，这里改为显式提取版本，
+      # 生成 tag / Release 名，避免与 Cargo.toml 产生歧义。
+      - name: Resolve app version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' src-tauri/Cargo.toml | head -n 1)"
+          if [ -z "$VERSION" ]; then
+            echo "::error::version not found in src-tauri/Cargo.toml"
+            exit 1
+          fi
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
       # 构建 Tauri 应用（前端由 beforeBuildCommand 自动构建到 src-react/dist），
       # 并自动创建 GitHub Release，上传 NSIS 安装包。
-      # __VERSION__ 会被替换为 tauri.conf.json 中的应用版本。
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__
-          releaseName: 'IC Tarkov v__VERSION__'
+          tagName: ${{ steps.version.outputs.tag }}
+          releaseName: 'IC Tarkov ${{ steps.version.outputs.tag }}'
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false

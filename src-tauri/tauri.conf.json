@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "IC Tarkov",
-  "version": "0.1.7",
   "identifier": "com.icecat.ictarkov",
   "build": {
     "frontendDist": "../src-react/dist",

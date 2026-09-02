@@ -1,7 +1,6 @@
 {
   "name": "ic-tarkov",
   "private": true,
-  "version": "0.1.6",
   "type": "module",
   "scripts": {
     "tauri:dev": "tauri dev",

@@ -2,6 +2,8 @@
 
 本项目（IC Tarkov）的 AI 协作约定与常用操作流程。修改代码前请务必先读本文件。
 
+> **文档分工**：`README.md` 面向最终用户与普通贡献者，只介绍项目、运行与构建方式；面向 AI / 内部维护的说明（约束、发布细节、提交规则、行为约定等）只维护在本文件，README 不重复、不承载此类细节，避免两份文档漂移。
+
 ## 项目概览
 
 《逃离塔科夫》任务与地图助手，Tauri 2 + React + TypeScript 桌面应用。
@@ -36,15 +38,15 @@ npm run tauri:build   # 构建桌面应用（仅 NSIS 安装包）
 采用「本地维护说明文件 + 打 tag 触发 CI」方式。
 
 1. **更新 `RELEASE_NOTES.md`**：写入本次版本的更新内容（Markdown）。这是 GitHub Release 的说明正文。
-2. **核对版本号**：确保 `src-tauri/tauri.conf.json` 的 `version` 与要发布的版本一致（它同时决定 CI 生成的 tag 名 `v__VERSION__`）。
+2. **提升版本号**：修改 `src-tauri/Cargo.toml` 的 `package.version`（版本唯一来源）。`tauri.conf.json` 与 `package.json` 均不写 `version`，Tauri 构建/运行时自动回退读 Cargo.toml。改后跑一次 `cargo check`（或 `.\check-tauri.bat`）让 `Cargo.lock` 同步。CI 的 tag/Release 名由 `release.yml` 显式从 Cargo.toml 提取，不依赖 conf。
 3. **提交并打 tag**：
 
 ```powershell
 git add RELEASE_NOTES.md
 git commit -m "docs: 更新发布说明"
-git tag v0.1.6        # 必须与 tauri.conf.json 的 version 一致
+git tag v<version>    # <version> 必须与 Cargo.toml 的 package.version 一致
 git push origin main
-git push origin v0.1.6
+git push origin v<version>
 ```
 
 4. **CI 自动完成**：`.github/workflows/release.yml` 在 `windows-latest` 构建 NSIS 包，创建 GitHub Release，说明取自 `RELEASE_NOTES.md`。
@@ -84,4 +86,4 @@ git push origin v0.1.6
 ## 其他
 
 - `quest_analysis/` 目录已被 `.gitignore` 忽略，README 与提交中均不涉及。
-- 本项目为 Vibe Coding 项目（深度使用 AI 编程），README 与软件内「设置 → 关于」均已声明。
+- 本项目为 Vibe Coding 项目（深度使用 AI 编程），README 与软件内「帮助窗口 → 关于」均已声明。

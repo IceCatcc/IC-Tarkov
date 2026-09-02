@@ -46,9 +46,11 @@ shift
 goto parse
 :parsed
 
-rem -- read version from tauri.conf.json (single source of truth) --
-set "APPVER="
-for /f "usebackq delims=" %%v in (`powershell -NoProfile -Command "(Get-Content -Raw 'src-tauri\tauri.conf.json' | ConvertFrom-Json).version"`) do set "APPVER=%%v"
+rem -- read version from Cargo.toml (single source of truth) --
+rem tauri.conf.json 不再维护 version（构建时 Tauri 自动回退读 Cargo.toml），
+rem 这里同样直接取 [package].version 用于给 exe 命名。
+set "APPVER=unknown"
+for /f "usebackq delims=" %%v in (`powershell -NoProfile -Command "(Get-Content 'src-tauri\Cargo.toml' | Select-String '^version' | Select-Object -First 1).Line.Split([char]34)[1]"`) do set "APPVER=%%v"
 if "!APPVER!"=="" set "APPVER=unknown"
 
 echo [IC Tarkov] building release bundle (v!APPVER!) ...
@@ -66,7 +68,6 @@ if "!EXITCODE!"=="0" (
         echo   app exe : !SRC_EXE!
         echo   named   : !DST_EXE!
         echo   nsis    : src-tauri\target\release\bundle\nsis\
-        echo   msi     : src-tauri\target\release\bundle\msi\
     ) else (
         echo [IC Tarkov] build OK but exe not found: !SRC_EXE!
     )
