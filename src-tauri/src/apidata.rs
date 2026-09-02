@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -281,10 +282,16 @@ pub struct SyncReport {
 }
 
 fn build_agent() -> Result<ureq::Agent, String> {
+    // ureq 2.10+ 的 native-tls 不会被自动用作默认 TLS 后端（仅 rustls tls feature
+    // 会进 default_tls_config），必须显式装配，否则 https 请求直接报
+    // "no TLS backend is configured"。Windows 下 native-tls 走 schannel，复用系统根证书。
+    let tls = ureq::native_tls::TlsConnector::new()
+        .map_err(|e| format!("初始化 TLS 后端失败: {e}"))?;
     Ok(ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(20))
         .timeout_read(Duration::from_secs(120))
         .timeout_write(Duration::from_secs(30))
+        .tls_connector(Arc::new(tls))
         .build())
 }
 
