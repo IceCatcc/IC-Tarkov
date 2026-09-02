@@ -78,7 +78,7 @@ git push origin v<version>
 
 ## UI 约定
 
-- 浮层层级：`SettingsModal` 为 `z-[2000]`，帮助窗口 `z-[1200]`，版本/更新窗口 `z-[1500]`。
+- 浮层层级：`SettingsModal` 为 `z-[2000]`，帮助窗口 `z-[1200]`，「关于」弹窗 `z-[1300]`，版本/更新窗口 `z-[1500]`。
 - **浮层互斥**：首次启动时若帮助窗口正在展示，缺日志目录的「打开设置」要挂起到帮助关闭后再执行，避免设置盖住帮助（见 `src-react/App.tsx` 的 `pendingOpenSettings`）。
 - 顶部栏（`src-react/components/TopBar.tsx`）右侧依次是：错误提示、「⚙ 设置」按钮、纯文字 `?` 帮助按钮、窗口控制按钮。
 - 窗口为无边框自定义标题栏，中部空白区域带 `data-tauri-drag-region` 可拖动。

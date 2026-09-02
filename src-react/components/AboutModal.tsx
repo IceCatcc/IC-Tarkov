@@ -33,7 +33,7 @@ export default function AboutModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60"
+      className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/60"
       onClick={onClose}
     >
       <div
