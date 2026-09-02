@@ -1120,7 +1120,7 @@ export function MapPage() {
 
   return (
     <div className="h-full flex flex-col bg-ink-900">
-      {/* 工具条（地图选单已移至左下角浮动按钮） */}
+      {/* 工具条（地图选单在左上角任务按钮右侧） */}
       <div
         className="shrink-0 flex items-center flex-wrap gap-x-3 gap-y-1 px-3 py-2 border-b border-line bg-ink-800"
         style={{ paddingLeft: 12 + topPad }}
@@ -1296,70 +1296,13 @@ export function MapPage() {
           </div>
         )}
 
-        {/* 地图选单：左下角浮动按钮（原顶栏 select 移此） */}
+        {/* 左上角浮窗行：任务 + 地图选单 */}
         <div
-          ref={mapMenuRef}
-          className="absolute left-3 bottom-3 z-[600] flex flex-col items-start gap-1.5"
-          onMouseDown={(e) => e.stopPropagation()}
+          className="absolute left-3 top-3 z-[600] flex items-start gap-1.5"
           onWheel={(e) => e.stopPropagation()}
         >
-          {mapMenuOpen && (
-            <div className="w-[120px] max-h-[45vh] overflow-y-auto py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
-              {skeleton.groups
-                .filter((g) => g.maps.some((m) => m.projection === 'interactive'))
-                .map((g) => (
-                  <button
-                    key={g.normalizedName}
-                    onClick={() => {
-                      setSelected(g.normalizedName)
-                      setFloorSel(-1)
-                      setMapMenuOpen(false)
-                    }}
-                    title={g.nameZh || g.normalizedName}
-                    className={`w-full text-left px-1.5 py-1.5 text-[13px] truncate ${
-                      selected === g.normalizedName
-                        ? 'text-[#d4a174] bg-amber/10'
-                        : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
-                    }`}
-                  >
-                    {g.nameZh || g.normalizedName}
-                  </button>
-                ))}
-              </div>
-            )}
-          <button
-            onClick={() => setMapMenuOpen((o) => !o)}
-            title="选择地图"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinejoin="round"
-              />
-              <path d="M9 4v14M15 6v14" stroke="currentColor" strokeWidth="1.2" opacity="0.6" />
-            </svg>
-            {(skeleton.groups ?? []).find((g) => g.normalizedName === selected)?.nameZh ||
-              selected ||
-              '选择地图'}
-            <span
-              className="text-[11px] opacity-70 transition-transform"
-              style={{ transform: mapMenuOpen ? 'rotate(180deg)' : 'none' }}
-            >
-              ▼
-            </span>
-          </button>
-        </div>
-
-        {/* 任务浮窗：左上角浮动按钮，显示监控页的进行中任务卡片 */}
-        <div
-          ref={tasksRef}
-          className="absolute left-3 top-3 z-[600] flex flex-col items-start gap-1.5"
-          onMouseDown={(e) => e.stopPropagation()}
-          onWheel={(e) => e.stopPropagation()}
-        >
+          {/* 任务浮窗：按钮常驻，展开面板为浮层（absolute），不影响右侧地图按钮布局 */}
+          <div ref={tasksRef} className="relative">
           <button
             onClick={() => setTasksOpen((o) => !o)}
             title="进行中任务"
@@ -1389,7 +1332,7 @@ export function MapPage() {
             </span>
           </button>
           {tasksOpen && (
-            <div className="w-[380px] max-w-[calc(100vw-24px)] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm p-2.5 space-y-2">
+            <div className="absolute left-0 top-[calc(100%+6px)] z-[610] w-[380px] max-w-[calc(100vw-24px)] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm p-2.5 space-y-2">
               {mapInProgressQuests.length === 0 ? (
                 <div className="text-[13px] text-muted px-0.5 py-3 text-center">
                   本地图暂无进行中任务
@@ -1419,17 +1362,70 @@ export function MapPage() {
               )}
             </div>
           )}
+          </div>
+          {/* 地图选单：任务按钮右侧（原左下角），面板同样浮层化 */}
+          <div ref={mapMenuRef} className="relative">
+            <button
+              onClick={() => setMapMenuOpen((o) => !o)}
+              title="选择地图"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                />
+                <path d="M9 4v14M15 6v14" stroke="currentColor" strokeWidth="1.2" opacity="0.6" />
+              </svg>
+              {(skeleton.groups ?? []).find((g) => g.normalizedName === selected)?.nameZh ||
+                selected ||
+                '选择地图'}
+              <span
+                className="text-[11px] opacity-70 transition-transform"
+                style={{ transform: mapMenuOpen ? 'rotate(180deg)' : 'none' }}
+              >
+                ▼
+              </span>
+            </button>
+            {mapMenuOpen && (
+              <div className="absolute left-0 top-[calc(100%+6px)] z-[610] w-[120px] max-h-[45vh] overflow-y-auto py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
+                {skeleton.groups
+                  .filter((g) => g.maps.some((m) => m.projection === 'interactive'))
+                  .map((g) => (
+                    <button
+                      key={g.normalizedName}
+                      onClick={() => {
+                        setSelected(g.normalizedName)
+                        setFloorSel(-1)
+                        setMapMenuOpen(false)
+                      }}
+                      title={g.nameZh || g.normalizedName}
+                      className={`w-full text-left px-1.5 py-1.5 text-[13px] truncate ${
+                        selected === g.normalizedName
+                          ? 'text-[#d4a174] bg-amber/10'
+                          : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
+                      }`}
+                    >
+                      {g.nameZh || g.normalizedName}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* 地图信息：右下角浮动按钮 —— Boss 刷新率 + 地图时间 */}
+        {/* 地图信息：右下角浮动按钮 —— Boss 刷新率 + 地图时间。
+            面板为常显浮层，容器整体 pointer-events-none 鼠标穿透不挡地图，
+            仅按钮 pointer-events-auto 可点；select-none 防止拖动时选中文字 */}
         <div
           ref={infoRef}
-          className="absolute right-3 bottom-3 z-[600] flex flex-col items-end gap-1.5"
-          onMouseDown={(e) => e.stopPropagation()}
+          className="pointer-events-none select-none absolute right-3 bottom-3 z-[600] flex flex-col items-end gap-1.5"
           onWheel={(e) => e.stopPropagation()}
         >
           {infoOpen && (
-            <div className="w-[280px] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm p-2.5 space-y-2.5">
+            <div className="pointer-events-none w-[180px] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/60 shadow-xl p-2.5 space-y-2.5">
               <div>
                 <div className="text-[13px] text-muted mb-1">地图时间</div>
                 {clockText ? (
@@ -1439,7 +1435,7 @@ export function MapPage() {
                   </div>
                 ) : (
                   <div className="text-[13px] text-muted/70">
-                    暂不可用（无可用时间源，预留）
+                    暂不可用
                   </div>
                 )}
               </div>
@@ -1468,7 +1464,7 @@ export function MapPage() {
           <button
             onClick={() => setInfoOpen((o) => !o)}
             title="地图信息：Boss 刷新率与地图时间"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+            className="pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
               <circle cx="12" cy="12" r="8.4" stroke="currentColor" strokeWidth="1.6" />
@@ -1489,15 +1485,13 @@ export function MapPage() {
           </button>
         </div>
 
-        {/* 坐标状态条：底部居中（左下/右下已让给浮窗按钮） */}
+        {/* 坐标状态条：底部居中（右下已让给地图信息按钮） */}
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[500] px-2 py-1 rounded bg-black/50 text-[12.5px] text-[#8b949e] pointer-events-none">
           {cursorCoord ? `X ${cursorCoord.x.toFixed(1)} · Z ${cursorCoord.z.toFixed(1)}` : ''}
           {shotPos && (
             <>
               {'　'}
-              {`玩家 ${shotPos.position.x.toFixed(1)}, ${shotPos.position.z.toFixed(1)} · 航向 ${Math.round(
-                iconRotationDeg(shotPos.rotation, 0),
-              )}° · ${shotPos.timestamp}`}
+              {`玩家 ${shotPos.position.x.toFixed(1)}, ${shotPos.position.z.toFixed(1)}`}
             </>
           )}
         </div>
