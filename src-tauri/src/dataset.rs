@@ -50,6 +50,9 @@ pub struct TraderReq {
     pub trader_id: Option<String>,
     pub req_type: Option<String>,
     pub value: Option<i64>,
+    /// 比较方式（compareMethod）：>= / <= / < / > 等。
+    /// 不能一律按「≥」判定——例如 Fence 的「亡羊补牢」系列要求好感 **小于** 阈值。
+    pub compare: Option<String>,
 }
 
 #[derive(Clone)]
@@ -444,6 +447,7 @@ fn build_one(
             trader_id: s(r, "trader").map(|v| v.to_string()),
             req_type: Some(s(r, "requirementType").unwrap_or("level").to_string()),
             value: r.get("value").and_then(|v| v.as_i64()),
+            compare: s(r, "compareMethod").map(|v| v.to_string()),
         });
     }
     for o in arr(t, "otherRequirements") {
@@ -456,6 +460,7 @@ fn build_one(
                 // 这里的 value 是全局变量阈值，不等于忠诚等级数字，仅作「存在额外商人条件」提示
                 req_type: Some("variable".to_string()),
                 value: o.get("value").and_then(|v| v.as_i64()),
+                compare: s(o, "compareMethod").map(|v| v.to_string()),
             });
         }
     }

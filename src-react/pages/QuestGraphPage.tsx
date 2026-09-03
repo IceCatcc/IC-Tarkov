@@ -13,6 +13,7 @@ import { getQuestGraph, getQuestDetail, setQuestStatus, getMaps } from '../tauri
 import { traderImage } from '../traderImages'
 import { TRADER_UNLOCK_QUEST, traderDisplayName, TRADERS } from '../traderMeta'
 import type { GraphEdge, GraphNode, ItemRef, MapInfo } from '../types'
+import { compareMet, compareLabel } from '../types'
 
 
 const ROW_H = 104
@@ -28,9 +29,10 @@ const DEFAULT_SCALE = 0.8
 const SUB_G = 26 // 小列间距（水平卡片间隔）
 const ZONE_PAD_IN = 20 // 大列内边距（列与列之间，内含分区分隔线）
 const EDGE_STUB = 12 // 连线出入卡片的水平引出段
-const EDGE_CORNER = 6 // 正交连线的拐角圆角半径
-const ROWS_CAP = 3 // 每个小列的最大行数（超出则开新小列，行数永久封顶）
-const GRID_TOP = 38 // 顶部等级标尺高度（屏幕像素）
+const EDGE_CORNER = 8 // 正交连线的拐角圆角半径（线加粗后同步放大，拐角更顺滑）
+const ROWS_CAP = 5 // 每个小列的最大行数（超出则开新小列，行数永久封顶）
+// 顶部留白：原「等级标尺」已移除（等级改为标注在卡片上），仅保留区域标识的绘制空间
+const GRID_TOP = 22
 const BAND_X = 78 // 网格整体右移量：左侧为外置商人头像的固定屏幕沟槽
 const TOP_GAP = 14 // 泳道顶边到第一行卡片的间距
 
@@ -112,15 +114,83 @@ function truncateText(ctx: CanvasRenderingContext2D, text: string, maxW: number)
   return s + '…'
 }
 
+/** 连线与卡片之间保持的最小间隙，避免视觉上贴着卡片边 */
+const CLEAR_PAD = 5
+
+/** 卡片矩形（世界坐标），用于判断某段连线是否压到卡片 */
+interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 /**
- * 正交（曼哈顿）走线：水平引出 → 垂直 → 水平进入，全程走卡片之间的通道，不斜穿。
- * 目标在正右方足够远时走 4 点（竖直段位于两卡片水平中点）；
- * 否则（同列回流等）走 6 点绕行，避开卡片本体。
+ * 水平段 (y, xa→xb) 是否压到卡片。
+ * 端点自身所在的卡片不计入：起点是卡片右边缘、终点是卡片左边缘，
+ * 用「严格内部重叠」判定天然排除了它们。
  */
-function orthoPath(x1: number, y1: number, x2: number, y2: number): number[][] {
-  if (Math.abs(y1 - y2) < 0.5) return [[x1, y1], [x2, y2]]
-  if (x2 - x1 >= EDGE_STUB * 2) {
-    const midX = (x1 + x2) / 2
+function hBlocked(rects: Rect[], y: number, xa: number, xb: number): boolean {
+  const lo = Math.min(xa, xb) + 0.5
+  const hi = Math.max(xa, xb) - 0.5
+  for (const r of rects) {
+    if (r.x + r.w <= lo || r.x >= hi) continue
+    if (y > r.y - CLEAR_PAD && y < r.y + r.h + CLEAR_PAD) return true
+  }
+  return false
+}
+
+/** 竖直段 (x, ya→yb) 是否压到卡片（判定同上，端点卡片自动排除） */
+function vBlocked(rects: Rect[], x: number, ya: number, yb: number): boolean {
+  const lo = Math.min(ya, yb) + 0.5
+  const hi = Math.max(ya, yb) - 0.5
+  for (const r of rects) {
+    if (r.y + r.h <= lo || r.y >= hi) continue
+    if (x > r.x - CLEAR_PAD && x < r.x + r.w + CLEAR_PAD) return true
+  }
+  return false
+}
+
+/**
+ * 正交（曼哈顿）走线：能用短路径就用短路径，只有确实会被卡片挡住时才绕行。
+ *
+ * 1. 同行且中间没有卡片（相邻列）→ 直接一条直线，不再绕到行间通道；
+ * 2. 不同行且两卡片水平中点是空的（相邻列）→ 4 点 Z 形（右出 → 竖直 → 左入）；
+ * 3. 否则（跨多列）→ 6 点绕行：竖直段走在列间空隙，水平段走在 hChans 行间空隙。
+ *    由于所有 band 的起始 y 已对齐 ROW_H 网格，行间空隙横向全宽贯通，
+ *    所以绕行段也绝不会压到卡片。
+ */
+function orthoPath(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  hChans: number[],
+  rects: Rect[],
+): number[][] {
+  const s = EDGE_STUB
+
+  // 1) 同行：中间没有卡片时直接连直线（相邻列的常见情况）
+  if (Math.abs(y1 - y2) < 0.5) {
+    if (!hBlocked(rects, y1, x1, x2)) return [[x1, y1], [x2, y2]]
+    const my = hChans.find((v) => v > y1) ?? y1 + ROW_H / 2
+    return [
+      [x1, y1],
+      [x1 + s, y1],
+      [x1 + s, my],
+      [x2 - s, my],
+      [x2 - s, y2],
+      [x2, y2],
+    ]
+  }
+
+  // 2) 不同行：竖直段放在两卡片水平中点（相邻列时该点落在列间空隙里）
+  const midX = (x1 + x2) / 2
+  if (
+    !hBlocked(rects, y1, x1, midX) &&
+    !hBlocked(rects, y2, midX, x2) &&
+    !vBlocked(rects, midX, y1, y2)
+  ) {
     return [
       [x1, y1],
       [midX, y1],
@@ -128,15 +198,22 @@ function orthoPath(x1: number, y1: number, x2: number, y2: number): number[][] {
       [x2, y2],
     ]
   }
-  const outX = x1 + EDGE_STUB
-  const inX = x2 - EDGE_STUB
-  const midY = (y1 + y2) / 2
+
+  // 3) 跨多列：走行间通道绕行
+  const lo = Math.min(y1, y2)
+  const hi = Math.max(y1, y2)
+  const mid = (lo + hi) / 2
+  const cand = hChans.filter((v) => v > lo + 1 && v < hi - 1)
+  const my =
+    cand.length > 0
+      ? cand.reduce((b, v) => (Math.abs(v - mid) < Math.abs(b - mid) ? v : b))
+      : (hChans.find((v) => v > lo) ?? mid)
   return [
     [x1, y1],
-    [outX, y1],
-    [outX, midY],
-    [inX, midY],
-    [inX, y2],
+    [x1 + s, y1],
+    [x1 + s, my],
+    [x2 - s, my],
+    [x2 - s, y2],
     [x2, y2],
   ]
 }
@@ -459,7 +536,13 @@ export function QuestGraphPage() {
       width: 0,
       height: 0,
       bands: [] as { id: string; name: string; y: number; h: number }[],
-      zones: [] as { left: number; right: number; label: string; subs: number[] }[],
+      zones: [] as {
+        left: number
+        right: number
+        label: string
+        subs: number[]
+        solo: boolean
+      }[],
       matches: null as Set<string> | null,
     }
     if (!graph) return empty
@@ -492,7 +575,12 @@ export function QuestGraphPage() {
       if (effLvlMet && (n.minLevel ?? 1) > Math.max(1, profile?.level ?? 1)) return true
       if (effRepMet) {
         for (const r of n.traderReqs ?? []) {
-          if ((r.reqType === 'level' || r.reqType === 'variable') && (profile?.loyalty?.[r.traderId] ?? 1) < r.value) return true
+          if (r.reqType === 'reputation') continue
+          if (
+            !compareMet(profile?.loyalty?.[r.traderId] ?? 1, r.value, r.compare)
+          ) {
+            return true
+          }
         }
       }
       return false
@@ -538,7 +626,10 @@ export function QuestGraphPage() {
         }
         if (repMet) {
           for (const r of n.traderReqs ?? []) {
-            if ((r.reqType === 'level' || r.reqType === 'variable') && (profile?.loyalty?.[r.traderId] ?? 1) < r.value) {
+            if (r.reqType === 'reputation') continue
+            if (
+              !compareMet(profile?.loyalty?.[r.traderId] ?? 1, r.value, r.compare)
+            ) {
               vis.delete(n.id)
               break
             }
@@ -583,19 +674,57 @@ export function QuestGraphPage() {
       }
     }
 
-    // —— 分区分配：以解锁等级为基准，拓扑松弛保证「前置分区 < 后继分区」（含商人解锁隐性边），
-    //     松弛产生的稀疏整数稠密化为连续分区号，消除大量空置区域 ——
+    // —— 任务分类：孤立任务 vs 链路任务 ——
+    // 大量任务（近半数）既无前置也不作为任何任务的前置。把它们放进链路网格只会
+    // 挤爆第一列且毫无连线意义，因此单独划到最右侧的「独立任务」区。
+    // 判定基于完整任务图（不看筛选），这样切换筛选时任务不会在两个区之间跳变。
+    const preIdsOf = (n: GraphNode): string[] =>
+      questMode === 'pve' && n.prereqsPve?.length ? n.prereqsPve : n.prereqs
+    const allPre = new Set<string>()
+    const allSucc = new Set<string>()
+    for (const n of graph.nodes) {
+      const ps = preIdsOf(n)
+      if (ps.length > 0) allPre.add(n.id)
+      for (const p of ps) allSucc.add(p)
+    }
+    const soloSet = new Set<string>()
+    for (const n of graph.nodes) {
+      if (!allPre.has(n.id) && !allSucc.has(n.id)) soloSet.add(n.id)
+    }
+
+    // —— 分区分配：链路任务按「拓扑深度」分列（深度 = 到链条起点的最大距离），
+    //     孤立任务统一归入最右侧的独立区；再做拓扑松弛保证「前置分区 < 后继分区」。
+    //     相比按解锁等级分列，深度分列让每一列的任务数接近，不再出现巨型首列 ——
+    const SOLO_KEY = -1 // 独立区：排在所有链路分区（深度 0..n）之前，即最左一列
+    const depthCache = new Map<string, number>()
+    const depthOf = (id: string): number => {
+      const cached = depthCache.get(id)
+      if (cached !== undefined) return cached
+      depthCache.set(id, 0) // 兜底：万一数据成环也不会栈溢出
+      const n = nodeMap[id]
+      let d = 0
+      if (n) {
+        for (const p of preIdsOf(n)) {
+          if (!nodeMap[p]) continue
+          d = Math.max(d, depthOf(p) + 1)
+        }
+      }
+      depthCache.set(id, d)
+      return d
+    }
     const colOf = new Map<string, number>()
     for (const id of vis) {
-      const lv = nodeMap[id]?.minLevel ?? 1
-      colOf.set(id, Math.max(0, (lv < 1 ? 1 : lv) - 1))
+      colOf.set(id, soloSet.has(id) ? SOLO_KEY : depthOf(id))
     }
     // 隐性依赖：商人由任务 A 解锁时，该商人的任务必须排在 A 右侧
+    // （仅当两端都是链路任务，否则独立区的位置会把链路任务顶到最右边）
     const extraEdges: [string, string][] = []
     for (const n of graph.nodes) {
-      if (!vis.has(n.id)) continue
+      if (!vis.has(n.id) || soloSet.has(n.id)) continue
       const uq = TRADER_UNLOCK_QUEST[n.traderId]
-      if (uq && uq !== n.id && vis.has(uq)) extraEdges.push([uq, n.id])
+      if (uq && uq !== n.id && vis.has(uq) && !soloSet.has(uq)) {
+        extraEdges.push([uq, n.id])
+      }
     }
     for (let iter = 0; iter < 300; iter++) {
       let changed = false
@@ -616,24 +745,32 @@ export function QuestGraphPage() {
       if (!changed) break
     }
 
-    // 分区桶：同分区内按忠诚等级要求升序 -> 名称排序（LL 影响区内次序与轨道先后）
-    const buckets = new Map<number, { id: string; ll: number; lvReal: number }[]>()
+    // 分区桶：链路区按忠诚等级要求升序 -> 名称；独立区按解锁等级升序 -> 名称
+    const buckets = new Map<
+      number,
+      { id: string; sortKey: number; lvReal: number; solo: boolean }[]
+    >()
     for (const n of graph.nodes) {
       if (!vis.has(n.id)) continue
       const key = colOf.get(n.id)!
+      const solo = soloSet.has(n.id)
       const ll =
         Math.max(0, ...(n.traderReqs ?? []).filter((r) => r.reqType === 'level').map((r) => r.value)) || 0
+      const lvReal = n.minLevel ?? 1
       let b = buckets.get(key)
       if (!b) {
         b = []
         buckets.set(key, b)
       }
-      b.push({ id: n.id, ll, lvReal: n.minLevel ?? 1 })
+      b.push({ id: n.id, sortKey: solo ? lvReal : ll, lvReal, solo })
     }
     const zoneKeys = Array.from(buckets.keys()).sort((a, b) => a - b)
     const repLv = new Map<number, number>() // 稠密分区号 -> 代表性解锁等级
+    const zoneSolo = new Map<number, boolean>() // 稠密分区号 -> 是否为独立任务区
     zoneKeys.forEach((k, i) => {
-      repLv.set(i, Math.min(...buckets.get(k)!.map((x) => x.lvReal)))
+      const items = buckets.get(k)!
+      repLv.set(i, Math.min(...items.map((x) => x.lvReal)))
+      zoneSolo.set(i, items.some((x) => x.solo))
     })
 
     // 全局任务序列：分区升序 -> 忠诚等级要求升序 -> 名称
@@ -647,7 +784,7 @@ export function QuestGraphPage() {
       const items = buckets.get(zoneKeys[r])!
       items.sort(
         (a, b) =>
-          a.ll - b.ll ||
+          a.sortKey - b.sortKey ||
           (nodeMap[a.id]?.name ?? '').localeCompare(nodeMap[b.id]?.name ?? ''),
       )
       for (const it of items) {
@@ -696,7 +833,14 @@ export function QuestGraphPage() {
     }
 
     const zoneLeft = new Map<number, number>()
-    const zones: { left: number; right: number; label: string; subs: number[] }[] = []
+    const zones: {
+      left: number
+      right: number
+      label: string
+      subs: number[]
+      /** 是否为「独立任务」区（无依赖的任务，不与链路区混排） */
+      solo: boolean
+    }[] = []
     {
       // 网格整体右移，给外置商人头像列留出屏幕固定宽度的空白沟槽
       let acc = BAND_X
@@ -708,7 +852,15 @@ export function QuestGraphPage() {
         for (let j = 1; j < sc; j++) {
           subs.push(acc + ZONE_PAD_IN + j * NODE_W + (j - 0.5) * SUB_G)
         }
-        zones.push({ left: acc, right: acc + w, label: `Lv${repLv.get(r)}+`, subs })
+        const solo = zoneSolo.get(r) ?? false
+        // 独立区只有一列、内部已按等级排序，标「独立任务」比标等级更有信息量
+        zones.push({
+          left: acc,
+          right: acc + w,
+          label: solo ? '独立任务' : `Lv${repLv.get(r)}+`,
+          subs,
+          solo,
+        })
         acc += w
       }
     }
@@ -716,38 +868,213 @@ export function QuestGraphPage() {
     const positions: Record<string, { x: number; y: number }> = {}
     const bandsOut: { id: string; name: string; y: number; h: number }[] = []
 
-    const sortedGroups = Array.from(groups.values()).sort((a, b) =>
-      a.name.localeCompare(b.name),
-    )
-
-    let yCursor = GRID_TOP
-    for (const g of sortedGroups) {
-      bandsOut.push({ id: g.id, name: g.name, y: yCursor, h: 0 })
-      const innerY = yCursor + TOP_GAP
-
-      // 该商人的任务按全局序列顺序填充网格：先纵向占满小列的 ROWS_CAP 行，再开新小列
-      const bandTasks = g.ids
-        .filter((id) => ROf.has(id))
-        .sort((a, b) => seqIdxOf.get(a)! - seqIdxOf.get(b)!)
-
-      const cntByR = new Map<number, number>()
-      let maxRowUsed = 1
-      for (const id of bandTasks) {
-        const R = ROf.get(id)!
-        const k = cntByR.get(R) ?? 0
-        cntByR.set(R, k + 1)
-        const sub = Math.floor(k / ROWS_CAP)
-        const rowLocal = k % ROWS_CAP
-        positions[id] = {
-          x: zoneLeft.get(R)! + ZONE_PAD_IN + sub * (NODE_W + SUB_G),
-          y: innerY + rowLocal * ROW_H,
-        }
-        maxRowUsed = Math.max(maxRowUsed, rowLocal + 1)
+    // —— 商人泳道顺序：按「任务流向」的重心排序 ——
+    // 原本按商人名称字母序排列，与任务链走向无关，导致连线在纵向来回大幅跳跃。
+    // 这里用商人级别的邻接做重心迭代，让往来频繁的商人在纵向相邻，连线更短。
+    // 注意：基于**完整任务图**计算（不看筛选），切换筛选/模式时泳道顺序保持稳定。
+    const bandNeighbors = new Map<string, Set<string>>()
+    for (const e of graph.edges) {
+      const a = nodeMap[e.from]
+      const b = nodeMap[e.to]
+      if (!a || !b) continue
+      const ta = a.traderId || a.traderName || 'unknown'
+      const tb = b.traderId || b.traderName || 'unknown'
+      if (ta === tb) continue
+      {
+        const s = bandNeighbors.get(ta) ?? new Set<string>()
+        s.add(tb)
+        bandNeighbors.set(ta, s)
       }
+      {
+        const s = bandNeighbors.get(tb) ?? new Set<string>()
+        s.add(ta)
+        bandNeighbors.set(tb, s)
+      }
+    }
+    const groupList = Array.from(groups.values())
+    let bandOrder: Group[] = groupList
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+    {
+      let rank = new Map(bandOrder.map((g, i) => [g.id, i] as [string, number]))
+      for (let it = 0; it < 40; it++) {
+        const scored = bandOrder.map((g) => {
+          const nb = bandNeighbors.get(g.id)
+          let sum = 0
+          let n = 0
+          if (nb) {
+            for (const x of nb) {
+              const r = rank.get(x)
+              if (r !== undefined) {
+                sum += r
+                n++
+              }
+            }
+          }
+          return {
+            g,
+            d: n > 0 ? sum / n : (rank.get(g.id) ?? 0),
+            self: rank.get(g.id) ?? 0,
+          }
+        })
+        scored.sort((a, b) => a.d - b.d || a.self - b.self)
+        const next = scored.map((x) => x.g)
+        if (next.every((g, i) => g.id === bandOrder[i].id)) break
+        bandOrder = next
+        rank = new Map(bandOrder.map((g, i) => [g.id, i] as [string, number]))
+      }
+    }
 
-      const bandH = TOP_GAP + maxRowUsed * ROW_H
-      bandsOut[bandsOut.length - 1].h = bandH
-      yCursor += bandH + BAND_GAP
+    // 每个泳道的行数：只取决于「(商人, 分区) 的卡片数」，与卡片的排列顺序无关，
+    // 因此可以在重心排序之前先算出泳道高度与 y。
+    const bandRowsOf = new Map<string, number>()
+    const cellCounts = new Map<string, number>() // `${bandId}|${分区号}` -> 卡片数
+    for (const g of groups.values()) {
+      for (const id of g.ids) {
+        const R = ROf.get(id)
+        if (R === undefined) continue
+        const key = `${g.id}|${R}`
+        cellCounts.set(key, (cellCounts.get(key) ?? 0) + 1)
+      }
+    }
+    for (const g of groups.values()) {
+      let mr = 1
+      for (const [key, c] of cellCounts) {
+        if (!key.startsWith(`${g.id}|`)) continue
+        mr = Math.max(mr, Math.min(c, ROWS_CAP))
+      }
+      bandRowsOf.set(g.id, mr)
+    }
+
+    const bandTopY = new Map<string, number>()
+    {
+      let yCursor = GRID_TOP
+      for (const g of bandOrder) {
+        bandTopY.set(g.id, yCursor)
+        const bandH = TOP_GAP + (bandRowsOf.get(g.id) ?? 1) * ROW_H
+        // 下一个 band 的起始 y 向上取整到 ROW_H 的整数倍：
+        // 这样所有 band 的「行 y」都落在同一条全局网格上，行与行之间的空隙
+        // 成为横向全宽贯通的通道，连线可以贴着它走而永不压到卡片。
+        yCursor += Math.ceil((bandH + BAND_GAP) / ROW_H) * ROW_H
+      }
+    }
+
+    // —— 单元（泳道 × 分区）内的纵向顺序：重心排序 ——
+    // 让每张卡片尽量对齐到它的前置/后继所在的行，从而连线更短更直、交叉更少。
+    const cells = new Map<string, string[]>() // `${bandId}|${R}` -> 卡片 id（有序）
+    for (const g of groups.values()) {
+      for (const id of g.ids) {
+        const R = ROf.get(id)
+        if (R === undefined) continue
+        const key = `${g.id}|${R}`
+        const arr = cells.get(key)
+        if (arr) arr.push(id)
+        else cells.set(key, [id])
+      }
+    }
+    // 初始顺序：忠诚等级 -> 名称（与全局序列一致），保证无依赖任务也有稳定次序
+    for (const arr of cells.values()) {
+      arr.sort((a, b) => seqIdxOf.get(a)! - seqIdxOf.get(b)!)
+    }
+
+    // 邻接表（仅可见节点 + 当前模式的有效边）
+    const predsOf = new Map<string, string[]>()
+    const succsOf = new Map<string, string[]>()
+    for (const e of graph.edges) {
+      if (!vis.has(e.from) || !vis.has(e.to)) continue
+      if (!edgeValid(e)) continue
+      {
+        const arr = predsOf.get(e.to)
+        if (arr) arr.push(e.from)
+        else predsOf.set(e.to, [e.from])
+      }
+      {
+        const arr = succsOf.get(e.from)
+        if (arr) arr.push(e.to)
+        else succsOf.set(e.from, [e.to])
+      }
+    }
+
+    // 卡片当前 y：由它所在单元的次序决定（前 ROWS_CAP 个占满第一小列的行）
+    const yOf = new Map<string, number>()
+    const refreshCell = (key: string) => {
+      const arr = cells.get(key)
+      if (!arr) return
+      const r = Number(key.slice(key.lastIndexOf('|') + 1))
+      const bandId = key.slice(0, key.lastIndexOf('|'))
+      const top = bandTopY.get(bandId) ?? GRID_TOP
+      arr.forEach((id, i) => {
+        yOf.set(id, top + TOP_GAP + (i % ROWS_CAP) * ROW_H)
+      })
+    }
+    for (const key of cells.keys()) refreshCell(key)
+
+    /** 邻居的平均 y（重心）；无邻居时保持原位 */
+    const baryOf = (id: string, adj: Map<string, string[]>): number => {
+      const nb = adj.get(id)
+      if (!nb || nb.length === 0) return yOf.get(id) ?? 0
+      let sum = 0
+      let n = 0
+      for (const x of nb) {
+        const y = yOf.get(x)
+        if (y !== undefined) {
+          sum += y
+          n++
+        }
+      }
+      return n > 0 ? sum / n : (yOf.get(id) ?? 0)
+    }
+    const reorderCell = (key: string, adj: Map<string, string[]>): boolean => {
+      const arr = cells.get(key)
+      if (!arr || arr.length < 2) return false
+      const scored = arr.map((id) => ({ id, d: baryOf(id, adj), s: seqIdxOf.get(id)! }))
+      scored.sort((a, b) => a.d - b.d || a.s - b.s)
+      const next = scored.map((x) => x.id)
+      if (next.every((id, i) => id === arr[i])) return false
+      cells.set(key, next)
+      refreshCell(key)
+      return true
+    }
+
+    // 反向 -> 正向 交替迭代（Gauss-Seidel 式：用刚更新的邻居位置继续算，收敛更快）。
+    // 顺序很重要：每轮以「正向（对齐前置）」收尾，因为前置才是玩家实际推进的方向。
+    // 实测交叉数：不排序 285 -> 正向收尾 234（-18%）；若以反向收尾则为 250。
+    for (let it = 0; it < 8; it++) {
+      let changed = false
+      for (let r = zoneKeys.length - 1; r >= 0; r--) {
+        for (const g of groups.values()) {
+          if (reorderCell(`${g.id}|${r}`, succsOf)) changed = true
+        }
+      }
+      for (let r = 0; r < zoneKeys.length; r++) {
+        for (const g of groups.values()) {
+          if (reorderCell(`${g.id}|${r}`, predsOf)) changed = true
+        }
+      }
+      if (!changed) break
+    }
+
+    for (const g of bandOrder) {
+      bandsOut.push({
+        id: g.id,
+        name: g.name,
+        y: bandTopY.get(g.id) ?? GRID_TOP,
+        h: TOP_GAP + (bandRowsOf.get(g.id) ?? 1) * ROW_H,
+      })
+    }
+    for (const g of groups.values()) {
+      for (let r = 0; r < zoneKeys.length; r++) {
+        const arr = cells.get(`${g.id}|${r}`)
+        if (!arr) continue
+        arr.forEach((id, k) => {
+          const sub = Math.floor(k / ROWS_CAP)
+          const rowLocal = k % ROWS_CAP
+          positions[id] = {
+            x: zoneLeft.get(r)! + ZONE_PAD_IN + sub * (NODE_W + SUB_G),
+            y: (bandTopY.get(g.id) ?? GRID_TOP) + TOP_GAP + rowLocal * ROW_H,
+          }
+        })
+      }
     }
 
     // 实际内容包围盒（缩略图/钳制用；宽度至少覆盖完整等级网格）
@@ -759,7 +1086,11 @@ export function QuestGraphPage() {
     }
     if (zones.length > 0) {
       boundW = Math.max(boundW, zones[zones.length - 1].right + 8)
-      boundH = Math.max(boundH, yCursor)
+    }
+    // 高度取最后一个泳道的底部（泳道顺序按任务流向排列，不再是字母序）
+    if (bandsOut.length > 0) {
+      const last = bandsOut[bandsOut.length - 1]
+      boundH = Math.max(boundH, last.y + last.h)
     }
 
     return {
@@ -818,6 +1149,27 @@ export function QuestGraphPage() {
     return { w, h }
   }, [width, height])
 
+  // 行间水平通道（全宽贯通）：每张卡片下方的空隙中线。
+  // band 起始 y 已对齐 ROW_H 网格，因此这些 y 值在整个画布宽度上都是空的。
+  const hChans = useMemo(() => {
+    const out: number[] = []
+    const first = GRID_TOP + TOP_GAP + NODE_H + (ROW_H - NODE_H) / 2
+    for (let y = first; y < height + ROW_H; y += ROW_H) out.push(y)
+    return out
+  }, [height])
+
+  // 可见卡片的矩形（世界坐标），供走线判断是否被遮挡
+  const nodeRects = useMemo(() => {
+    const out: Rect[] = []
+    if (!graph) return out
+    for (const n of graph.nodes) {
+      const p = positions[n.id]
+      if (!p || !visible.has(n.id)) continue
+      out.push({ x: p.x, y: p.y, w: NODE_W, h: NODE_H })
+    }
+    return out
+  }, [graph, positions, visible])
+
   const edges = useMemo(() => {
     if (!graph) return []
     const nodeById = new Map<string, GraphNode>()
@@ -846,6 +1198,8 @@ export function QuestGraphPage() {
           a.y + NODE_H / 2,
           b.x,
           b.y + NODE_H / 2,
+          hChans,
+          nodeRects,
         ),
         doneEdge: statusMap[e.from] === 'completed',
         from: e.from,
@@ -853,7 +1207,7 @@ export function QuestGraphPage() {
       })
     }
     return out
-  }, [graph, visible, positions, statusMap, questMode])
+  }, [graph, visible, positions, statusMap, questMode, hChans, nodeRects])
 
   // 点击节点所属的整条任务链（全部祖先 + 全部后代），用于高亮；信息面板仍只显示点击的那个
   const chainIds = useMemo(() => {
@@ -1118,6 +1472,22 @@ export function QuestGraphPage() {
         ctx.fillRect(z.left, 0, z.right - z.left, height)
       }
     })
+    // 独立区起点：画一条更醒目的分隔线，把「独立任务」与「任务链」两个区域分开
+    const firstSolo = zones.find((z) => z.solo)
+    if (firstSolo) {
+      ctx.setLineDash([7, 5])
+      ctx.strokeStyle = 'rgba(139,148,158,0.55)'
+      ctx.lineWidth = 1.6
+      ctx.beginPath()
+      ctx.moveTo(firstSolo.left + 0.5, 0)
+      ctx.lineTo(firstSolo.left + 0.5, height)
+      ctx.stroke()
+      ctx.setLineDash([])
+      // 区域名画在顶部留白内（世界层，随内容滚动），替代被移除的等级标尺标签
+      ctx.font = '600 13px "Segoe UI", system-ui, sans-serif'
+      ctx.fillStyle = 'rgba(139,148,158,0.9)'
+      ctx.fillText(firstSolo.label, firstSolo.left + 8, 14)
+    }
     for (const z of zones) {
       ctx.strokeStyle = '#39424d'
       ctx.lineWidth = 1.2
@@ -1160,8 +1530,10 @@ export function QuestGraphPage() {
     ctx.lineCap = 'round'
     for (const e of edges) {
       ctx.globalAlpha = alphaOfEdge(e.from, e.to)
-      ctx.strokeStyle = e.doneEdge ? 'rgba(52,94,66,0.55)' : '#5b6773'
-      ctx.lineWidth = e.doneEdge ? 3.4 : 2.8
+      // 未完成依赖：加粗且提亮（浅灰白），在深色画布上清晰可辨；
+      // 已完成依赖：保持细而暗的绿色，与「弱化已完成」的整体取向一致
+      ctx.strokeStyle = e.doneEdge ? 'rgba(86,140,104,0.6)' : '#aab6c2'
+      ctx.lineWidth = e.doneEdge ? 3 : 3.8
       strokePolyline(ctx, e.pts, EDGE_CORNER)
     }
     if (chainIds.size > 0) {
@@ -1169,7 +1541,8 @@ export function QuestGraphPage() {
         if (!chainIds.has(e.from) || !chainIds.has(e.to)) continue
         ctx.globalAlpha = alphaOfEdge(e.from, e.to)
         ctx.strokeStyle = e.doneEdge ? 'rgba(63,185,80,0.95)' : '#ef9f27'
-        ctx.lineWidth = 4
+        // 高亮链要比加粗后的普通连线更粗，才能继续凸显
+        ctx.lineWidth = 5.2
         strokePolyline(ctx, e.pts, EDGE_CORNER)
       }
     }
@@ -1191,10 +1564,12 @@ export function QuestGraphPage() {
       const a = e.pts[0]
       const b = e.pts[e.pts.length - 1]
       ctx.globalAlpha = alphaOfEdge(e.from, e.to)
-      const fill = e.doneEdge ? 'rgba(63,185,80,0.98)' : '#b8c4d0'
+      // 端点圆点：未完成的提亮为近白色，已完成的保持暗绿
+      const fill = e.doneEdge ? 'rgba(90,150,108,0.98)' : '#e3e9f0'
       const edge = e.doneEdge ? 'rgba(6,32,12,0.85)' : 'rgba(10,14,20,0.9)'
-      endDot(a[0], a[1], 5.4, fill, edge)
-      endDot(b[0], b[1], 5.4, fill, edge)
+      const r = e.doneEdge ? 5.8 : 6.2
+      endDot(a[0], a[1], r, fill, edge)
+      endDot(b[0], b[1], r, fill, edge)
     }
     if (chainIds.size > 0) {
       for (const e of edges) {
@@ -1204,8 +1579,8 @@ export function QuestGraphPage() {
         ctx.globalAlpha = alphaOfEdge(e.from, e.to)
         const fill = e.doneEdge ? '#5ce06d' : '#f5c518'
         const edge = e.doneEdge ? 'rgba(6,32,12,0.9)' : 'rgba(40,26,0,0.9)'
-        endDot(a[0], a[1], 6.8, fill, edge)
-        endDot(b[0], b[1], 6.8, fill, edge)
+        endDot(a[0], a[1], 7.6, fill, edge)
+        endDot(b[0], b[1], 7.6, fill, edge)
       }
     }
     ctx.globalAlpha = 1
@@ -1323,22 +1698,49 @@ export function QuestGraphPage() {
         ctx.textBaseline = 'alphabetic'
       }
 
-      // 等级（右上角，不挤占元信息行）
+      // 等级（右上角 chip）：顶部标尺移除后，卡片上的 Lv 是唯一等级来源，故做成 chip 突出显示。
+      // Lv1+ 是默认值、无信息量（绝大多数任务都是），直接不画；等级越高门槛越明显：
+      // Lv2-14 灰、Lv15-29 蓝、Lv30+ 琥珀。
       const lv = n.minLevel && n.minLevel > 1 ? n.minLevel : 1
-      ctx.font = `${Math.max(8, Math.round(12 * TS))}px "Segoe UI", system-ui, sans-serif`
-      ctx.fillStyle = 'rgba(139,148,158,0.95)'
-      ctx.textAlign = 'right'
-      const lvText = `Lv${lv}+`
-      const lvW = ctx.measureText(lvText).width
-      const lvRight = n.special ? sx + sw - 19 * TS : sx + sw - 6 * TS
-      ctx.fillText(lvText, Math.round(lvRight), Math.round(sy + 15 * TS))
-      ctx.textAlign = 'left'
+      let lvReserve = 0
+      if (lv > 1) {
+        ctx.font = `600 ${Math.max(8, Math.round(11 * TS))}px "Segoe UI", system-ui, sans-serif`
+        const lvText = `Lv${lv}+`
+        const lvW = ctx.measureText(lvText).width
+        const lvPadX = 4 * TS
+        const lvH = 15 * TS
+        const lvRight = n.special ? sx + sw - 19 * TS : sx + sw - 5 * TS
+        const lvX = lvRight - (lvW + lvPadX * 2)
+        const lvY = sy + 3 * TS
+        rr(ctx, lvX, lvY, lvW + lvPadX * 2, lvH, 3 * TS)
+        ctx.fillStyle =
+          lv >= 30
+            ? 'rgba(239,159,39,0.16)'
+            : lv >= 15
+              ? 'rgba(111,179,255,0.14)'
+              : 'rgba(255,255,255,0.06)'
+        ctx.fill()
+        ctx.strokeStyle =
+          lv >= 30
+            ? 'rgba(239,159,39,0.45)'
+            : lv >= 15
+              ? 'rgba(111,179,255,0.4)'
+              : 'rgba(255,255,255,0.12)'
+        ctx.lineWidth = 1
+        ctx.stroke()
+        ctx.fillStyle =
+          lv >= 30 ? '#ef9f27' : lv >= 15 ? '#6fb3ff' : 'rgba(139,148,158,0.95)'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(lvText, Math.round(lvX + lvPadX), Math.round(lvY + lvH / 2))
+        ctx.textBaseline = 'alphabetic'
+        lvReserve = lvW + lvPadX * 2 + 4 * TS
+      }
 
       // 标题（为右上角 Lv/✦ 预留宽度）
       ctx.font = `600 ${Math.max(9, Math.round(14.5 * TS))}px "Segoe UI", system-ui, sans-serif`
       ctx.fillStyle = stl.text
       const glyph = st === 'completed' ? '✓ ' : st === 'available' ? '● ' : st === 'in_progress' ? '▶ ' : ''
-      const rightReserve = (n.special ? 19 * TS : 6 * TS) + lvW + 6 * TS
+      const rightReserve = (n.special ? 19 * TS : 5 * TS) + lvReserve
       const titleMax = Math.max(24, sw - 12 * TS - rightReserve)
       const title = truncateText(ctx, glyph + n.name, titleMax)
       ctx.fillText(title, Math.round(sx + 12 * TS), Math.round(sy + 19 * TS))
@@ -1363,11 +1765,12 @@ export function QuestGraphPage() {
         return true
       }
       for (const r of n.traderReqs ?? []) {
-        const met = (loyalty[r.traderId] ?? 1) >= r.value
+        // 用数据自带的 compareMethod 判定：Fence「亡羊补牢」要求好感小于阈值
+        const met = compareMet(loyalty[r.traderId] ?? 1, r.value, r.compare)
         const label =
           r.reqType === 'level' || r.reqType === 'variable'
             ? `${traderDisplayName(r.traderId, r.traderName)} LL${r.value}`
-            : `好感${r.value}`
+            : `好感${compareLabel(r.compare)}${r.value}`
         drawChip(
           label,
           met ? '#7ee0c8' : '#ff9d9d',
@@ -1390,7 +1793,8 @@ export function QuestGraphPage() {
     ctx.textBaseline = 'middle'
     for (const b of bands) {
       const cy = w2sy(b.y) + 26
-      if (cy < GRID_TOP - 40 || cy > CH + 60) continue
+      // 顶部标尺已移除：头像完全滚出视野上方才跳过（原判断依赖标尺高度）
+      if (cy < -30 || cy > CH + 60) continue
       const cx = BAND_X / 2
       const src = traderImage(b.id)
       if (src) {
@@ -1421,43 +1825,8 @@ export function QuestGraphPage() {
     }
     ctx.textAlign = 'left'
 
-    // 顶部等级标尺条：屏幕空间固定高度
-    zones.forEach((z, i) => {
-      const x1 = w2sx(z.left)
-      const x2 = w2sx(z.right)
-      if (x2 < 0 || x1 > CW) return
-      const a = Math.max(0, x1)
-      const bnd = Math.min(CW, x2)
-      if (i % 2 === 1 && bnd > a) {
-        ctx.fillStyle = 'rgba(255,255,255,0.05)'
-        ctx.fillRect(a, 0, bnd - a, GRID_TOP)
-      }
-    })
-    for (const z of zones) {
-      const x = w2sx(z.right)
-      if (x < -4 || x > CW + 4) continue
-      ctx.strokeStyle = '#39424d'
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, GRID_TOP)
-      ctx.stroke()
-    }
-    ctx.strokeStyle = '#39424d'
-    ctx.lineWidth = 1.5
-    ctx.beginPath()
-    ctx.moveTo(0, GRID_TOP + 0.5)
-    ctx.lineTo(CW, GRID_TOP + 0.5)
-    ctx.stroke()
-    ctx.font = '700 17px "Segoe UI", system-ui, sans-serif'
-    ctx.fillStyle = '#6fb3ff'
-    ctx.textAlign = 'center'
-    for (const z of zones) {
-      const cxz = (w2sx(z.left) + w2sx(z.right)) / 2
-      if (cxz < 22 || cxz > CW - 22) continue
-      if (w2sx(z.right) - w2sx(z.left) >= 46) ctx.fillText(z.label, cxz, GRID_TOP / 2 + 1)
-    }
-    ctx.textAlign = 'left'
+    // 顶部等级标尺已移除：等级改标在卡片上（下方 drawChip 风格）。
+    // 这里只在世界层顶部留白内画出「独立任务」区标识，随内容滚动，不遮挡卡片。
 
     // ===== 缩略图画布（尺寸随世界包围盒宽高比动态变化） =====
     const mn = miniRef.current
@@ -1590,24 +1959,24 @@ export function QuestGraphPage() {
             active={filterCount > 0}
             open={filterOpen}
             onClick={() => setFilterOpen((o) => !o)}
-            title="筛选条件：好感达标 / 等级达标 / 地图解锁 / 已完成 / 赛季任务（点击展开勾选）"
+            title="筛选条件：仅好感达标 / 仅等级达标 / 仅地图解锁 / 已完成 / 赛季任务（点击展开勾选）"
           />
           {filterOpen && (
             <div className="absolute left-0 top-full mt-1.5 z-50 bg-ink-800 border border-line rounded-lg shadow-xl p-1.5 space-y-0.5 min-w-[180px] max-w-[260px] max-h-[70vh] overflow-y-auto">
               <FilterCheck
-                label="好感达标"
+                label="仅好感达标"
                 checked={repMet}
                 onChange={setRepMet}
                 title="仅显示商人忠诚等级达标的任务（在侧边栏「角色」页填写；搜索任务名时忽略此项）"
               />
               <FilterCheck
-                label="等级达标"
+                label="仅等级达标"
                 checked={lvlMet}
                 onChange={setLvlMet}
                 title="仅显示玩家等级足够的任务（搜索任务名时忽略此项）"
               />
               <FilterCheck
-                label="地图解锁"
+                label="仅地图解锁"
                 checked={mapUnlocked}
                 onChange={setMapUnlocked}
                 title="仅显示已解锁（未锁定）地图的任务"
@@ -1852,27 +2221,28 @@ export function QuestGraphPage() {
                   <div className="mt-3">
                     <div className="text-[13px] text-muted mb-1">贸易条件</div>
                     <div className="space-y-1 text-[14px]">
-                      {detail.traderReqs.map((r) => {
+                      {detail.traderReqs.map((r, i) => {
                         const cur = profile?.loyalty?.[r.traderId] ?? 1
-                        const met = cur >= r.value
+                        // 按数据自带的 compareMethod 判定（如好感需 < -1）
+                        const met = compareMet(cur, r.value, r.compare)
                         // 需求文案：level = 忠诚等级（权威的 traderRequirements）；
                         // reputation = 好感；variable = 仅知存在额外商人条件，
                         // 源数据只给全局变量阈值，不等于等级/好感数字，故不展示具体数值
-                        const text =
-                          r.reqType === 'level' || r.reqType === 'variable'
-                            ? `忠诚等级 LL${r.value}（当前 LL${cur}）`
-                            : r.reqType === 'reputation'
-                              ? `好感 ≥${r.value}`
-                              : '额外条件（需达成商人要求）'
+                        const isLv = r.reqType === 'level' || r.reqType === 'variable'
+                        const text = isLv
+                          ? `忠诚等级 LL${r.value}（当前 LL${cur}）`
+                          : r.reqType === 'reputation'
+                            ? `好感 ${compareLabel(r.compare)} ${r.value}（当前 ${cur}）`
+                            : '额外条件（需达成商人要求）'
                         return (
                           <div
-                            key={`${r.traderId}-${r.reqType}`}
+                            key={`${r.traderId}-${r.reqType}-${r.value}-${i}`}
                             className="flex items-center justify-between gap-2"
                           >
                             <span className="text-[#c9d1d9] truncate">
                               {traderDisplayName(r.traderId, r.traderName)} {text}
                             </span>
-                            {(r.reqType === 'level' || r.reqType === 'variable') &&
+                            {(isLv || r.reqType === 'reputation') &&
                               (met ? (
                                 <span className="text-ok shrink-0">✓ 已达标</span>
                               ) : (

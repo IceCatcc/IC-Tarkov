@@ -101,6 +101,46 @@ export interface TraderReq {
   traderName: string
   reqType: TraderReqType | string
   value: number
+  /** 比较方式（>= / <= / < / > 等）。如 Fence「亡羊补牢」要求好感 **小于** 阈值 */
+  compare: string
+}
+
+/** 按 compare 比较：缺省视为 >= */
+export function compareMet(cur: number, value: number, compare: string): boolean {
+  switch (compare) {
+    case '<':
+      return cur < value
+    case '<=':
+      return cur <= value
+    case '>':
+      return cur > value
+    case '>=':
+      return cur >= value
+    case '==':
+    case '=':
+      return cur === value
+    default:
+      return cur >= value
+  }
+}
+
+/** 条件的比较符号文案 */
+export function compareLabel(compare: string): string {
+  switch (compare) {
+    case '<':
+      return '<'
+    case '<=':
+      return '≤'
+    case '>':
+      return '>'
+    case '>=':
+      return '≥'
+    case '==':
+    case '=':
+      return '='
+    default:
+      return '≥'
+  }
 }
 
 export interface GraphNode {

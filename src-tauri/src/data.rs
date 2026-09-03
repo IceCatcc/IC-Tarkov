@@ -56,6 +56,9 @@ pub struct TraderReqPayload {
     pub trader_name: String,
     pub req_type: String,
     pub value: i64,
+    /// 比较方式（>= / <= / < / > 等）；缺省按 >= 处理。
+    /// Fence「亡羊补牢」等任务要求好感**低于**阈值，不能用 >= 判定。
+    pub compare: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -185,6 +188,10 @@ fn trader_reqs_payload(n: &dataset::QuestNode, trader_names: &std::collections::
                 trader_id: tid,
                 req_type: r.req_type.clone().unwrap_or_else(|| "level".into()),
                 value: r.value.unwrap_or(0),
+                compare: r
+                    .compare
+                    .clone()
+                    .unwrap_or_else(|| ">=".to_string()),
             })
         })
         .collect()

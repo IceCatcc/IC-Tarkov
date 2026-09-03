@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore, useQuestDetail, dedupeItems } from '../store'
 import { getCollectorQuestId, getCollectedItems, setItemCollected } from '../tauri'
 import { traderDisplayName } from '../traderMeta'
-import type { ItemRef } from '../types'
+import { compareMet, compareLabel, type ItemRef } from '../types'
 
 /** 卡片网格间距（px） */
 const GAP = 8
@@ -369,20 +369,21 @@ export function CollectorPage() {
             {!detail?.traderReqs?.length ? (
               detail?.minLevel == null && <span className="text-muted">无商人要求</span>
             ) : (
-              detail.traderReqs.map((r) => {
+              detail.traderReqs.map((r, i) => {
                 const cur = profile?.loyalty?.[r.traderId] ?? 1
-                const met = cur >= r.value
-                const text =
-                  r.reqType === 'level' || r.reqType === 'variable'
-                    ? `LL${r.value}（当前 LL${cur}）`
-                    : r.reqType === 'reputation'
-                      ? `好感 ≥${r.value}`
-                      : '额外条件'
+                // 按数据自带的 compareMethod 判定（如好感需 < -1）
+                const met = compareMet(cur, r.value, r.compare)
+                const isLv = r.reqType === 'level' || r.reqType === 'variable'
+                const text = isLv
+                  ? `LL${r.value}（当前 LL${cur}）`
+                  : r.reqType === 'reputation'
+                    ? `好感 ${compareLabel(r.compare)} ${r.value}`
+                    : '额外条件'
                 return (
                   <span
-                    key={`${r.traderId}-${r.reqType}`}
+                    key={`${r.traderId}-${r.reqType}-${r.value}-${i}`}
                     className={`inline-flex items-center h-6 px-1.5 rounded border ${
-                      !(r.reqType === 'level' || r.reqType === 'variable')
+                      !isLv && r.reqType !== 'reputation'
                         ? 'border-line bg-ink-700 text-[#c9d1d9]'
                         : met
                           ? 'border-[#2c4a35] bg-[#12161a] text-[#83a291]'
@@ -390,7 +391,7 @@ export function CollectorPage() {
                     }`}
                   >
                     {traderDisplayName(r.traderId, r.traderName)} {text}
-                    {(r.reqType === 'level' || r.reqType === 'variable') && (
+                    {(isLv || r.reqType === 'reputation') && (
                       <span className="ml-1">{met ? '✓' : '✗'}</span>
                     )}
                   </span>
