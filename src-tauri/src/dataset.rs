@@ -29,6 +29,8 @@ pub struct ItemRef {
     pub id: String,
     pub name: String,
     pub count: Option<i64>,
+    /// 是否必须在战局内拾取（目标级 foundInRaid，收藏家类任务全为 true）
+    pub found_in_raid: bool,
 }
 
 #[derive(Clone)]
@@ -493,6 +495,8 @@ fn build_one(
             continue;
         }
         let count = o.get("count").and_then(|v| v.as_i64());
+        // 目标级「必须战局内找到」标记（foundInRaid），上传类任务据此提示玩家
+        let found_in_raid = o.get("foundInRaid").and_then(|v| v.as_bool()).unwrap_or(false);
         let items = arr(o, "items")
             .iter()
             .filter_map(|v| v.as_str())
@@ -500,6 +504,7 @@ fn build_one(
                 id: iid.to_string(),
                 name: item_name(raw, iid),
                 count,
+                found_in_raid,
             })
             .collect();
         objectives.push(Objective { description: desc, items });

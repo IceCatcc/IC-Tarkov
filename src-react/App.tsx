@@ -12,6 +12,7 @@ import { TopBar } from './components/TopBar'
 import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
 import { ProfilePage } from './pages/ProfilePage'
+import { CollectorPage } from './pages/CollectorPage'
 import { MapPage } from './pages/MapPage'
 import SettingsModal from './components/SettingsModal'
 import AboutModal from './components/AboutModal'
@@ -139,6 +140,7 @@ export default function App() {
           </div>
         )}
         {page === 'profile' && <ProfilePage />}
+        {page === 'collector' && <CollectorPage />}
         {mapAlive && (
           <div className="h-full" style={{ display: page === 'map' ? 'block' : 'none' }}>
             <MapPage />

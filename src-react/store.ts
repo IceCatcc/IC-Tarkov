@@ -16,7 +16,7 @@ import type {
 import { getQuestDetail } from './tauri'
 
 interface AppState {
-  page: 'monitor' | 'graph' | 'map' | 'profile'
+  page: 'monitor' | 'graph' | 'map' | 'profile' | 'collector'
   setPage: (p: AppState['page']) => void
 
   /** 当前游戏所在地图（游戏内部 location id，如 factory4_day），由全局 map-changed 事件写入，任何页面生效 */
@@ -82,6 +82,10 @@ interface AppState {
   /** 手动解锁的任务集合（前置未达成但已解锁为可接取），来自后端持久化 */
   unlockedQuests: string[]
   setUnlockedQuests: (list: string[]) => void
+
+  /** 收藏家：已收集的物品 id（后端 collected.json 持久化） */
+  collectedItems: string[]
+  setCollectedItems: (list: string[]) => void
 
   selectedId: string | null
   detail: QuestDetail | null
@@ -432,6 +436,9 @@ export const useStore = create<AppState>((set) => ({
 
   unlockedQuests: [],
   setUnlockedQuests: (list) => set({ unlockedQuests: list }),
+
+  collectedItems: [],
+  setCollectedItems: (list) => set({ collectedItems: list }),
 
   selectedId: null,
   detail: null,

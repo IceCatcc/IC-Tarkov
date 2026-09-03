@@ -81,6 +81,8 @@ export interface ItemRef {
   id: string
   name: string
   count: number | null
+  /** 是否必须在战局内拾取（目标级 foundInRaid，收藏家类任务全为 true） */
+  foundInRaid: boolean
 }
 
 export interface ObjectiveInfo {

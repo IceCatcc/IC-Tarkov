@@ -20,6 +20,37 @@ pub struct Persisted {
     pub offsets: HashMap<String, u64>,
     #[serde(default)]
     pub unlocked: Vec<String>,
+    /// 收藏家已收集物品 id（导出/导入携带；运行期的真值源是 collected.json）
+    #[serde(default)]
+    pub collected: Vec<String>,
+}
+
+/// 收藏进度单独文件：<data_root>/collected.json
+/// 与 quest_state.json 分开：避免「重新读取日志」清空玩家手动记录的收集进度。
+pub fn collected_path(app: &tauri::AppHandle) -> Option<PathBuf> {
+    crate::data_root(app).ok().map(|d| d.join("collected.json"))
+}
+
+pub fn load_collected(app: &tauri::AppHandle) -> Vec<String> {
+    if let Some(p) = collected_path(app) {
+        if let Ok(s) = std::fs::read_to_string(p) {
+            if let Ok(v) = serde_json::from_str::<Vec<String>>(&s) {
+                return v;
+            }
+        }
+    }
+    Vec::new()
+}
+
+pub fn save_collected(app: &tauri::AppHandle, ids: &[String]) {
+    if let Some(path) = collected_path(app) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string(ids) {
+            let _ = std::fs::write(&path, json);
+        }
+    }
 }
 
 pub fn state_path(app: &tauri::AppHandle) -> Option<PathBuf> {
@@ -49,6 +80,7 @@ pub fn save(app: &tauri::AppHandle) {
         current_map: store.current_map_nameid.clone(),
         offsets: offsets.clone(),
         unlocked: st.unlocked.lock().unwrap().iter().cloned().collect(),
+        collected: st.collected.lock().unwrap().iter().cloned().collect(),
     };
     drop(store);
     drop(offsets);
@@ -74,6 +106,7 @@ pub fn save_to_path(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
         current_map: store.current_map_nameid.clone(),
         offsets: offsets.clone(),
         unlocked: st.unlocked.lock().unwrap().iter().cloned().collect(),
+        collected: st.collected.lock().unwrap().iter().cloned().collect(),
     };
     drop(store);
     drop(offsets);

@@ -30,6 +30,8 @@ pub struct ItemPayload {
     pub id: String,
     pub name: String,
     pub count: Option<i64>,
+    /// 是否必须在战局内拾取（目标级 foundInRaid）
+    pub found_in_raid: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -196,6 +198,7 @@ fn flatten_turn_ins(n: &dataset::QuestNode) -> Vec<ItemPayload> {
                 id: it.id.clone(),
                 name: it.name.clone(),
                 count: it.count,
+                found_in_raid: it.found_in_raid,
             });
         }
     }
@@ -214,10 +217,25 @@ fn objectives_payload(n: &dataset::QuestNode) -> Vec<ObjectivePayload> {
                     id: it.id.clone(),
                     name: it.name.clone(),
                     count: it.count,
+                    found_in_raid: it.found_in_raid,
                 })
                 .collect(),
         })
         .collect()
+}
+
+/// 收藏家（Collector）任务 id。
+/// 优先用已知 id；数据更新导致 id 失效时，回退按「名称含收藏家的特殊商人任务」查找。
+pub fn collector_quest_id() -> Option<String> {
+    const KNOWN: &str = "5c51aac186f77432ea65c552";
+    let s = store();
+    if s.quests.contains_key(KNOWN) {
+        return Some(KNOWN.to_string());
+    }
+    s.quests
+        .iter()
+        .find(|(_, n)| n.name.contains("收藏家"))
+        .map(|(id, _)| id.clone())
 }
 
 /// 任务涉及的地图 id 列表

@@ -9,10 +9,14 @@ import { openUrl } from '../tauri'
 
 const win = getCurrentWindow()
 
-const NAV_ITEMS: { key: 'monitor' | 'graph' | 'profile' | 'map'; label: string }[] = [
+const NAV_ITEMS: {
+  key: 'monitor' | 'graph' | 'profile' | 'map' | 'collector'
+  label: string
+}[] = [
   { key: 'monitor', label: '监控' },
   { key: 'map', label: '地图' },
   { key: 'graph', label: '任务' },
+  { key: 'collector', label: '收藏家' },
   { key: 'profile', label: '档案' },
 ]
 

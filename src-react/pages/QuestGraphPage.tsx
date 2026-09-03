@@ -40,6 +40,9 @@ type NodeState = 'completed' | 'in_progress' | 'available' | 'locked'
 // 视口边界留白（屏幕像素）
 const VIEW_PAD = 48
 
+// 搜索时未命中节点的淡化透明度（命中项保持原样，其余压暗但仍可见轮廓）
+const DIM_ALPHA = 0.22
+
 // 视口边界钳制：世界内容不允许被移出「边界 + VIEW_PAD」范围；内容小于视口时居中
 function clampView(
   v: { scale: number; x: number; y: number },
@@ -60,7 +63,8 @@ function clampView(
 
 // —— Canvas 调色板（与原 DOM 版一致）——
 const STATE_STYLE: Record<NodeState, { bg: string; border: string; text: string }> = {
-  completed: { bg: '#14261b', border: '#2ea043', text: '#86e29b' },
+  // 已完成：贴近画布底色、低饱和低对比的淡绿，边框与文字都压暗，弱化存在感
+  completed: { bg: '#12161a', border: '#2a3a31', text: '#6f7f77' },
   in_progress: { bg: '#0e2438', border: '#58a6ff', text: '#a8d1ff' },
   // 待接取：底色与文字保持黄色系，描边改用中性浅灰——
   // 黄色描边会与「任务链高亮」的琥珀色撞色，难以区分
@@ -448,7 +452,7 @@ export function QuestGraphPage() {
   }
 
   // —— 过滤 + 聚焦 + 布局（商人泳道 / 等级分区网格 / 轨道复用）——
-  const { positions, visible, width, height, bands, zones } = useMemo(() => {
+  const { positions, visible, width, height, bands, zones, matches } = useMemo(() => {
     const empty = {
       positions: {} as Record<string, { x: number; y: number }>,
       visible: new Set<string>(),
@@ -456,6 +460,7 @@ export function QuestGraphPage() {
       height: 0,
       bands: [] as { id: string; name: string; y: number; h: number }[],
       zones: [] as { left: number; right: number; label: string; subs: number[] }[],
+      matches: null as Set<string> | null,
     }
     if (!graph) return empty
     const nodeMap: Record<string, GraphNode> = {}
@@ -505,8 +510,17 @@ export function QuestGraphPage() {
       // 「已完成」开关：不勾选时排除已完成任务（仅在显示层排除，不参与任务链传播——
       // 已完成的前置不应隐藏其下游）
       if (!showCompleted && statusMap[n.id] === 'completed') continue
-      if (q && !n.name.toLowerCase().includes(q)) continue
+      // 搜索不再剔除节点：只记录命中集合，未命中项在绘制时淡化，保留上下文与布局稳定
       vis.add(n.id)
+    }
+
+    // 搜索命中集合：非空查询时，未命中的节点与连线在绘制阶段压暗
+    let matches: Set<string> | null = null
+    if (q) {
+      matches = new Set<string>()
+      for (const n of graph.nodes) {
+        if (n.name.toLowerCase().includes(q)) matches.add(n.id)
+      }
     }
 
     // 按名称搜索时无视好感和等级、前置筛选
@@ -755,8 +769,35 @@ export function QuestGraphPage() {
       height: boundH,
       bands: bandsOut,
       zones,
+      matches,
     }
   }, [graph, disabledTraders, mapSel, search, hideLegacy, repMet, lvlMet, mapUnlocked, profile, statusMap, completedSet, unlockedSet, questMode, showCompleted])
+
+  // 搜索唯一命中项：命中数恰好为 1 时自动把视图居中过去（不改变缩放）
+  const soleMatchId = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q || !graph) return null
+    const hit = graph.nodes.filter(
+      (n) => visible.has(n.id) && n.name.toLowerCase().includes(q),
+    )
+    return hit.length === 1 ? hit[0].id : null
+  }, [search, graph, visible])
+
+  useEffect(() => {
+    if (!soleMatchId) return
+    const p = positions[soleMatchId]
+    if (!p || csize.w <= 0 || csize.h <= 0) return
+    setView((v) => {
+      // 详情面板打开时，只在面板左侧的可用区域里居中，避免目标被面板挡住
+      const availW = Math.max(120, csize.w - (selectedId ? 584 : 0))
+      const x = availW / 2 - (p.x + NODE_W / 2) * v.scale
+      const y = csize.h / 2 - (p.y + NODE_H / 2) * v.scale
+      const c = clampView({ scale: v.scale, x, y }, width, height, csize.w, csize.h)
+      return { ...v, ...c }
+    })
+    // selectedId 只用于计算可用宽度，变化时不重复居中
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soleMatchId, positions, width, height, csize.w, csize.h])
 
   // 缩略图尺寸：按世界包围盒宽高比动态确定（最长边固定，含上下限）
   const MINI_LONG = 170
@@ -1108,22 +1149,31 @@ export function QuestGraphPage() {
       ctx.stroke()
     })
 
+    // 搜索淡化：节点未命中时压暗；连线两端都未命中才压暗（保留命中项的上下游连线）
+    const alphaOf = (id: string): number =>
+      matches && !matches.has(id) ? DIM_ALPHA : 1
+    const alphaOfEdge = (from: string, to: string): number =>
+      matches && !matches.has(from) && !matches.has(to) ? DIM_ALPHA : 1
+
     // 连线：正交折线（先画普通，再画链内高亮，避免被覆盖）
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
     for (const e of edges) {
-      ctx.strokeStyle = e.doneEdge ? 'rgba(46,160,67,0.8)' : '#5b6773'
+      ctx.globalAlpha = alphaOfEdge(e.from, e.to)
+      ctx.strokeStyle = e.doneEdge ? 'rgba(52,94,66,0.55)' : '#5b6773'
       ctx.lineWidth = e.doneEdge ? 3.4 : 2.8
       strokePolyline(ctx, e.pts, EDGE_CORNER)
     }
     if (chainIds.size > 0) {
       for (const e of edges) {
         if (!chainIds.has(e.from) || !chainIds.has(e.to)) continue
+        ctx.globalAlpha = alphaOfEdge(e.from, e.to)
         ctx.strokeStyle = e.doneEdge ? 'rgba(63,185,80,0.95)' : '#ef9f27'
         ctx.lineWidth = 4
         strokePolyline(ctx, e.pts, EDGE_CORNER)
       }
     }
+    ctx.globalAlpha = 1
     // 端点圆点：只画在真正接入卡片的端点上，
     // 与「连线只是从卡片旁边/上方经过」区分开
     const endDot = (x: number, y: number, r: number, fill: string, edge?: string) => {
@@ -1140,6 +1190,7 @@ export function QuestGraphPage() {
     for (const e of edges) {
       const a = e.pts[0]
       const b = e.pts[e.pts.length - 1]
+      ctx.globalAlpha = alphaOfEdge(e.from, e.to)
       const fill = e.doneEdge ? 'rgba(63,185,80,0.98)' : '#b8c4d0'
       const edge = e.doneEdge ? 'rgba(6,32,12,0.85)' : 'rgba(10,14,20,0.9)'
       endDot(a[0], a[1], 5.4, fill, edge)
@@ -1150,12 +1201,14 @@ export function QuestGraphPage() {
         if (!chainIds.has(e.from) || !chainIds.has(e.to)) continue
         const a = e.pts[0]
         const b = e.pts[e.pts.length - 1]
+        ctx.globalAlpha = alphaOfEdge(e.from, e.to)
         const fill = e.doneEdge ? '#5ce06d' : '#f5c518'
         const edge = e.doneEdge ? 'rgba(6,32,12,0.9)' : 'rgba(40,26,0,0.9)'
         endDot(a[0], a[1], 6.8, fill, edge)
         endDot(b[0], b[1], 6.8, fill, edge)
       }
     }
+    ctx.globalAlpha = 1
 
     // 节点
     ctx.textBaseline = 'alphabetic'
@@ -1165,6 +1218,8 @@ export function QuestGraphPage() {
       if (!p) continue
       const st = nodeStates[n.id] ?? 'locked'
       const stl = STATE_STYLE[st]
+      // 搜索未命中：整张卡片（含高亮环与物品图标）压暗
+      ctx.globalAlpha = alphaOf(n.id)
 
       // 卡片底与边框
       rr(ctx, p.x, p.y, NODE_W, NODE_H, 8)
@@ -1222,6 +1277,7 @@ export function QuestGraphPage() {
           ctx.fillText(`+${items.length - shown}`, ix - 2, iy + 13)
         }
       }
+      ctx.globalAlpha = 1
     }
     ctx.restore()
 
@@ -1246,6 +1302,8 @@ export function QuestGraphPage() {
       const sw = NODE_W * TS
       const sh = NODE_H * TS
       if (sx + sw < -24 || sx > CW + 24 || sy + sh < -24 || sy > CH + 24) continue
+      // 搜索未命中：文字同样淡化，与卡片保持一致
+      ctx.globalAlpha = alphaOf(n.id)
 
       // 特殊角标 ✦（右上角，与 Lv 同角但更靠边）
       if (n.special) {
@@ -1325,6 +1383,7 @@ export function QuestGraphPage() {
         drawChip('仅PvE', '#ffd9a3', '#8b6b3a', '#2a2418')
       if ((loyalty[n.traderId] ?? 1) === 0) drawChip('商人未解锁', '#ffb3b3', '#8b3a3a', '#2a1518')
       ctx.textBaseline = 'alphabetic'
+      ctx.globalAlpha = 1
     }
 
     // 商人泳道头像（48px）+ 中文名，位于左侧固定沟槽
@@ -1445,9 +1504,11 @@ export function QuestGraphPage() {
         const p = positions[n.id]
         if (!p) continue
         const st = nodeStates[n.id] ?? 'locked'
+        // 已完成用弱化后的浅淡绿，与主画面对齐；搜索未命中同样淡化
+        mctx.globalAlpha = matches && !matches.has(n.id) ? DIM_ALPHA : 1
         mctx.fillStyle =
           st === 'completed'
-            ? '#2ea043'
+            ? '#2f4438'
             : st === 'in_progress'
               ? '#58a6ff'
               : st === 'available'
@@ -1455,6 +1516,7 @@ export function QuestGraphPage() {
                 : '#3d444d'
         mctx.fillRect(p.x * k, p.y * k, Math.max(2, NODE_W * k), Math.max(1.5, NODE_H * k * 0.55))
       }
+      mctx.globalAlpha = 1
 
       // 当前视口框
       const vw = (CW / view.scale) * k
@@ -1654,7 +1716,7 @@ export function QuestGraphPage() {
 
         {/* 图例：左下角浮动显示 */}
         <div className="absolute bottom-3 left-3 z-40 flex flex-col gap-1 px-2.5 py-2 rounded-md bg-ink-800/85 border border-line shadow-lg backdrop-blur-sm text-[13px] text-muted pointer-events-none">
-          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#14261b] border border-[#2ea043]" />已完成</span>
+          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#12161a] border border-[#2a3a31]" />已完成</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#0e2438] border border-[#58a6ff]" />进行中</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#231b0d] border border-[#9aa5b1]" />待接取</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#1f2730] border border-[#6b7682]" />后续解锁</span>

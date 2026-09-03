@@ -20,6 +20,8 @@ pub struct AppState {
     pub offsets: Mutex<HashMap<String, u64>>,
     /// 手动解锁的任务集合（前置未达成但已解锁为可接取），持久化
     pub unlocked: Mutex<std::collections::HashSet<String>>,
+    /// 收藏家已收集的物品 id 集合（持久化于 <data_root>/collected.json）
+    pub collected: Mutex<std::collections::HashSet<String>>,
 }
 
 // ---------------- 应用设置（持久化） ----------------
@@ -572,6 +574,41 @@ fn get_unlocked(app: tauri::AppHandle) -> Vec<String> {
     u.iter().cloned().collect()
 }
 
+/// 收藏家任务 id（数据集里找不到时返回 null）
+#[tauri::command]
+fn get_collector_quest_id() -> Option<String> {
+    data::collector_quest_id()
+}
+
+/// 已收集的物品 id 列表（持久化于 <data_root>/collected.json）
+#[tauri::command]
+fn get_collected_items(app: tauri::AppHandle) -> Vec<String> {
+    let binding = app.state::<AppState>();
+    let c = binding.collected.lock().unwrap();
+    c.iter().cloned().collect()
+}
+
+/// 标记 / 取消标记某个收集品为已收集，立即落盘，返回更新后的全集
+#[tauri::command]
+fn set_item_collected(
+    app: tauri::AppHandle,
+    item_id: String,
+    collected: bool,
+) -> Vec<String> {
+    let all = {
+        let binding = app.state::<AppState>();
+        let mut c = binding.collected.lock().unwrap();
+        if collected {
+            c.insert(item_id);
+        } else {
+            c.remove(&item_id);
+        }
+        c.iter().cloned().collect::<Vec<String>>()
+    };
+    persist::save_collected(&app, &all);
+    all
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StatusResult {
@@ -764,6 +801,10 @@ fn import_data(app: tauri::AppHandle, path: String) -> Result<(), String> {
         *offsets = parsed.offsets;
         let mut unlocked = binding.unlocked.lock().unwrap();
         *unlocked = parsed.unlocked.iter().cloned().collect();
+        // 收藏进度来自导出文件；同时写回 collected.json 保持两处一致
+        let mut collected = binding.collected.lock().unwrap();
+        *collected = parsed.collected.iter().cloned().collect();
+        persist::save_collected(&app, &parsed.collected);
     }
     let dir = read_settings(&app).log_dir;
     start_watching(app, Some(dir))
@@ -995,7 +1036,14 @@ pub fn run() {
                 screenshot: Mutex::new(None),
                 offsets: Mutex::new(HashMap::new()),
                 unlocked: Mutex::new(std::collections::HashSet::new()),
+                collected: Mutex::new(std::collections::HashSet::new()),
             });
+            // 收藏进度独立于任务状态：无论是否配置日志目录都能读写
+            {
+                let binding = app.state::<AppState>();
+                let mut collected = binding.collected.lock().unwrap();
+                *collected = persist::load_collected(&app.handle().clone()).into_iter().collect();
+            }
             // 装载 tarkov.dev 原始数据的派生索引。
             // 仅当缓存里已有部分数据且已过期时才后台静默拉取；
             // 缓存为空（没有任何 JSON）时不自动联网下载，避免离线/首次启动空转与误报，
@@ -1032,6 +1080,9 @@ pub fn run() {
             export_data,
             import_data,
             get_unlocked,
+            get_collector_quest_id,
+            get_collected_items,
+            set_item_collected,
             set_quest_status,
             get_data_status,
             refresh_game_data,

@@ -163,6 +163,24 @@ export async function getUnlocked(): Promise<string[]> {
   return await invoke<string[]>('get_unlocked')
 }
 
+/** 收藏家任务 id（数据集里找不到时为 null） */
+export async function getCollectorQuestId(): Promise<string | null> {
+  return await invoke<string | null>('get_collector_quest_id')
+}
+
+/** 已收集的物品 id 列表（持久化于 collected.json） */
+export async function getCollectedItems(): Promise<string[]> {
+  return await invoke<string[]>('get_collected_items')
+}
+
+/** 标记 / 取消标记收集品，返回更新后的全集 */
+export async function setItemCollected(
+  itemId: string,
+  collected: boolean,
+): Promise<string[]> {
+  return await invoke<string[]>('set_item_collected', { itemId, collected })
+}
+
 /** 手动修改任务状态：accept=接取（同时完成前置）、complete=完成、unlock=解锁（含前置未结束任务） */
 export async function setQuestStatus(
   questId: string,
