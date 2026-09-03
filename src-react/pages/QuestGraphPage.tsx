@@ -476,7 +476,7 @@ export function QuestGraphPage() {
       if (!lockedMaps || lockedMaps.length === 0) return false
       return maps.some((m) => lockedMaps.includes(m))
     }
-    // 专注于「需求过滤」（好感 / 等级 / 地图 / 商人 / 旧任务 / 地区），不含搜索。
+    // 专注于「需求过滤」（好感 / 等级 / 地图 / 商人 / 赛季任务 / 地区），不含搜索。
     const effRepMet = repMet
     const effLvlMet = lvlMet
     const reqFails = (n: GraphNode): boolean => {
@@ -492,7 +492,7 @@ export function QuestGraphPage() {
       if (effLvlMet && (n.minLevel ?? 1) > Math.max(1, profile?.level ?? 1)) return true
       if (effRepMet) {
         for (const r of n.traderReqs ?? []) {
-          if (r.reqType === 'level' && (profile?.loyalty?.[r.traderId] ?? 1) < r.value) return true
+          if ((r.reqType === 'level' || r.reqType === 'variable') && (profile?.loyalty?.[r.traderId] ?? 1) < r.value) return true
         }
       }
       return false
@@ -538,7 +538,7 @@ export function QuestGraphPage() {
         }
         if (repMet) {
           for (const r of n.traderReqs ?? []) {
-            if (r.reqType === 'level' && (profile?.loyalty?.[r.traderId] ?? 1) < r.value) {
+            if ((r.reqType === 'level' || r.reqType === 'variable') && (profile?.loyalty?.[r.traderId] ?? 1) < r.value) {
               vis.delete(n.id)
               break
             }
@@ -556,7 +556,7 @@ export function QuestGraphPage() {
     }
 
     // —— 任务链过滤传播 ——
-    // 被「需求过滤」（好感 / 等级 / 地图 / 商人 / 旧任务 / 地区）隐藏的前置任务，
+    // 被「需求过滤」（好感 / 等级 / 地图 / 商人 / 赛季任务 / 地区）隐藏的前置任务，
     // 其下游整条任务链也应隐藏，哪怕下游任务自身满足要求。搜索(q)时不传播。
     if (!q) {
       const fwd = new Map<string, string[]>()
@@ -1365,7 +1365,7 @@ export function QuestGraphPage() {
       for (const r of n.traderReqs ?? []) {
         const met = (loyalty[r.traderId] ?? 1) >= r.value
         const label =
-          r.reqType === 'level'
+          r.reqType === 'level' || r.reqType === 'variable'
             ? `${traderDisplayName(r.traderId, r.traderName)} LL${r.value}`
             : `好感${r.value}`
         drawChip(
@@ -1375,7 +1375,7 @@ export function QuestGraphPage() {
           met ? '#10231f' : '#2a1518',
         )
       }
-      if (n.legacy) drawChip('旧', '#8b949e', '#30363d', '#ffffff1a')
+      if (n.legacy) drawChip('赛季', '#8b949e', '#30363d', '#ffffff1a')
       // 模式专属标记：与隐藏逻辑一致，基于 modes 判定（而非 legacy）
       if (n.modes && n.modes.length > 0 && !n.modes.includes('pve'))
         drawChip('仅PvP', '#ffb3b3', '#8b3a3a', '#2a1518')
@@ -1570,7 +1570,7 @@ export function QuestGraphPage() {
           ))}
         </div>
 
-        {/* 筛选条件：好感达标 / 等级达标 / 地图解锁 / 专注模式 / 旧任务，合并为下拉多选 */}
+        {/* 筛选条件：好感达标 / 等级达标 / 地图解锁 / 专注模式 / 赛季任务，合并为下拉多选 */}
         <div className="relative shrink-0" ref={filterRef}>
           <DropdownTrigger
             icon={
@@ -1590,7 +1590,7 @@ export function QuestGraphPage() {
             active={filterCount > 0}
             open={filterOpen}
             onClick={() => setFilterOpen((o) => !o)}
-            title="筛选条件：好感达标 / 等级达标 / 地图解锁 / 已完成 / 旧任务（点击展开勾选）"
+            title="筛选条件：好感达标 / 等级达标 / 地图解锁 / 已完成 / 赛季任务（点击展开勾选）"
           />
           {filterOpen && (
             <div className="absolute left-0 top-full mt-1.5 z-50 bg-ink-800 border border-line rounded-lg shadow-xl p-1.5 space-y-0.5 min-w-[180px] max-w-[260px] max-h-[70vh] overflow-y-auto">
@@ -1619,10 +1619,10 @@ export function QuestGraphPage() {
                 title="勾选时显示已完成的任务；不勾选则排除已完成任务"
               />
               <FilterCheck
-                label="旧任务"
+                label="赛季任务"
                 checked={!hideLegacy}
                 onChange={(v) => setHideLegacy(!v)}
-                title="勾选才显示已移除的旧任务（多为旧 PvP 专属任务）"
+                title="勾选才显示已移除的赛季任务（往期赛季任务，多为旧 PvP 专属任务）"
               />
             </div>
           )}
@@ -1828,7 +1828,7 @@ export function QuestGraphPage() {
                   </span>
                   {detail.legacy && (
                     <span className="px-1.5 rounded border border-line text-[12px] text-muted">
-                      旧任务
+                      赛季任务
                     </span>
                   )}
                   {detail.modes && detail.modes.length > 0 && !detail.modes.includes('pve') && (
@@ -1859,7 +1859,7 @@ export function QuestGraphPage() {
                         // reputation = 好感；variable = 仅知存在额外商人条件，
                         // 源数据只给全局变量阈值，不等于等级/好感数字，故不展示具体数值
                         const text =
-                          r.reqType === 'level'
+                          r.reqType === 'level' || r.reqType === 'variable'
                             ? `忠诚等级 LL${r.value}（当前 LL${cur}）`
                             : r.reqType === 'reputation'
                               ? `好感 ≥${r.value}`
@@ -1872,7 +1872,7 @@ export function QuestGraphPage() {
                             <span className="text-[#c9d1d9] truncate">
                               {traderDisplayName(r.traderId, r.traderName)} {text}
                             </span>
-                            {r.reqType === 'level' &&
+                            {(r.reqType === 'level' || r.reqType === 'variable') &&
                               (met ? (
                                 <span className="text-ok shrink-0">✓ 已达标</span>
                               ) : (

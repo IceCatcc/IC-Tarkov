@@ -173,7 +173,7 @@ function loadGraphPrefs(): GraphPrefs {
     lvlMet: false,
     mapUnlocked: false,
     showCompleted: false, // 默认排除已完成任务（「已完成」勾选才显示）
-    hideLegacy: true, // 默认隐藏旧任务（「旧任务」勾选才显示）
+    hideLegacy: true, // 默认隐藏赛季任务（「赛季任务」勾选才显示）
     disabledTraders: Object.fromEntries(DEFAULT_DISABLED_TRADERS.map((id) => [id, true])),
     questMode: 'pvp',
   }

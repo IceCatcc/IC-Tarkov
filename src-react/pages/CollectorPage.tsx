@@ -373,7 +373,7 @@ export function CollectorPage() {
                 const cur = profile?.loyalty?.[r.traderId] ?? 1
                 const met = cur >= r.value
                 const text =
-                  r.reqType === 'level'
+                  r.reqType === 'level' || r.reqType === 'variable'
                     ? `LL${r.value}（当前 LL${cur}）`
                     : r.reqType === 'reputation'
                       ? `好感 ≥${r.value}`
@@ -382,7 +382,7 @@ export function CollectorPage() {
                   <span
                     key={`${r.traderId}-${r.reqType}`}
                     className={`inline-flex items-center h-6 px-1.5 rounded border ${
-                      r.reqType !== 'level'
+                      !(r.reqType === 'level' || r.reqType === 'variable')
                         ? 'border-line bg-ink-700 text-[#c9d1d9]'
                         : met
                           ? 'border-[#2c4a35] bg-[#12161a] text-[#83a291]'
@@ -390,7 +390,7 @@ export function CollectorPage() {
                     }`}
                   >
                     {traderDisplayName(r.traderId, r.traderName)} {text}
-                    {r.reqType === 'level' && (
+                    {(r.reqType === 'level' || r.reqType === 'variable') && (
                       <span className="ml-1">{met ? '✓' : '✗'}</span>
                     )}
                   </span>

@@ -119,7 +119,7 @@ export interface GraphNode {
   maps: string[]
   /** 贸易条件（商人忠诚等级/好感） */
   traderReqs: TraderReq[]
-  /** 是否为旧任务（当前赛季已移除，多为旧 PvP 专属任务） */
+  /** 是否为赛季任务（往期赛季任务，当前赛季已移除，多为旧 PvP 专属任务） */
   legacy: boolean
   special: boolean
   /** 任务可用模式：pvp / pve（两者都有则为 ['pvp','pve']） */
