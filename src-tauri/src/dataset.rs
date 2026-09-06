@@ -601,7 +601,19 @@ fn entry_val(e: &Value, raw: &Raw) -> Value {
         "nameZh".into(),
         name_zh.map(Value::String).unwrap_or(Value::Null),
     );
-    m.insert("position".into(), pos_val(e.get("position")));
+    // 坐标：多数集合用嵌套的 position 对象，但部分集合（如 btrStops）是扁平的 x / y / z。
+    // 缺少回退时这些标记会因 position 为 null 被前端整条跳过（BTR 勾选后不显示的根因）。
+    let pos_src = match e.get("position") {
+        Some(p) if p.is_object() => Some(p.clone()),
+        _ => {
+            if e.get("x").is_some() && e.get("z").is_some() {
+                Some(e.clone())
+            } else {
+                None
+            }
+        }
+    };
+    m.insert("position".into(), pos_val(pos_src.as_ref()));
     m.insert("top".into(), num(e.get("top")));
     m.insert("bottom".into(), num(e.get("bottom")));
     Value::Object(m)

@@ -1,10 +1,13 @@
 import type { PlayerQuest } from '../types'
 import { useStore, useQuestDetail, dedupeItems } from '../store'
 import { traderImage } from '../traderImages'
+import { traderDisplayName } from '../traderMeta'
 
 export function QuestCard({ quest }: { quest: PlayerQuest }) {
   const completed = quest.status === 'completed'
   const avatar = traderImage(quest.traderId)
+  // 商人统一展示为「中文名-英文名」
+  const traderLabel = traderDisplayName(quest.traderId, quest.traderName)
   const openWiki = useStore((s) => s.openWiki)
   const detail = useQuestDetail(quest.questId)
 
@@ -26,7 +29,7 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
         {avatar && (
           <img
             src={avatar}
-            alt={quest.traderName}
+            alt={traderLabel}
             className="w-6 h-6 rounded-full object-cover border border-line shrink-0"
           />
         )}
@@ -44,7 +47,7 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
 
       {/* 第二行：商人名（弱化）+ 时间（最不重要） */}
       <div className="mt-1 flex items-center gap-2 text-[12px] text-muted flex-wrap">
-        {quest.traderName && <span>{quest.traderName}</span>}
+        {quest.traderName && <span>{traderLabel}</span>}
         {quest.acceptedAt && <span className="text-muted/60">接取 {quest.acceptedAt}</span>}
         {quest.completedAt && <span className="text-muted/60">完成 {quest.completedAt}</span>}
         {quest.minLevel != null && <span className="text-muted/60">最低 Lv{quest.minLevel}</span>}

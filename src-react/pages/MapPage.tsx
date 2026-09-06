@@ -5,7 +5,6 @@ import 'leaflet/dist/leaflet.css'
 import './map.css'
 import {
   getPlayerPosition,
-  fetchTarkovTime,
   getMapMarkers,
   getQuestZones,
   getMapBosses,
@@ -172,6 +171,7 @@ type ChipKey =
   | 'extract_scav'
   | 'player_spawns'
   | 'ai_spawns'
+  | 'sniper_spawns'
   | 'bosses'
   | 'locks'
   | 'hazards'
@@ -187,6 +187,7 @@ const CHIP_DEFS: { key: ChipKey; label: string }[] = [
   { key: 'extract_scav', label: 'Scav撤离' },
   { key: 'player_spawns', label: '玩家出生点' },
   { key: 'ai_spawns', label: 'AI出生点' },
+  { key: 'sniper_spawns', label: '狙击AI' },
   { key: 'bosses', label: 'Boss' },
   { key: 'locks', label: '钥匙锁' },
   { key: 'hazards', label: '危险区' },
@@ -261,20 +262,6 @@ function fmtNum(v: number | null | undefined) {
   return typeof v === 'number' ? v.toFixed(1) : '-'
 }
 
-/**
- * 塔科夫游戏内时钟：现实 1 秒 = 游戏 7 秒。
- * @param realMs 现实时间毫秒戳
- * @param offsetHours 左右局偏移（左局 0，右局 +12）
- */
-function tarkovClockText(realMs: number, offsetHours: number): string {
-  const gameMs = realMs * 7 + offsetHours * 3600_000
-  const total = Math.floor(gameMs / 1000) % 86400
-  const h = String(Math.floor(total / 3600)).padStart(2, '0')
-  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0')
-  const s = String(total % 60).padStart(2, '0')
-  return `${h}:${m}:${s}`
-}
-
 /** HTML 转义（任务名等文本注入到 divIcon/popup 前使用） */
 function escapeHtml(s: string): string {
   return s.replace(
@@ -327,6 +314,7 @@ export function MapPage() {
     extract_scav: true,
     player_spawns: false,
     ai_spawns: false,
+    sniper_spawns: false,
     bosses: true,
     locks: false,
     hazards: false,
@@ -342,12 +330,7 @@ export function MapPage() {
   const [tasksOpen, setTasksOpen] = useState(false) // 右下角任务浮窗
   const [infoOpen, setInfoOpen] = useState(false) // 右下角地图信息浮窗
   const [focusOpen, setFocusOpen] = useState(false) // 工具栏「自动聚焦」展开面板
-  // 塔科夫游戏内时间：{ serverMs: 同步到的服务器时间, localMs: 同步时的本地时间 }
-  // 同步失败时保持 null（顶部时间显示隐藏）
-  const [tarkovClock, setTarkovClock] = useState<{ serverMs: number; localMs: number } | null>(
-    null,
-  )
-  const [nowTick, setNowTick] = useState(() => Date.now())
+
   const [cursorCoord, setCursorCoord] = useState<{ x: number; z: number } | null>(null)
   // 三个浮窗（地图选单/任务/层级）的容器 ref：点击外部自动关闭
   const mapMenuRef = useRef<HTMLDivElement | null>(null)
@@ -432,24 +415,8 @@ export function MapPage() {
     }
   }, [currentMapId, markers, selectable])
 
-  /* ---------- 塔科夫游戏内时间（左右局） ---------- */
-  // 游戏内时间是现实的 7 倍速；左右局相差 12 小时且同时正向流逝
-  useEffect(() => {
-    let timer: number | undefined
-    const sync = async () => {
-      const serverMs = await fetchTarkovTime()
-      if (serverMs) setTarkovClock({ serverMs, localMs: Date.now() })
-    }
-    void sync()
-    // 1s 刷新显示，10 分钟重新与服务器同步一次
-    timer = window.setInterval(() => setNowTick(Date.now()), 1000)
-    const resync = window.setInterval(() => void sync(), 10 * 60 * 1000)
-    return () => {
-      if (timer) window.clearInterval(timer)
-      window.clearInterval(resync)
-    }
-    // currentMapId 变化 = 进入（切换）地图，此时重新同步一次时间
-  }, [currentMapId])
+  /* 地图时间已移除：接口长期无数据，面板里只会显示「暂不可用」还占位置。
+     相关的时钟状态、1s 定时器与 10 分钟一次的网络同步一并去掉。 */
 
   /* ---------- Leaflet 构建（每张地图重建实例，保证状态干净） ---------- */
 
@@ -738,6 +705,8 @@ export function MapPage() {
       list: MarkerEntry[],
       iconFile: (en: MarkerEntry) => string,
       fallback?: (en: MarkerEntry) => string,
+      /** 是否参与按楼层灰显（false = 任何楼层都保持原样，如狙击 AI、撤离点） */
+      floorDim = true,
     ): L.LayerGroup => {
       const lg = L.layerGroup()
       for (const en of list) {
@@ -751,7 +720,7 @@ export function MapPage() {
             coordMeta(en),
           ),
         )
-        floorMarkers.push({ m: mk, idx: markerFloorIdx(en) })
+        if (floorDim) floorMarkers.push({ m: mk, idx: markerFloorIdx(en) })
         lg.addLayer(mk)
       }
       return lg
@@ -773,6 +742,7 @@ export function MapPage() {
       MarkerEntry[],
       (en: MarkerEntry) => string,
       ((en: MarkerEntry) => string)?,
+      boolean?,
     ][] = [
       [
         'player_spawns',
@@ -786,10 +756,22 @@ export function MapPage() {
         'ai_spawns',
         (mm.spawns ?? []).filter(
           (s) =>
-            !(s.categories ?? []).includes('boss') && !(s.categories ?? []).includes('player'),
+            !(s.categories ?? []).includes('boss') &&
+            !(s.categories ?? []).includes('player') &&
+            // 狙击 AI 有独立开关，不混在普通 AI 出生点里
+            !(s.categories ?? []).includes('sniper'),
         ),
         spawnIcon,
         () => 'AI 出生点',
+      ],
+      [
+        'sniper_spawns',
+        (mm.spawns ?? []).filter((s) => (s.categories ?? []).includes('sniper')),
+        () => 'spawn_sniper_scav',
+        // 数据在狙击点上没有 name，给一个明确的中文名
+        () => '狙击 AI 出生点',
+        // 不参与按楼层灰显：狙击手位置固定且需常驻可见，透明度跳动会干扰判断
+        false,
       ],
       [
         'bosses',
@@ -807,9 +789,9 @@ export function MapPage() {
       ['weapons', mm.stationaryWeapons ?? [], () => 'stationarygun', undefined],
       ['btr', mm.btrStops ?? [], () => 'btr_stop', undefined],
     ]
-    for (const [key, list, iconFn, fb] of defs) {
+    for (const [key, list, iconFn, fb, floorDim] of defs) {
       if (!list.length) continue
-      chipGroups.set(key, groupOf(list, iconFn, fb))
+      chipGroups.set(key, groupOf(list, iconFn, fb, floorDim ?? true))
     }
 
     const keyOf = (
@@ -852,7 +834,7 @@ export function MapPage() {
       const reqs = en.requirements ?? []
       const m = L.marker(pos(en.position), { icon: makeIcon(extractIcon(en)) })
       m.setZIndexOffset(EXTRACT_ZINDEX[fac] ?? 500)
-      floorMarkers.push({ m, idx: markerFloorIdx(en) })
+      // 撤离点不参与「按楼层灰显」：无论当前看哪一层都保持原样，避免被误调透明度
       m.bindPopup(
         popupHtml(
           en.nameZh ?? en.name ?? '未命名',
@@ -1107,14 +1089,6 @@ export function MapPage() {
         (o.zones ?? []).some((z) => z.nn === imap.key),
     )
   })
-
-  // 地图时间（左右局）：同步失败时为空，面板内显示「暂不可用」
-  const clockText = tarkovClock
-    ? {
-        left: tarkovClockText(tarkovClock.serverMs + (nowTick - tarkovClock.localMs), 0),
-        right: tarkovClockText(tarkovClock.serverMs + (nowTick - tarkovClock.localMs), 12),
-      }
-    : null
 
   // 本图 Boss 刷新率（按刷新率降序，数据来自 map-bosses.json）
   const mapBosses = (imap && bossDoc?.maps?.[imap.key]) ?? []
@@ -1417,7 +1391,7 @@ export function MapPage() {
           </div>
         </div>
 
-        {/* 地图信息：右下角浮动按钮 —— Boss 刷新率 + 地图时间。
+        {/* 地图信息：右下角浮动按钮 —— Boss 刷新率。
             面板为常显浮层，容器整体 pointer-events-none 鼠标穿透不挡地图，
             仅按钮 pointer-events-auto 可点；select-none 防止拖动时选中文字 */}
         <div
@@ -1428,19 +1402,6 @@ export function MapPage() {
           {infoOpen && (
             <div className="pointer-events-none w-[180px] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/60 shadow-xl p-2.5 space-y-2.5">
               <div>
-                <div className="text-[13px] text-muted mb-1">地图时间</div>
-                {clockText ? (
-                  <div className="text-[14px] text-[#c9d1d9] tabular-nums leading-relaxed">
-                    <div>左局 {clockText.left}</div>
-                    <div>右局 {clockText.right}</div>
-                  </div>
-                ) : (
-                  <div className="text-[13px] text-muted/70">
-                    暂不可用
-                  </div>
-                )}
-              </div>
-              <div className="border-t border-line pt-2">
                 <div className="text-[13px] text-muted mb-1">Boss 刷新率</div>
                 {mapBosses.length === 0 ? (
                   <div className="text-[13px] text-muted/70">本图无固定 Boss</div>
@@ -1477,7 +1438,7 @@ export function MapPage() {
           )}
           <button
             onClick={() => setInfoOpen((o) => !o)}
-            title="地图信息：Boss 刷新率与地图时间"
+            title="地图信息：Boss 刷新率"
             className="pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>

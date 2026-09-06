@@ -16,9 +16,15 @@ static RE_QUEST_LIST: Lazy<Regex> = Lazy::new(|| {
 static RE_TEMPLATE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^([0-9a-fA-F]{24})\s+(\w+)$").unwrap());
 static RE_TRAIL_COMMA: Lazy<Regex> = Lazy::new(|| Regex::new(r",(\s*[}\]])").unwrap());
-/// 进入 raid 时 application 行：`[Transit] Flag:None, RaidId:..., Count:0, Locations:Sandbox_start -> `
-static RE_LOCATION: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"Locations:([A-Za-z0-9_]+)").unwrap());
+/// application 行的地图链：
+/// - 进入 raid：`[Transit] Flag:None, RaidId:..., Count:0, Locations:Sandbox_start -> `
+/// - 地图转移：`[Transit] Flag:Common, RaidId:..., Count:1, Locations:bigmap -> factory4_day -> `
+///
+/// 转移时是「源 -> 目标」链，**最后一个**才是当前所在地图；
+/// 只取第一个会导致转移后仍停留在原地图（不会跟随切换）。
+static RE_LOCATION: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"Locations:([A-Za-z0-9_\-]*(?:\s*->\s*[A-Za-z0-9_\-]*)*)").unwrap()
+});
 /// 会话模式行（application_000.log 启动时一行）：`Session mode: Pve` / `Session mode: Pvp`
 static RE_SESSION_MODE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)Session mode:\s*(Pve|Pvp)").unwrap());
@@ -154,10 +160,20 @@ pub fn parse_chunk(text: &str, st: &mut ParseState) -> Vec<RawEvent> {
             }
         } else if line.contains("RaidId") {
             if let Some(cap) = RE_LOCATION.captures(line) {
-                out.push(RawEvent::Location {
-                    location_id: cap.get(1).unwrap().as_str().to_string(),
-                    timestamp: st.cur_ts.clone(),
-                });
+                // 取地图链的最后一个非空段：转移时形如 `bigmap -> factory4_day ->`
+                let chain = cap.get(1).map(|m| m.as_str()).unwrap_or("");
+                let last = chain
+                    .split("->")
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .last()
+                    .unwrap_or("");
+                if !last.is_empty() {
+                    out.push(RawEvent::Location {
+                        location_id: last.to_string(),
+                        timestamp: st.cur_ts.clone(),
+                    });
+                }
             }
         }
 

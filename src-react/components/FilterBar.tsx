@@ -1,9 +1,13 @@
 import { useMemo } from 'react'
 import { useStore } from '../store'
+import { traderDisplayName } from '../traderMeta'
 
 export function FilterBar() {
   const filter = useStore((s) => s.filter as 'all' | 'in_progress' | 'completed')
   const setFilter = useStore((s) => s.setFilter)
+  // 任务关键字：在已选分类（进行中 / 已完成 / 全部）内再过滤
+  const search = useStore((s) => s.searchMonitor)
+  const setSearch = useStore((s) => s.setSearchMonitor)
   const traderFilter = useStore((s) => s.traderFilter)
   const setTraderFilter = useStore((s) => s.setTraderFilter)
   const mapFilter = useStore((s) => s.mapFilter)
@@ -11,6 +15,13 @@ export function FilterBar() {
   const list = useStore((s) => s.playerQuests)
   const mapNames = useStore((s) => s.mapNames)
 
+  // 商人名按 id 换成统一的「中文名-英文名」展示；筛选值仍用 traderName
+  const traderIdByName = new Map<string, string>()
+  for (const q of list) {
+    if (q.traderName && q.traderId && !traderIdByName.has(q.traderName)) {
+      traderIdByName.set(q.traderName, q.traderId)
+    }
+  }
   const traders = Array.from(new Set(list.map((q) => q.traderName).filter(Boolean))).sort()
   // 地图选项：来自任务自带的地图 id（显示中文名）
   const maps = useMemo(() => {
@@ -61,6 +72,13 @@ export function FilterBar() {
           </option>
         ))}
       </select>
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="搜索任务名 / 商人"
+        title="在当前分类内按任务名或商人名过滤"
+        className="bg-ink-800 border border-line text-[14px] rounded px-2 py-1.5 text-[#e6edf3] placeholder:text-muted/70 w-[180px]"
+      />
       <select
         value={traderFilter ?? ''}
         onChange={(e) => setTraderFilter(e.target.value || null)}
@@ -70,7 +88,7 @@ export function FilterBar() {
         <option value="">全部商人</option>
         {traders.map((t) => (
           <option key={t} value={t}>
-            {t}
+            {traderDisplayName(traderIdByName.get(t) ?? '', t)}
           </option>
         ))}
       </select>

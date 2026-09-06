@@ -112,6 +112,10 @@ interface AppState {
   searchGraph: string
   setSearchGraph: (s: string) => void
 
+  /** 监控页任务列表的关键字过滤（在所选分类内过滤任务名 / 商人名） */
+  searchMonitor: string
+  setSearchMonitor: (s: string) => void
+
   hideLegacyGraph: boolean
   setHideLegacyGraph: (v: boolean) => void
   /** 仅显示商人忠诚等级达标的任务（搜索时忽略） */
@@ -471,6 +475,9 @@ export const useStore = create<AppState>((set) => ({
   setMapSelGraph: (m) => set({ mapSelGraph: m }),
   searchGraph: '',
   setSearchGraph: (s) => set({ searchGraph: s }),
+
+  searchMonitor: '',
+  setSearchMonitor: (s) => set({ searchMonitor: s }),
 
   hideLegacyGraph: prefs0.hideLegacy,
   setHideLegacyGraph: (v) => set({ hideLegacyGraph: v }),
