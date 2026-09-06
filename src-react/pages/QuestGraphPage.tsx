@@ -45,6 +45,11 @@ const VIEW_PAD = 48
 // 搜索时未命中节点的淡化透明度（命中项保持原样，其余压暗但仍可见轮廓）
 const DIM_ALPHA = 0.22
 
+// 右侧任务详情面板宽度（须与下方面板的 w-[..] 一致）+ 右边距。
+// 搜索命中唯一节点时用它算出「面板左侧的可用区域」，避免目标被面板挡住。
+const DETAIL_PANEL_W = 480
+const DETAIL_PANEL_OCCUPY = DETAIL_PANEL_W + 24
+
 // 视口边界钳制：世界内容不允许被移出「边界 + VIEW_PAD」范围；内容小于视口时居中
 function clampView(
   v: { scale: number; x: number; y: number },
@@ -1120,7 +1125,7 @@ export function QuestGraphPage() {
     if (!p || csize.w <= 0 || csize.h <= 0) return
     setView((v) => {
       // 详情面板打开时，只在面板左侧的可用区域里居中，避免目标被面板挡住
-      const availW = Math.max(120, csize.w - (selectedId ? 584 : 0))
+      const availW = Math.max(120, csize.w - (selectedId ? DETAIL_PANEL_OCCUPY : 0))
       const x = availW / 2 - (p.x + NODE_W / 2) * v.scale
       const y = csize.h / 2 - (p.y + NODE_H / 2) * v.scale
       const c = clampView({ scale: v.scale, x, y }, width, height, csize.w, csize.h)
@@ -2111,8 +2116,11 @@ export function QuestGraphPage() {
           <div
             onMouseDown={(e) => e.stopPropagation()}
             onWheel={(e) => e.stopPropagation()}
-            style={{ maxHeight: `min(88%, calc(100% - ${miniDim.h + 36}px))` }}
-            className="absolute right-3 top-3 w-[560px] min-w-[380px] max-w-[calc(100%-24px)] overflow-y-auto bg-ink-800 border border-line rounded-xl p-4 shadow-xl z-50 cursor-default"
+            style={{
+              width: DETAIL_PANEL_W,
+              maxHeight: `min(88%, calc(100% - ${miniDim.h + 36}px))`,
+            }}
+            className="absolute right-3 top-3 min-w-[360px] max-w-[calc(100%-24px)] overflow-y-auto bg-ink-800/90 backdrop-blur-sm border border-line rounded-xl p-4 shadow-xl z-50 cursor-default"
           >
             <button
               onClick={(e) => {

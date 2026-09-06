@@ -616,6 +616,14 @@ fn entry_val(e: &Value, raw: &Raw) -> Value {
     m.insert("position".into(), pos_val(pos_src.as_ref()));
     m.insert("top".into(), num(e.get("top")));
     m.insert("bottom".into(), num(e.get("bottom")));
+    // zoneName：狙击 AI 的唯一可靠标识——数据中它们的 categories 仅为 ["bot"]，
+    // 是靠 zoneName 里的 Snipe/Sniper 区分的（如海关 ZoneSnipeTower、中心区 ZoneSandSnipeCenter）
+    m.insert(
+        "zoneName".into(),
+        s(e, "zoneName")
+            .map(|v| Value::String(v.to_string()))
+            .unwrap_or(Value::Null),
+    );
     Value::Object(m)
 }
 

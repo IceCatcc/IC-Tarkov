@@ -103,7 +103,10 @@ export async function initTauri(): Promise<UnlistenFn> {
     'disabledTradersGraph',
     'questMode',
     'autoZoomMap',
+    'autoCenter',
+    'focusZoom',
     'untrackedQuests',
+    'mapChips',
     'uiScale',
   ] as const
   const snapState = (s: ReturnType<typeof useStore.getState>) =>

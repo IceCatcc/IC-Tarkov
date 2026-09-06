@@ -79,9 +79,10 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     line-height: 1.5;
 }
 .map-popup-coord {
-    font-size: 13.5px;
+    font-size: 12.5px;
     color: #6e7681;
-    line-height: 1.45;
+    line-height: 1.4;
+    white-space: nowrap;
 }
 
 /* 撤离要求：物品类（图片 + 中文名），对齐任务 tooltip 风格 */
@@ -158,6 +159,15 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
 .req-switch { background: rgba(95, 166, 255, 0.18); color: #9ec5ff; border-color: rgba(95, 166, 255, 0.6); }
 .req-btr { background: rgba(95, 166, 255, 0.18); color: #9ec5ff; border-color: rgba(95, 166, 255, 0.6); }
 .req-info { background: rgba(139, 148, 158, 0.16); color: #c9d1d9; border-color: rgba(139, 148, 158, 0.5); }
+
+/* 狙击 AI 出生点：图标套红色光晕，和普通 AI 明显区分 */
+.marker-sniper {
+    filter:
+        drop-shadow(0 0 2px rgba(0, 0, 0, 0.95))
+        drop-shadow(0 0 3px rgba(255, 46, 46, 1))
+        drop-shadow(0 0 7px rgba(255, 46, 46, 0.85))
+        drop-shadow(0 0 11px rgba(255, 46, 46, 0.55));
+}
 
 /* 任务区域半透明黄色区块 */
 .quest-zone {

@@ -266,6 +266,8 @@ export interface MarkerEntry {
   bottom?: number | null
   faction?: string | null
   categories?: string[]
+  /** 区域名：狙击 AI 靠它区分（如 ZoneSnipeTower），非所有集合都有 */
+  zoneName?: string | null
   kind?: string | null
   icon?: string | null
   /** 撤离要求（合作撤离/信号弹/付费…），来自 tarkov.dev，缺失时为空 */

@@ -59,10 +59,17 @@ export function FilterBar() {
           {c.label} {counts[c.k]}
         </button>
       ))}
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="搜索任务名"
+        title="在当前分类内按任务名过滤"
+        className="ml-auto bg-ink-800 border border-line text-[14px] rounded px-2 py-1.5 text-[#e6edf3] placeholder:text-muted/70 w-[180px]"
+      />
       <select
         value={mapFilter}
         onChange={(e) => setMapFilter(e.target.value)}
-        className="ml-auto bg-ink-800 border border-line text-[14px] rounded px-2 py-1.5 text-muted"
+        className="bg-ink-800 border border-line text-[14px] rounded px-2 py-1.5 text-muted"
         title="按地图筛选任务"
       >
         <option value="">全部地图</option>
@@ -72,13 +79,6 @@ export function FilterBar() {
           </option>
         ))}
       </select>
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="搜索任务名 / 商人"
-        title="在当前分类内按任务名或商人名过滤"
-        className="bg-ink-800 border border-line text-[14px] rounded px-2 py-1.5 text-[#e6edf3] placeholder:text-muted/70 w-[180px]"
-      />
       <select
         value={traderFilter ?? ''}
         onChange={(e) => setTraderFilter(e.target.value || null)}

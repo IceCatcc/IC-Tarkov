@@ -115,6 +115,21 @@ const EXTRACT_ICON: Record<string, string> = {
   transit: 'extract_transit',
 }
 
+/**
+ * 是否为狙击 AI 出生点。
+ *
+ * 数据里狙击点有两种形态，必须都覆盖，否则会被当成普通 AI（掉进 ai_spawns）：
+ * 1. categories 含 sniper（仅 Streets 等少数地图）；
+ * 2. 只有 categories: ["bot"]，靠 zoneName 区分——这是海关、中心区、灯塔、海岸线等
+ *    绝大多数地图的形态，如 ZoneSnipeTower（海关）、ZoneSandSnipeCenter（中心区）、
+ *    Zone_SniperPeak（灯塔）。
+ */
+function isSniper(en: MarkerEntry): boolean {
+  if ((en.categories ?? []).includes('sniper')) return true
+  const z = en.zoneName ?? ''
+  return /snip/i.test(z)
+}
+
 /** 撤离要求类型 -> 中文标签（value 为补充细节，如信号弹颜色 / 付费金额） */
 const REQ_LABEL: Record<string, (v: string | null) => string> = {
   cooperation: () => '合作撤离',
@@ -308,22 +323,9 @@ export function MapPage() {
   const setFocusZoom = useStore((s) => s.setFocusZoom)
   const untrackedQuests = useStore((s) => s.untrackedQuests)
   const toggleQuestTracked = useStore((s) => s.toggleQuestTracked)
-  const [chips, setChips] = useState<Record<ChipKey, boolean>>({
-    quests: true,
-    extract_pmc: true,
-    extract_scav: true,
-    player_spawns: false,
-    ai_spawns: false,
-    sniper_spawns: false,
-    bosses: true,
-    locks: false,
-    hazards: false,
-    containers: false,
-    switches: false,
-    weapons: false,
-    btr: false,
-    labels: false,
-  })
+  // 图标显隐存于 store（随 mapPrefs 持久化到 settings.json），跨启动保留
+  const chips = useStore((s) => s.mapChips) as Record<ChipKey, boolean>
+  const setMapChip = useStore((s) => s.setMapChip)
   const [floorSel, setFloorSel] = useState(-1) // -1 = 默认主层
   const [floorOpen, setFloorOpen] = useState(false) // 层级切换浮层
   const [mapMenuOpen, setMapMenuOpen] = useState(false) // 左下角地图选单浮层
@@ -405,10 +407,7 @@ export function MapPage() {
       markers.nameIdFallback?.[currentMapId] ?? markers.nameIds?.[currentMapId] ?? currentMapId
     if (selectable.some((g) => g.normalizedName === nn)) {
       setSelected((prev) => {
-        if (prev !== nn) {
-          setFloorSel(-1)
-          panOnceRef.current = false // 换图后首次收到位置自动平移一次
-        }
+        if (prev !== nn) setFloorSel(-1)
         return nn
       })
       useStore.getState().setCurrentMap(nn)
@@ -428,10 +427,6 @@ export function MapPage() {
   shotRef.current = shotPos
   const playerMarkerRef = useRef<L.Marker | null>(null)
   const questLayerRef = useRef<L.LayerGroup | null>(null)
-  const panOnceRef = useRef(false)
-  // 楼层选择 ref：标记灰显的 syncAll 闭包在构建 effect 内创建，通过 ref 读最新值
-  const floorSelRef = useRef(floorSel)
-  floorSelRef.current = floorSel
   // 自动缩放 / 自动居中 / 任务跟踪 ref：地图构建 effect 与跟随 effect 通过 ref 读最新值
   const autoZoomRef = useRef(false)
   autoZoomRef.current = autoZoomMap
@@ -445,11 +440,6 @@ export function MapPage() {
   const pageRef = useRef(page)
   pageRef.current = page
   const rawBoundsRef = useRef<L.LatLngBounds | null>(null)
-
-  // 切换地图时重置首次定位标志，使新地图第一次定位能居中/缩放
-  useEffect(() => {
-    panOnceRef.current = false
-  }, [imap])
 
   // 点击浮窗外部自动关闭（容器内 onMouseDown 已 stopPropagation，不会误触发）
   // 注意：「地图信息」面板不在此列——它只由按钮点击切换显隐，点外部不关闭
@@ -663,56 +653,45 @@ export function MapPage() {
     applyFloor(-1)
 
     /* ---- 标记 ---- */
+    // 坐标与高度合并为一行，减少弹窗高度
     const coordMeta = (en: MarkerEntry) => {
-      const rows: string[] = []
+      const parts: string[] = []
       if (en.position)
-        rows.push(`坐标 X ${en.position.x.toFixed(1)} · Z ${en.position.z.toFixed(1)}`)
+        parts.push(`坐标 X ${en.position.x.toFixed(1)} · Z ${en.position.z.toFixed(1)}`)
       if (typeof en.top === 'number' || typeof en.bottom === 'number')
-        rows.push(`高度 ${fmtNum(en.top)} ~ ${fmtNum(en.bottom)}`)
-      return rows
+        parts.push(`高度 ${fmtNum(en.top)} ~ ${fmtNum(en.bottom)}`)
+      return parts.length ? [parts.join(' · ')] : []
     }
 
-    const makeIcon = (file: string) =>
-      L.icon({ iconUrl: `${ICON_BASE}${file}.png`, iconSize: [20, 20], iconAnchor: [10, 10] })
+    // 狙击 AI：图标外面套一圈醒目的红色光晕，和普通 AI 明显区分
+    const makeIcon = (file: string, opts?: { highlight?: 'red' }) =>
+      L.icon({
+        iconUrl: `${ICON_BASE}${file}.png`,
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+        className: opts?.highlight === 'red' ? 'marker-sniper' : undefined,
+      })
 
-    // —— 标记自动分层：按高度（top/bottom/position.y）与楼层 extents 的 height 区间求交 ——
-    const floorMarkers: { m: L.Marker; idx: number }[] = []
-    const markerFloorIdx = (en: MarkerEntry): number => {
-      const layers = imap.layers ?? []
-      if (!layers.length) return -1
-      const lo2 = en.bottom ?? en.top ?? en.position?.y
-      const hi2 = en.top ?? en.bottom ?? en.position?.y
-      if (lo2 == null || hi2 == null) return -1 // 无高度信息：归属主层（不参与灰显）
-      for (let i = 0; i < layers.length; i++) {
-        for (const ext of layers[i].extents ?? []) {
-          const [lo, hi] = ext.height ?? []
-          if (lo == null || hi == null) continue
-          if (hi2 >= lo && lo2 <= hi) return i // 高度区间相交
-        }
-      }
-      return -1
-    }
-    /** 按当前楼层灰显不属于该层的标记（无高度信息的标记保持正常） */
-    const syncFloors = () => {
-      const cur = floorSelRef.current
-      const hasFloors = (imap.layers?.length ?? 0) > 0
-      for (const { m, idx } of floorMarkers) {
-        m.setOpacity(!hasFloors || idx === -1 || idx === cur ? 1 : 0.2)
-      }
-    }
+    /* 按楼层的灰显已移除：实测效果不好（切换楼层时大量标记忽明忽暗，
+       且高度区间判定在有误差时会误灰显相邻层的标记）。现在所有标记始终正常显示，
+       楼层切换只影响底图本身。 */
 
     const groupOf = (
       list: MarkerEntry[],
       iconFile: (en: MarkerEntry) => string,
       fallback?: (en: MarkerEntry) => string,
-      /** 是否参与按楼层灰显（false = 任何楼层都保持原样，如狙击 AI、撤离点） */
-      floorDim = true,
+      /** 图标高亮样式（red = 狙击 AI 的红色光晕） */
+      highlight?: 'red',
     ): L.LayerGroup => {
       const lg = L.layerGroup()
       for (const en of list) {
         if (!en.position) continue
         const title = en.nameZh || en.name || (fallback && fallback(en)) || '未命名'
-        const mk = L.marker(pos(en.position), { icon: makeIcon(iconFile(en)) }).bindPopup(
+        const mk = L.marker(pos(en.position), {
+          icon: makeIcon(iconFile(en), { highlight }),
+          // 狙击 AI 压在普通标记之上，避免被遮挡
+          zIndexOffset: highlight === 'red' ? 900 : undefined,
+        }).bindPopup(
           popupHtml(
             title,
             [...(en.faction ? [`阵营 ${en.faction}`] : [])],
@@ -720,7 +699,6 @@ export function MapPage() {
             coordMeta(en),
           ),
         )
-        if (floorDim) floorMarkers.push({ m: mk, idx: markerFloorIdx(en) })
         lg.addLayer(mk)
       }
       return lg
@@ -742,7 +720,6 @@ export function MapPage() {
       MarkerEntry[],
       (en: MarkerEntry) => string,
       ((en: MarkerEntry) => string)?,
-      boolean?,
     ][] = [
       [
         'player_spawns',
@@ -759,19 +736,17 @@ export function MapPage() {
             !(s.categories ?? []).includes('boss') &&
             !(s.categories ?? []).includes('player') &&
             // 狙击 AI 有独立开关，不混在普通 AI 出生点里
-            !(s.categories ?? []).includes('sniper'),
+            !isSniper(s),
         ),
         spawnIcon,
         () => 'AI 出生点',
       ],
       [
         'sniper_spawns',
-        (mm.spawns ?? []).filter((s) => (s.categories ?? []).includes('sniper')),
+        (mm.spawns ?? []).filter(isSniper),
         () => 'spawn_sniper_scav',
         // 数据在狙击点上没有 name，给一个明确的中文名
         () => '狙击 AI 出生点',
-        // 不参与按楼层灰显：狙击手位置固定且需常驻可见，透明度跳动会干扰判断
-        false,
       ],
       [
         'bosses',
@@ -789,9 +764,9 @@ export function MapPage() {
       ['weapons', mm.stationaryWeapons ?? [], () => 'stationarygun', undefined],
       ['btr', mm.btrStops ?? [], () => 'btr_stop', undefined],
     ]
-    for (const [key, list, iconFn, fb, floorDim] of defs) {
+    for (const [key, list, iconFn, fb] of defs) {
       if (!list.length) continue
-      chipGroups.set(key, groupOf(list, iconFn, fb, floorDim ?? true))
+      chipGroups.set(key, groupOf(list, iconFn, fb, key === 'sniper_spawns' ? 'red' : undefined))
     }
 
     const keyOf = (
@@ -886,8 +861,7 @@ export function MapPage() {
     syncExtracts()
 
     syncAll()
-    syncFloors()
-    syncFnsRef.current = [syncAll, syncExtracts, syncFloors]
+    syncFnsRef.current = [syncAll, syncExtracts]
 
     return () => {
       cancelled = true
@@ -902,9 +876,8 @@ export function MapPage() {
   }, [imap, markers])
 
   useEffect(() => {
+    // 楼层切换只切换底图（applyFloor），不再改变标记的透明度
     floorApplyRef.current?.(floorSel)
-    // 楼层切换后重新同步标记灰显
-    syncFnsRef.current.forEach((fn) => fn())
   }, [floorSel, imap])
 
   useEffect(() => {
@@ -977,14 +950,10 @@ export function MapPage() {
       imap.minZoom ?? 1,
       Math.min(imap.maxZoom ?? 6, focusZoomRef.current),
     )
-    if (!panOnceRef.current) {
-      panOnceRef.current = true
-      map.setView(ll, targetZoom, { animate: false })
-    } else if (autoZoomRef.current) {
-      map.setView(ll, targetZoom, { animate: false })
-    } else {
-      map.setView(ll, map.getZoom(), { animate: false })
-    }
+    // 自动缩放开启：每次定位都缩到目标级别；关闭：只平移，保持用户当前缩放。
+    // 这里必须无条件遵守开关，不能有「首帧例外」——换图、测试、首次定位都会走这条路径，
+    // 任何例外都会表现为「没勾自动缩放却还是缩放了」。
+    map.setView(ll, autoZoomRef.current ? targetZoom : map.getZoom(), { animate: false })
   }, [shotPos, imap])
 
   /* ---------- 进行中任务的目标标记 ---------- */
@@ -996,6 +965,9 @@ export function MapPage() {
       if (map.hasLayer(questLayerRef.current)) map.removeLayer(questLayerRef.current)
       questLayerRef.current = null
     }
+    // 「任务目标」开关：此前它只出现在依赖数组里、effect 内并未判断，
+    // 所以切换开关会重跑却照旧绘制，表现为开关无效。
+    if (!chips.quests) return
     const lg = L.layerGroup()
     const untracked = untrackedRef.current
     for (const [tid, t] of Object.entries(qzDoc.tasks)) {
@@ -1104,7 +1076,7 @@ export function MapPage() {
           {CHIP_DEFS.map((c) => (
             <button
               key={c.key}
-              onClick={() => setChips((p) => ({ ...p, [c.key]: !p[c.key] }))}
+              onClick={() => setMapChip(c.key, !chips[c.key])}
               className={`px-2 py-[3px] rounded text-[13px] border ${
                 chips[c.key]
                   ? 'border-amber text-[#d4a174] bg-amber/10'
@@ -1120,9 +1092,9 @@ export function MapPage() {
         <div className="relative shrink-0" ref={focusRef} onMouseDown={(e) => e.stopPropagation()}>
           <button
             onClick={() => setFocusOpen((v) => !v)}
-            title="自动聚焦：定位后自动居中 / 缩放地图"
+            title="自动聚焦：定位后自动居中地图（可选自动缩放）"
             className={`flex items-center gap-1.5 px-2 py-[3px] rounded text-[13px] border ${
-              autoCenter || autoZoomMap
+              autoCenter
                 ? 'border-amber text-[#d4a174] bg-amber/10'
                 : 'border-line text-muted hover:text-[#e6edf3]'
             }`}
@@ -1144,7 +1116,7 @@ export function MapPage() {
           {focusOpen && (
             <div className="absolute right-0 top-[calc(100%+6px)] z-[700] w-60 rounded-md border border-line bg-ink-800 p-3 shadow-lg shadow-black/40">
               <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1">
-                <span>自动居中</span>
+                <span title="关闭后完全不跟随定位，可自由浏览地图">自动聚焦</span>
                 <input
                   type="checkbox"
                   checked={autoCenter}
@@ -1152,35 +1124,39 @@ export function MapPage() {
                   className="accent-amber"
                 />
               </label>
-              <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1">
-                <span>自动缩放</span>
-                <input
-                  type="checkbox"
-                  checked={autoZoomMap}
-                  onChange={(e) => setAutoZoomMap(e.target.checked)}
-                  className="accent-amber"
-                />
-              </label>
-              <div className="pt-2 mt-1 border-t border-line">
-                <div className="flex items-center justify-between text-[13px] text-muted mb-1">
-                  <span>聚焦缩放</span>
-                  <span className="text-[#d4a174]">{focusZoom.toFixed(1)}×</span>
+              {/* 自动缩放是自动聚焦的从属选项：未开启聚焦时缩放无从谈起，故隐藏 */}
+              {autoCenter && (
+                <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1 pl-3 border-l border-line ml-1">
+                  <span>自动缩放</span>
+                  <input
+                    type="checkbox"
+                    checked={autoZoomMap}
+                    onChange={(e) => setAutoZoomMap(e.target.checked)}
+                    className="accent-amber"
+                  />
+                </label>
+              )}
+              {/* 缩放比例条仅在需要缩放时才有意义 */}
+              {autoCenter && autoZoomMap && (
+                <div className="pt-2 mt-1 border-t border-line">
+                  <div className="flex items-center justify-between text-[13px] text-muted mb-1">
+                    <span>聚焦缩放</span>
+                    <span className="text-[#d4a174]">{focusZoom.toFixed(1)}×</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={imap?.minZoom ?? 1}
+                    max={imap?.maxZoom ?? 6}
+                    step={0.5}
+                    value={focusZoom}
+                    onChange={(e) => setFocusZoom(Number(e.target.value))}
+                    className="w-full accent-amber"
+                  />
                 </div>
-                <input
-                  type="range"
-                  min={imap?.minZoom ?? 1}
-                  max={imap?.maxZoom ?? 6}
-                  step={0.5}
-                  value={focusZoom}
-                  onChange={(e) => setFocusZoom(Number(e.target.value))}
-                  className="w-full accent-amber"
-                />
-              </div>
+              )}
               <button
                 onClick={() => {
                   // 测试：绕过截图监控服务，直接构造一个虚拟玩家位置，走与真实截图一致的后续渲染
-                  // 重置首次定位标志，确保每次测试都重新居中/缩放（不受上次 panOnce 影响）
-                  panOnceRef.current = false
                   const b = imap?.bounds
                   let x = 100,
                     z = 100
