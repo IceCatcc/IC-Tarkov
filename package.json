@@ -6,11 +6,15 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "tauri:build:nobundle": "tauri build --no-bundle",
     "tauri:android": "tauri android build --apk --target aarch64 && node scripts/sign-apk.mjs",
     "tauri:android:dev": "tauri android dev",
     "react:dev": "vite",
     "react:build": "tsc && vite build",
-    "react:preview": "vite preview"
+    "react:build:fast": "vite build",
+    "react:preview": "vite preview",
+    "rust:check": "cargo check --manifest-path src-tauri/Cargo.toml",
+    "rust:build": "cargo build --release --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

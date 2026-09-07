@@ -26,6 +26,20 @@ npm run tauri:build   # 构建桌面应用（仅 NSIS 安装包）
 .\build.bat           # 发布构建（恒 release，拒绝 --debug，输出带版本号 exe）
 ```
 
+### 快速迭代（跳过不必要步骤）
+
+默认 `npm run tauri:build` 会连带跑 `tsc && vite build`（拷贝 `public/` 下近千个 webp）和 NSIS 打包，
+改 Rust 时这些都是纯浪费。按需选用 `package.json` 里的快捷脚本：
+
+```powershell
+npm run rust:check          # 只做 Rust 类型/借用检查，最快
+npm run rust:build          # 只编 Rust release（跳过前端构建与 NSIS）；产物 src-tauri/target/release/ic-tarkov.exe
+npm run react:build:fast    # 跳过 tsc，只 vite build
+npm run tauri:build:nobundle # 完整构建但跳过 NSIS 打包
+```
+
+> `rust:check` / `rust:build` 在 Windows 需先由 `.\start-dev.bat`（或任何已配置 vcvars 的终端）提供 MSVC 链接器环境。
+
 ### 关键约束
 
 - **前端产物目录**：`vite.config.ts` 里 `build.outDir = 'src-react/dist'`，必须与 `tauri.conf.json` 的 `frontendDist: "../src-react/dist"` 保持一致。二者不符会导致 `Unable to find your web assets` 错误。
