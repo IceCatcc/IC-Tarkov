@@ -195,8 +195,8 @@ export async function setQuestStatus(
   })
 }
 
-export async function resetAndRescan(): Promise<void> {
-  await invoke('reset_and_rescan')
+export async function resetAndRescan(mode?: string): Promise<void> {
+  await invoke('reset_and_rescan', { mode })
 }
 
 export async function exportData(path: string): Promise<void> {
