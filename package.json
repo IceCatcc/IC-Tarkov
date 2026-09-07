@@ -6,6 +6,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
+    "tauri:android": "tauri android build --apk --target aarch64",
+    "tauri:android:dev": "tauri android dev",
     "react:dev": "vite",
     "react:build": "tsc && vite build",
     "react:preview": "vite preview"
