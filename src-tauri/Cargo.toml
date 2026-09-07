@@ -40,7 +40,8 @@ incremental = false
 
 # 发布构建：裁剪符号 + LTO，缩小体积并降低杀软（360 等）对未签名 exe 的启发式误报面。
 # 分发给他人时务必用 release 构建，不要用 target/debug 下的 exe。
+# 注：lto 用 thin 而非 fat（true），codegen-units 用默认（16 并行），
+#     构建速度显著变快，体积/优化差异可忽略；strip 才是减少误报的主要手段。
 [profile.release]
 strip = true
-lto = true
-codegen-units = 1
+lto = "thin"
