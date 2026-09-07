@@ -160,6 +160,9 @@ pub fn setup_lan(app: &mut tauri::App) {
         "data-reloaded",
         // 手机端监控页需显示电脑端的监控状态（watching/error/目录）
         "watcher-state",
+        // 手机端需同步：收藏进度变化、档案变化（电脑端手动改任务状态本就走 quest-event）
+        "collected-changed",
+        "profile-changed",
     ] {
         let tx2 = tx.clone();
         let ev_name = ev.to_string();
@@ -245,6 +248,60 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
                             }
                             Some("refresh") => {
                                 let _ = app.emit("lan-request-refresh", ());
+                            }
+                            // 手机端反向同步：手动改任务状态（电脑端执行后经 quest-event 广播回所有端）
+                            Some("set-quest-status") => {
+                                let qid = v
+                                    .get("questId")
+                                    .and_then(|x| x.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let action = v
+                                    .get("action")
+                                    .and_then(|x| x.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                if !qid.is_empty() {
+                                    if let Err(e) =
+                                        crate::set_quest_status(app.clone(), qid, action)
+                                    {
+                                        eprintln!("[lan] set-quest-status 失败：{e}");
+                                    }
+                                }
+                            }
+                            // 手机端反向同步：收藏品标记（执行后经 collected-changed 广播）
+                            Some("set-item-collected") => {
+                                let id = v
+                                    .get("itemId")
+                                    .and_then(|x| x.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let collected =
+                                    v.get("collected").and_then(|x| x.as_bool()).unwrap_or(false);
+                                if !id.is_empty() {
+                                    crate::set_item_collected(app.clone(), id, collected);
+                                }
+                            }
+                            // 手机端反向同步：档案（等级/好感）变化
+                            Some("set-profile") => {
+                                match serde_json::from_value::<crate::PlayerProfile>(
+                                    v.get("profile").cloned().unwrap_or(serde_json::Value::Null),
+                                ) {
+                                    Ok(p) => {
+                                        let st = crate::read_settings(&app);
+                                        if let Err(e) = crate::save_settings(
+                                            app.clone(),
+                                            st.log_dir,
+                                            st.screenshot_dir,
+                                            Some(st.delete_screenshots),
+                                            Some(p),
+                                            None,
+                                        ) {
+                                            eprintln!("[lan] set-profile 失败：{e}");
+                                        }
+                                    }
+                                    Err(e) => eprintln!("[lan] set-profile 解析失败：{e}"),
+                                }
                             }
                             _ => {}
                         }

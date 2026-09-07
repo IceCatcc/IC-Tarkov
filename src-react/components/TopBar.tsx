@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../store'
 import { isMobile } from '../platform'
+import { getLanConnStatus, onLanStatus } from '../lan'
 import { checkLatestRelease, isNewer, RELEASES_PAGE, type ReleaseInfo } from '../updater'
 import { openUrl } from '../tauri'
 import { LanSyncModal } from './LanSyncModal'
@@ -61,6 +62,10 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
   const [releaseOpen, setReleaseOpen] = useState(false)
   const [lanOpen, setLanOpen] = useState(false)
   const [connectOpen, setConnectOpen] = useState(false)
+  const [lanConn, setLanConn] = useState(getLanConnStatus())
+
+  useEffect(() => onLanStatus(setLanConn), [])
+  const lanConnected = lanConn === 'connected'
 
   // 应用版本号（Tauri 运行时；开发环境取不到时静默留空）
   useEffect(() => {
@@ -160,10 +165,15 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
         {mobile && (
           <button
             onClick={() => setConnectOpen(true)}
-            title="扫码连接电脑端，实时跟随电脑"
-            className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
+            title={lanConnected ? '已连接电脑端，点击管理连接' : '扫码连接电脑端，实时跟随电脑'}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[12px] transition-colors ${
+              lanConnected
+                ? 'border-ok/50 bg-ok/10 text-ok'
+                : 'border-line hover:bg-ink-700 text-[#e6edf3]'
+            }`}
           >
-            连接电脑
+            {lanConnected && <span className="w-1.5 h-1.5 rounded-full bg-ok" />}
+            {lanConnected ? '已连接' : '连接电脑'}
           </button>
         )}
         <button

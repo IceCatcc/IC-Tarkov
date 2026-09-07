@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore, useQuestDetail, dedupeItems } from '../store'
 import { getCollectorQuestId, getCollectedItems, setItemCollected } from '../tauri'
 import { traderDisplayName } from '../traderMeta'
+import { isMobile } from '../platform'
 import { compareMet, compareLabel, type ItemRef } from '../types'
 
 /** 卡片网格间距（px） */
@@ -223,8 +224,108 @@ export function CollectorPage() {
     return { cols, cw: cwOf(cols) }
   }, [box.w, box.h, shown.length])
 
+  // 移动端：底部需求条收起，经顶部「前置」按钮弹窗显示
+  const mobile = isMobile()
+  const [showReqs, setShowReqs] = useState(false)
+
+  const reqsBody = (
+    <>
+      {/* 前置任务 */}
+      <div className="flex items-start gap-2 min-w-0">
+        <span className="shrink-0 leading-6 text-muted">
+          前置
+          {prereqs.length > 0 && (
+            <span className="ml-1">
+              {prereqs.filter((p) => completedSet.has(p.id)).length}/{prereqs.length}
+            </span>
+          )}
+        </span>
+        {prereqs.length === 0 ? (
+          <span className="leading-6 text-muted">无</span>
+        ) : (
+          <div className="flex flex-wrap gap-1 min-w-0">
+            {prereqs.map((p) => {
+              const done = completedSet.has(p.id)
+              const unlocked = !done && unlockedSet.has(p.id)
+              return (
+                <span
+                  key={p.id}
+                  title={unlocked ? '已手动解锁' : undefined}
+                  className={`inline-flex items-center gap-1 h-6 px-1.5 rounded border ${
+                    done
+                      ? 'border-[#2a3a31] bg-[#12161a] text-[#6f7f77]'
+                      : 'border-line bg-ink-700 text-[#c9d1d9]'
+                  }`}
+                >
+                  <span className={done ? 'text-ok' : unlocked ? 'text-amber' : 'text-muted'}>
+                    {done ? '✓' : unlocked ? '◐' : '○'}
+                  </span>
+                  {p.name}
+                </span>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 等级 / 商人好感要求 */}
+      <div className="flex items-start gap-2 min-w-0">
+        <span className="shrink-0 leading-6 text-muted">要求</span>
+        <div className="flex flex-wrap gap-1 min-w-0 items-center">
+          {detail?.minLevel != null && (
+            <span
+              className={`inline-flex items-center h-6 px-1.5 rounded border ${
+                (profile?.level ?? 1) >= detail.minLevel
+                  ? 'border-[#2c4a35] bg-[#12161a] text-[#83a291]'
+                  : 'border-[#5c2b2b] bg-[#1a1214] text-red-400'
+              }`}
+              title={`角色等级需 Lv${detail.minLevel}+，当前 Lv${profile?.level ?? 1}`}
+            >
+              <span className="mr-1">
+                {(profile?.level ?? 1) >= detail.minLevel ? '✓' : '✗'}
+              </span>
+              Lv{detail.minLevel}+（当前 Lv{profile?.level ?? 1}）
+            </span>
+          )}
+          {!detail?.traderReqs?.length ? (
+            detail?.minLevel == null && <span className="text-muted">无商人要求</span>
+          ) : (
+            detail.traderReqs.map((r, i) => {
+              const cur = profile?.loyalty?.[r.traderId] ?? 1
+              // 按数据自带的 compareMethod 判定（如好感需 < -1）
+              const met = compareMet(cur, r.value, r.compare)
+              const isLv = r.reqType === 'level' || r.reqType === 'variable'
+              const text = isLv
+                ? `LL${r.value}（当前 LL${cur}）`
+                : r.reqType === 'reputation'
+                  ? `好感 ${compareLabel(r.compare)} ${r.value}`
+                  : '额外条件'
+              return (
+                <span
+                  key={`${r.traderId}-${r.reqType}-${r.value}-${i}`}
+                  className={`inline-flex items-center h-6 px-1.5 rounded border ${
+                    !isLv && r.reqType !== 'reputation'
+                      ? 'border-line bg-ink-700 text-[#c9d1d9]'
+                      : met
+                        ? 'border-[#2c4a35] bg-[#12161a] text-[#83a291]'
+                        : 'border-[#5c2b2b] bg-[#1a1214] text-red-400'
+                  }`}
+                >
+                  {traderDisplayName(r.traderId, r.traderName)} {text}
+                  {(isLv || r.reqType === 'reputation') && (
+                    <span className="ml-1">{met ? '✓' : '✗'}</span>
+                  )}
+                </span>
+              )
+            })
+          )}
+        </div>
+      </div>
+    </>
+  )
+
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full relative flex flex-col">
       <div className="shrink-0 px-4 pt-4 pb-3 space-y-3">
         {/* 头部：任务名 + 进度 */}
         <div className="flex items-center gap-3 flex-wrap">
@@ -236,6 +337,16 @@ export function CollectorPage() {
               title="在侧边栏打开 Wiki 资料"
             >
               Wiki ↗
+            </button>
+          )}
+          {/* 移动端：底部需求条收起，经此按钮弹窗显示 */}
+          {mobile && (
+            <button
+              onClick={() => setShowReqs(true)}
+              className="px-2.5 py-1 rounded-full border border-line bg-ink-800 text-[13px] text-muted hover:text-[#e6edf3] hover:bg-ink-700 transition-colors"
+              title="查看前置任务与等级/好感要求"
+            >
+              前置
             </button>
           )}
           {detail?.minLevel != null && (
@@ -307,100 +418,35 @@ export function CollectorPage() {
         )}
       </div>
 
-      {/* 底部：前置任务 + 等级/好感要求（紧凑两行 chip 条） */}
-      <div className="shrink-0 border-t border-line bg-ink-800 px-4 py-2 space-y-1 text-[13px]">
-        {/* 前置任务 */}
-        <div className="flex items-start gap-2 min-w-0">
-          <span className="shrink-0 leading-6 text-muted">
-            前置
-            {prereqs.length > 0 && (
-              <span className="ml-1">
-                {prereqs.filter((p) => completedSet.has(p.id)).length}/{prereqs.length}
-              </span>
-            )}
-          </span>
-          {prereqs.length === 0 ? (
-            <span className="leading-6 text-muted">无</span>
-          ) : (
-            <div className="flex flex-wrap gap-1 min-w-0">
-              {prereqs.map((p) => {
-                const done = completedSet.has(p.id)
-                const unlocked = !done && unlockedSet.has(p.id)
-                return (
-                  <span
-                    key={p.id}
-                    title={unlocked ? '已手动解锁' : undefined}
-                    className={`inline-flex items-center gap-1 h-6 px-1.5 rounded border ${
-                      done
-                        ? 'border-[#2a3a31] bg-[#12161a] text-[#6f7f77]'
-                        : 'border-line bg-ink-700 text-[#c9d1d9]'
-                    }`}
-                  >
-                    <span className={done ? 'text-ok' : unlocked ? 'text-amber' : 'text-muted'}>
-                      {done ? '✓' : unlocked ? '◐' : '○'}
-                    </span>
-                    {p.name}
-                  </span>
-                )
-              })}
-            </div>
-          )}
+      {/* 前置/要求条：桌面端底部常驻；移动端经顶部「前置」按钮弹窗显示 */}
+      {!mobile && (
+        <div className="shrink-0 border-t border-line bg-ink-800 px-4 py-2 space-y-1 text-[13px]">
+          {reqsBody}
         </div>
+      )}
 
-        {/* 等级 / 商人好感要求 */}
-        <div className="flex items-start gap-2 min-w-0">
-          <span className="shrink-0 leading-6 text-muted">要求</span>
-          <div className="flex flex-wrap gap-1 min-w-0 items-center">
-            {detail?.minLevel != null && (
-              <span
-                className={`inline-flex items-center h-6 px-1.5 rounded border ${
-                  (profile?.level ?? 1) >= detail.minLevel
-                    ? 'border-[#2c4a35] bg-[#12161a] text-[#83a291]'
-                    : 'border-[#5c2b2b] bg-[#1a1214] text-red-400'
-                }`}
-                title={`角色等级需 Lv${detail.minLevel}+，当前 Lv${profile?.level ?? 1}`}
+      {/* 移动端：前置/要求弹窗 */}
+      {mobile && showReqs && (
+        <>
+          <div
+            className="absolute inset-0 z-[880] bg-black/40"
+            onClick={() => setShowReqs(false)}
+          />
+          <div className="absolute inset-x-3 top-12 bottom-4 z-[890] overflow-y-auto rounded-xl border border-line bg-ink-800 shadow-2xl p-4 space-y-2 text-[13px]">
+            <div className="flex items-center justify-between">
+              <span className="text-[15px] font-medium">前置与要求</span>
+              <button
+                onClick={() => setShowReqs(false)}
+                className="w-7 h-7 grid place-items-center rounded-md text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+                aria-label="关闭"
               >
-                <span className="mr-1">
-                  {(profile?.level ?? 1) >= detail.minLevel ? '✓' : '✗'}
-                </span>
-                Lv{detail.minLevel}+（当前 Lv{profile?.level ?? 1}）
-              </span>
-            )}
-            {!detail?.traderReqs?.length ? (
-              detail?.minLevel == null && <span className="text-muted">无商人要求</span>
-            ) : (
-              detail.traderReqs.map((r, i) => {
-                const cur = profile?.loyalty?.[r.traderId] ?? 1
-                // 按数据自带的 compareMethod 判定（如好感需 < -1）
-                const met = compareMet(cur, r.value, r.compare)
-                const isLv = r.reqType === 'level' || r.reqType === 'variable'
-                const text = isLv
-                  ? `LL${r.value}（当前 LL${cur}）`
-                  : r.reqType === 'reputation'
-                    ? `好感 ${compareLabel(r.compare)} ${r.value}`
-                    : '额外条件'
-                return (
-                  <span
-                    key={`${r.traderId}-${r.reqType}-${r.value}-${i}`}
-                    className={`inline-flex items-center h-6 px-1.5 rounded border ${
-                      !isLv && r.reqType !== 'reputation'
-                        ? 'border-line bg-ink-700 text-[#c9d1d9]'
-                        : met
-                          ? 'border-[#2c4a35] bg-[#12161a] text-[#83a291]'
-                          : 'border-[#5c2b2b] bg-[#1a1214] text-red-400'
-                    }`}
-                  >
-                    {traderDisplayName(r.traderId, r.traderName)} {text}
-                    {(isLv || r.reqType === 'reputation') && (
-                      <span className="ml-1">{met ? '✓' : '✗'}</span>
-                    )}
-                  </span>
-                )
-              })
-            )}
+                ✕
+              </button>
+            </div>
+            {reqsBody}
           </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   )
 }

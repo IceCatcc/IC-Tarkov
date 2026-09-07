@@ -315,6 +315,7 @@ fn save_settings(
     if let Some(d) = delete_screenshots {
         s.delete_screenshots = d;
     }
+    let profile_changed = profile.is_some();
     if let Some(p) = profile {
         s.profile = p;
     }
@@ -324,6 +325,10 @@ fn save_settings(
         s.ui_prefs.extend(u);
     }
     write_settings(&app, &s)?;
+    // 档案变化广播给局域网同步的手机端
+    if profile_changed {
+        let _ = app.emit("profile-changed", &s.profile);
+    }
     Ok(s)
 }
 
@@ -602,6 +607,8 @@ fn set_item_collected(
         c.iter().cloned().collect::<Vec<String>>()
     };
     persist::save_collected(&app, &all);
+    // 广播给局域网同步的手机端（桌面前端自身已就地更新，重复设置同值无害）
+    let _ = app.emit("collected-changed", &all);
     all
 }
 

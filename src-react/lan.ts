@@ -106,6 +106,17 @@ export function parseConnectUrl(raw: string): ParsedConnect | null {
   return null
 }
 
+/** 已连接时向电脑端发送反向同步指令（未连接则静默丢弃） */
+export function sendLanMsg(msg: Record<string, unknown>): void {
+  if (ws && status === 'connected') {
+    try {
+      ws.send(JSON.stringify(msg))
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export function disconnectLan(): void {
   if (retryTimer) {
     clearTimeout(retryTimer)

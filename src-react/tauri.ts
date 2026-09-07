@@ -1,6 +1,7 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore, collectUiPrefs } from './store'
+import { sendLanMsg } from './lan'
 import type {
   QuestEventPayload,
   WatcherStatePayload,
@@ -47,6 +48,20 @@ export async function initTauri(): Promise<UnlistenFn> {
   track(
     await listen<WatcherStatePayload>('watcher-state', (e) => {
       setWatcher(e.payload)
+    }),
+  )
+  // 局域网同步：电脑端的收藏进度 / 档案变化（本机操作的后端事件回声为同值，无害）
+  track(
+    await listen<string[]>('collected-changed', (e) => {
+      useStore.getState().setCollectedItems(e.payload)
+    }),
+  )
+  track(
+    await listen<PlayerProfile>('profile-changed', (e) => {
+      if (e.payload) {
+        const s = useStore.getState()
+        s.setSettings({ ...s.settings, profile: e.payload })
+      }
     }),
   )
 
@@ -181,7 +196,11 @@ export async function setItemCollected(
   itemId: string,
   collected: boolean,
 ): Promise<string[]> {
-  return await invoke<string[]>('set_item_collected', { itemId, collected })
+  return await invoke<string[]>('set_item_collected', { itemId, collected }).then((r) => {
+    // 反向同步收藏变化到电脑端
+    sendLanMsg({ type: 'set-item-collected', itemId, collected })
+    return r
+  })
 }
 
 /** 手动修改任务状态：accept=接取（同时完成前置）、complete=完成、unlock=解锁（含前置未结束任务） */
@@ -192,6 +211,10 @@ export async function setQuestStatus(
   return await invoke<{ quests: PlayerQuest[]; unlocked: string[] }>('set_quest_status', {
     questId,
     action,
+  }).then((r) => {
+    // 已连接电脑端时，把操作反向同步过去（电脑端执行后经事件广播回所有端）
+    sendLanMsg({ type: 'set-quest-status', questId, action })
+    return r
   })
 }
 
@@ -232,6 +255,10 @@ export async function saveSettings(
     deleteScreenshots,
     profile,
     uiPrefs,
+  }).then((r) => {
+    // 档案变化反向同步到电脑端（仅显式携带 profile 时）
+    if (profile) sendLanMsg({ type: 'set-profile', profile })
+    return r
   })
 }
 
