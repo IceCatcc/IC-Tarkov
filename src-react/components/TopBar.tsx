@@ -92,9 +92,7 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
   return (
     <>
       <header
-        className={`flex items-stretch bg-ink-800 border-b border-line shrink-0 select-none`}
-        // 移动端顶部加固定 margin，避免系统状态栏/挖孔遮挡；高度随 padding 自适应（不再固定 h-10）
-        style={mobile ? { paddingTop: 'calc(env(safe-area-inset-top) + 32px)' } : undefined}
+        className="flex items-stretch bg-ink-800 border-b border-line shrink-0 select-none"
       >
         {/* 左侧：品牌 + 导航（空白处可拖动窗口） */}
         <div className="flex h-10 items-center gap-2 pl-3">

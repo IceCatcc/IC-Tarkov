@@ -36,7 +36,26 @@ let autoConnect = false
 let current: ParsedConnect | null = null
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 let retries = 0
+let hbTimer: ReturnType<typeof setInterval> | undefined
 const statusListeners = new Set<(s: LanConnStatus) => void>()
+
+// 应用层心跳：防止局域网 AP/NAT 空闲超时踢掉 WS（服务端忽略未知 type，仅保活）
+function startHeartbeat(sock: WebSocket): void {
+  stopHeartbeat()
+  hbTimer = setInterval(() => {
+    try {
+      sock.send(JSON.stringify({ type: 'ping' }))
+    } catch {
+      /* ignore */
+    }
+  }, 25000)
+}
+function stopHeartbeat(): void {
+  if (hbTimer) {
+    clearInterval(hbTimer)
+    hbTimer = undefined
+  }
+}
 
 export function getLanConnStatus(): LanConnStatus {
   return status
@@ -122,6 +141,7 @@ export function disconnectLan(): void {
     clearTimeout(retryTimer)
     retryTimer = undefined
   }
+  stopHeartbeat()
   retries = 0
   autoConnect = false
   if (ws) {
@@ -188,6 +208,7 @@ export async function connectLan(c: ParsedConnect, opts?: { auto?: boolean }): P
   ws = sock
   retries = 0
   setStatus('connected')
+  startHeartbeat(sock)
   useStore.getState().pushToast('已连接到电脑端', 'done')
   sock.onmessage = (ev) => {
     void handleMessage(typeof ev.data === 'string' ? ev.data : '')
@@ -198,6 +219,7 @@ export async function connectLan(c: ParsedConnect, opts?: { auto?: boolean }): P
   sock.onclose = () => {
     if (ws === sock) {
       ws = null
+      stopHeartbeat()
       setStatus('disconnected')
       if (autoConnect) scheduleRetry(c)
     }
@@ -211,13 +233,12 @@ export async function connectLan(c: ParsedConnect, opts?: { auto?: boolean }): P
 }
 
 function scheduleRetry(c: ParsedConnect): void {
-  if (retries >= 5) {
-    autoConnect = false
-    useStore.getState().pushToast('无法连接电脑端，已暂停自动重连', 'info')
-    return
-  }
+  // 无限重连（指数退避，封顶 30s）：局域网同步应持续自动恢复
   retries += 1
   const delay = Math.min(30000, 2000 * 2 ** (retries - 1))
+  if (retries === 1) {
+    useStore.getState().pushToast('与电脑端连接断开，正在自动重连…', 'info')
+  }
   retryTimer = setTimeout(() => {
     void connectLan(c, { auto: true })
   }, delay)

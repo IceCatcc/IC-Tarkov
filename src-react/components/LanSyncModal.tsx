@@ -32,9 +32,10 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
       .then(refresh)
       .catch((e) => setErr(String(e)))
     const timer = window.setInterval(refresh, 2000)
+    // 注意：关闭界面不停服务——服务保持运行，手机端连接才能持续；
+    // 需要停止时用界面里的「停止服务」按钮显式关闭
     return () => {
       window.clearInterval(timer)
-      stopLanSync().catch(() => {})
     }
   }, [open])
 
@@ -120,10 +121,21 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
 
         <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-line">
           <button
+            onClick={() => {
+              stopLanSync().catch(() => {})
+              onClose()
+            }}
+            className="px-3 py-1.5 rounded border border-[#5c2b2b] text-[13px] text-red-400 hover:bg-[#1a1214]"
+            title="停止局域网同步服务，断开所有手机端"
+          >
+            停止服务
+          </button>
+          <button
             onClick={onClose}
             className="px-3 py-1.5 rounded border border-line text-[13px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+            title="仅关闭窗口，服务保持运行，手机端连接不断开"
           >
-            关闭（停止服务）
+            关闭
           </button>
         </div>
       </div>

@@ -830,8 +830,13 @@ pub(crate) fn apply_persisted(app: &tauri::AppHandle, parsed: &persist::Persiste
         *collected = parsed.collected.iter().cloned().collect();
         persist::save_collected(app, &parsed.collected);
     }
-    let dir = read_settings(app).log_dir;
-    let _ = start_watching(app.clone(), Some(dir));
+    // 移动端无日志可监控：不启动 watcher（否则本地 watcher-state{watching:false}
+    // 会覆盖手机端从电脑端同步来的监控状态）
+    #[cfg(not(mobile))]
+    {
+        let dir = read_settings(app).log_dir;
+        let _ = start_watching(app.clone(), Some(dir));
+    }
 }
 
 /// 写设置到 settings.json（save_settings 与局域网快照应用共用）

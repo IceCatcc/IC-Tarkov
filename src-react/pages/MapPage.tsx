@@ -25,6 +25,7 @@ import type {
   MapBossesDoc,
 } from '../types'
 import { useStore, useTopPad } from '../store'
+import { isMobile } from '../platform'
 import { QuestCard } from '../components/QuestCard'
 import { bossImage } from '../bossImages'
 
@@ -332,6 +333,8 @@ export function MapPage() {
   const [tasksOpen, setTasksOpen] = useState(false) // 右下角任务浮窗
   const [infoOpen, setInfoOpen] = useState(false) // 右下角地图信息浮窗
   const [focusOpen, setFocusOpen] = useState(false) // 工具栏「自动聚焦」展开面板
+  const [chipsOpen, setChipsOpen] = useState(false) // 移动端「标记」浮动选单（左下角）
+  const mobile = isMobile()
 
   const [cursorCoord, setCursorCoord] = useState<{ x: number; z: number } | null>(null)
   // 三个浮窗（地图选单/任务/层级）的容器 ref：点击外部自动关闭
@@ -1065,6 +1068,81 @@ export function MapPage() {
   // 本图 Boss 刷新率（按刷新率降序，数据来自 map-bosses.json）
   const mapBosses = (imap && bossDoc?.maps?.[imap.key]) ?? []
 
+  // 自动聚焦面板内容（桌面工具条与移动端左下角浮层共用）
+  const focusBody = (
+    <>
+      <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1">
+        <span title="关闭后完全不跟随定位，可自由浏览地图">自动聚焦</span>
+        <input
+          type="checkbox"
+          checked={autoCenter}
+          onChange={(e) => setAutoCenter(e.target.checked)}
+          className="accent-amber"
+        />
+      </label>
+      {/* 自动缩放是自动聚焦的从属选项：未开启聚焦时缩放无从谈起，故隐藏 */}
+      {autoCenter && (
+        <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1 pl-3 border-l border-line ml-1">
+          <span>自动缩放</span>
+          <input
+            type="checkbox"
+            checked={autoZoomMap}
+            onChange={(e) => setAutoZoomMap(e.target.checked)}
+            className="accent-amber"
+          />
+        </label>
+      )}
+      {/* 缩放比例条仅在需要缩放时才有意义 */}
+      {autoCenter && autoZoomMap && (
+        <div className="pt-2 mt-1 border-t border-line">
+          <div className="flex items-center justify-between text-[13px] text-muted mb-1">
+            <span>聚焦缩放</span>
+            <span className="text-[#d4a174]">{focusZoom.toFixed(1)}×</span>
+          </div>
+          <input
+            type="range"
+            min={imap?.minZoom ?? 1}
+            max={imap?.maxZoom ?? 6}
+            step={0.5}
+            value={focusZoom}
+            onChange={(e) => setFocusZoom(Number(e.target.value))}
+            className="w-full accent-amber"
+          />
+        </div>
+      )}
+      <button
+        onClick={() => {
+          // 测试：绕过截图监控服务，直接构造一个虚拟玩家位置，走与真实截图一致的后续渲染
+          const b = imap?.bounds
+          let x = 100,
+            z = 100
+          if (b && b.length === 2) {
+            x = (b[0][0] + b[1][0]) / 2
+            z = (b[0][1] + b[1][1]) / 2
+            const jx = Math.abs(b[1][0] - b[0][0]) * 0.12
+            const jz = Math.abs(b[1][1] - b[0][1]) * 0.12
+            x += (Math.random() * 2 - 1) * jx
+            z += (Math.random() * 2 - 1) * jz
+          }
+          const now = new Date()
+          const p2 = (n: number) => String(n).padStart(2, '0')
+          const ts = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(
+            now.getDate(),
+          )}[${p2(now.getHours())}-${p2(now.getMinutes())}]`
+          setShotPos({
+            position: { x, y: 12, z },
+            rotation: Math.random() * 360,
+            timestamp: ts,
+            file: 'simulated',
+          })
+        }}
+        className="w-full text-right px-1 pt-2 text-[12px] text-muted/70 hover:text-[#d4a174]"
+      >
+        测试
+      </button>
+    </>
+  )
+
   return (
     <div className="h-full flex flex-col bg-ink-900">
       {/* 工具条（地图选单在左上角任务按钮右侧） */}
@@ -1072,23 +1150,27 @@ export function MapPage() {
         className="shrink-0 flex items-center flex-wrap gap-x-3 gap-y-1 px-3 py-2 border-b border-line bg-ink-800"
         style={{ paddingLeft: 12 + topPad }}
       >
-        <div className="flex items-center gap-1 flex-wrap">
-          {CHIP_DEFS.map((c) => (
-            <button
-              key={c.key}
-              onClick={() => setMapChip(c.key, !chips[c.key])}
-              className={`px-2 py-[3px] rounded text-[13px] border ${
-                chips[c.key]
-                  ? 'border-amber text-[#d4a174] bg-amber/10'
-                  : 'border-line text-muted hover:text-[#e6edf3]'
-              }`}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
+        {/* 标记开关：桌面端在工具条；移动端收进左下角浮动选单 */}
+        {!mobile && (
+          <div className="flex items-center gap-1 flex-wrap">
+            {CHIP_DEFS.map((c) => (
+              <button
+                key={c.key}
+                onClick={() => setMapChip(c.key, !chips[c.key])}
+                className={`px-2 py-[3px] rounded text-[13px] border ${
+                  chips[c.key]
+                    ? 'border-amber text-[#d4a174] bg-amber/10'
+                    : 'border-line text-muted hover:text-[#e6edf3]'
+                }`}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex-1" />
-        {/* 自动聚焦：展开后可开关「自动居中」「自动缩放」，并用进度条调节聚焦缩放级别 */}
+        {/* 自动聚焦：桌面端在工具条；移动端收进左下角浮动选单 */}
+        {!mobile && (
         <div className="relative shrink-0" ref={focusRef} onMouseDown={(e) => e.stopPropagation()}>
           <button
             onClick={() => setFocusOpen((v) => !v)}
@@ -1115,83 +1197,71 @@ export function MapPage() {
           </button>
           {focusOpen && (
             <div className="absolute right-0 top-[calc(100%+6px)] z-[700] w-60 rounded-md border border-line bg-ink-800 p-3 shadow-lg shadow-black/40">
-              <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1">
-                <span title="关闭后完全不跟随定位，可自由浏览地图">自动聚焦</span>
-                <input
-                  type="checkbox"
-                  checked={autoCenter}
-                  onChange={(e) => setAutoCenter(e.target.checked)}
-                  className="accent-amber"
-                />
-              </label>
-              {/* 自动缩放是自动聚焦的从属选项：未开启聚焦时缩放无从谈起，故隐藏 */}
-              {autoCenter && (
-                <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1 pl-3 border-l border-line ml-1">
-                  <span>自动缩放</span>
-                  <input
-                    type="checkbox"
-                    checked={autoZoomMap}
-                    onChange={(e) => setAutoZoomMap(e.target.checked)}
-                    className="accent-amber"
-                  />
-                </label>
-              )}
-              {/* 缩放比例条仅在需要缩放时才有意义 */}
-              {autoCenter && autoZoomMap && (
-                <div className="pt-2 mt-1 border-t border-line">
-                  <div className="flex items-center justify-between text-[13px] text-muted mb-1">
-                    <span>聚焦缩放</span>
-                    <span className="text-[#d4a174]">{focusZoom.toFixed(1)}×</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={imap?.minZoom ?? 1}
-                    max={imap?.maxZoom ?? 6}
-                    step={0.5}
-                    value={focusZoom}
-                    onChange={(e) => setFocusZoom(Number(e.target.value))}
-                    className="w-full accent-amber"
-                  />
-                </div>
-              )}
-              <button
-                onClick={() => {
-                  // 测试：绕过截图监控服务，直接构造一个虚拟玩家位置，走与真实截图一致的后续渲染
-                  const b = imap?.bounds
-                  let x = 100,
-                    z = 100
-                  if (b && b.length === 2) {
-                    x = (b[0][0] + b[1][0]) / 2
-                    z = (b[0][1] + b[1][1]) / 2
-                    const jx = Math.abs(b[1][0] - b[0][0]) * 0.12
-                    const jz = Math.abs(b[1][1] - b[0][1]) * 0.12
-                    x += (Math.random() * 2 - 1) * jx
-                    z += (Math.random() * 2 - 1) * jz
-                  }
-                  const now = new Date()
-                  const p2 = (n: number) => String(n).padStart(2, '0')
-                  const ts = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(
-                    now.getDate(),
-                  )}[${p2(now.getHours())}-${p2(now.getMinutes())}]`
-                  setShotPos({
-                    position: { x, y: 12, z },
-                    rotation: Math.random() * 360,
-                    timestamp: ts,
-                    file: 'simulated',
-                  })
-                }}
-                className="w-full text-right px-1 pt-2 text-[12px] text-muted/70 hover:text-[#d4a174]"
-              >
-                测试
-              </button>
+              {focusBody}
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* 地图区 */}
       <div className="relative flex-1 min-h-0">
         <div id={mapDivId} className="absolute inset-0" />
+        {/* 标记开关浮动选单：移动端左下角 */}
+        {mobile && (
+          <div className="absolute left-3 bottom-3 z-[600] flex flex-col items-start gap-2">
+            {chipsOpen && (
+              <div className="flex flex-col gap-1 p-2 rounded-md border border-line bg-ink-800/90 shadow-lg backdrop-blur-sm">
+                {CHIP_DEFS.map((c) => (
+                  <button
+                    key={c.key}
+                    onClick={() => setMapChip(c.key, !chips[c.key])}
+                    className={`px-2.5 py-1 rounded text-[13px] border text-left ${
+                      chips[c.key]
+                        ? 'border-amber text-[#d4a174] bg-amber/10'
+                        : 'border-line text-muted hover:text-[#e6edf3]'
+                    }`}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {focusOpen && (
+              <div className="w-60 rounded-md border border-line bg-ink-800 p-3 shadow-lg shadow-black/40">
+                {focusBody}
+              </div>
+            )}
+            <button
+              onClick={() => {
+                setFocusOpen((v) => !v)
+                setChipsOpen(false)
+              }}
+              title="自动聚焦：定位后自动居中地图（可选自动缩放）"
+              className={`px-2.5 py-1.5 rounded border bg-ink-800/80 shadow-lg text-[13px] transition-colors ${
+                focusOpen
+                  ? 'border-amber text-[#d4a174] bg-amber/10'
+                  : 'border-line text-[#e6edf3] hover:border-amber/70'
+              }`}
+            >
+              聚焦
+            </button>
+            <button
+              onClick={() => {
+                setFocusOpen(false)
+                setChipsOpen((o) => !o)
+              }}
+              title="地图标记显隐"
+              className={`px-2.5 py-1.5 rounded border bg-ink-800/80 shadow-lg text-[13px] transition-colors ${
+                chipsOpen
+                  ? 'border-amber text-[#d4a174] bg-amber/10'
+                  : 'border-line text-[#e6edf3] hover:border-amber/70'
+              }`}
+            >
+              标记 {chipsOpen ? '▾' : '▴'}
+            </button>
+          </div>
+        )}
         {/* 层级切换：地图右上浮动按钮（tarkov.dev 风格，自定义非原生组件） */}
         {floors.length > 0 && (
           <div ref={floorRef} className="absolute right-3 top-3 z-[600] flex flex-col items-end gap-1.5">

@@ -208,20 +208,28 @@ async fn info_handler(State(ctx): State<Arc<ServerCtx>>) -> axum::Json<ConnectIn
 }
 
 async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
+    eprintln!("[lan] 客户端接入，当前连接数 {}", ctx.tx.receiver_count());
     let mut rx = ctx.tx.subscribe();
     let (mut sender, mut receiver) = socket.split();
     // 手机端 pull 指令的单播回包通道（与广播事件复用同一条 socket 出站）
     let (tx_out, mut rx_out) = tokio::sync::mpsc::channel::<String>(16);
 
-    // 出站：广播事件 或 单播回包 -> WebSocket
+    // 出站：广播事件 或 单播回包 -> WebSocket。
+    // 广播 Lagged（客户端消费太慢）只跳过缺失事件，不断开连接。
     let send_task = tauri::async_runtime::spawn(async move {
         loop {
             tokio::select! {
-                Ok(msg) = rx.recv() => {
-                    if sender.send(Message::Text(msg)).await.is_err() {
-                        break;
+                res = rx.recv() => match res {
+                    Ok(msg) => {
+                        if sender.send(Message::Text(msg)).await.is_err() {
+                            break;
+                        }
                     }
-                }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        eprintln!("[lan] 客户端消费落后 {n} 条事件，已跳过");
+                    }
+                    Err(_) => break,
+                },
                 Some(out) = rx_out.recv() => {
                     if sender.send(Message::Text(out)).await.is_err() {
                         break;
@@ -231,10 +239,21 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
         }
     });
 
-    // 入站：手机端指令
+    // 入站：手机端指令。90s 无任何消息视为死连接（客户端每 25s 有心跳），
+    // 主动断开以回收资源并让「已连接数」正确回落。
     let app = ctx.app.clone();
     let recv_task = tauri::async_runtime::spawn(async move {
-        while let Some(Ok(msg)) = receiver.next().await {
+        loop {
+            let idle = tokio::time::sleep(std::time::Duration::from_secs(90));
+            tokio::pin!(idle);
+            let res = tokio::select! {
+                _ = &mut idle => {
+                    eprintln!("[lan] 客户端 90s 无活动，断开");
+                    break;
+                }
+                msg = receiver.next() => msg,
+            };
+            let Some(Ok(msg)) = res else { break };
             match msg {
                 Message::Text(text) => {
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
@@ -243,6 +262,17 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
                                 if let Ok(snap) = build_snapshot(&app) {
                                     let out =
                                         json!({ "type": "snapshot", "payload": snap }).to_string();
+                                    let _ = tx_out.send(out).await;
+                                }
+                                // 附带电脑端当前监控状态，手机端连上即正确显示
+                                let st = crate::get_state(app.clone());
+                                if let Ok(p) = serde_json::to_string(&st) {
+                                    let out = json!({
+                                        "type": "event",
+                                        "event": "watcher-state",
+                                        "payload": p,
+                                    })
+                                    .to_string();
                                     let _ = tx_out.send(out).await;
                                 }
                             }
@@ -318,6 +348,7 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
         Either::Left((_, recv)) => recv.abort(),
         Either::Right((_, send)) => send.abort(),
     }
+    eprintln!("[lan] 客户端断开，当前连接数 {}", ctx.tx.receiver_count());
 }
 
 // ---------------- 路由构建 ----------------
