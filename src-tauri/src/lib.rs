@@ -923,7 +923,24 @@ fn open_url(url: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        // 移动端无桌面文件浏览器；外链打开后续由 tauri-plugin-shell 补全（见 P4）
+        let _ = url;
+    }
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "android",
+        target_os = "ios"
+    )))]
     {
         std::process::Command::new("xdg-open")
             .arg(&url)
@@ -946,7 +963,24 @@ fn open_data_dir(app: tauri::AppHandle) -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        // 移动端无「文件浏览器」概念；数据目录分享/提示后续在 P4 补全
+        let _ = dir;
+    }
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "android",
+        target_os = "ios"
+    )))]
     {
         std::process::Command::new("xdg-open")
             .arg(&dir)
