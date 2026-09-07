@@ -16,6 +16,7 @@
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-barcode-scanner": "^2.4.6",
     "@tauri-apps/plugin-dialog": "^2.7.2",
+    "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",

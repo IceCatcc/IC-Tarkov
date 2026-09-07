@@ -1,6 +1,6 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.ic_tarkov" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- edge-to-edge（MainActivity 启用）下由 ViewCompat insets 监听统一转 padding，这里不重复处理 -->
     </style>
 </resources>

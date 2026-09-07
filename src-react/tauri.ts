@@ -388,15 +388,30 @@ export async function applySnapshot(json: string): Promise<void> {
 }
 
 /**
- * 调起摄像头扫码（仅移动端；桌面未装扫码插件，动态 import 避免桌面加载插件代码）。
- * 返回二维码内容字符串；失败/取消返回 null。
+ * 申请相机权限（原生弹窗；桌面无此插件，静默跳过）。
+ * WebView 内 getUserMedia 需要 App 先持有 CAMERA 权限。
  */
-export async function scanQr(): Promise<string | null> {
+export async function ensureCameraPermission(): Promise<boolean> {
+  try {
+    const mod = await import('@tauri-apps/plugin-barcode-scanner')
+    if (typeof mod.requestPermissions === 'function') {
+      await mod.requestPermissions()
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 原生全屏扫码（插件 Activity）。失败时透出真实错误便于排查。
+ */
+export async function scanQr(): Promise<{ text: string | null; error?: string }> {
   try {
     const mod = await import('@tauri-apps/plugin-barcode-scanner')
     const text = await mod.scan()
-    return typeof text === 'string' && text ? text : null
-  } catch {
-    return null
+    return { text: typeof text === 'string' && text ? text : null }
+  } catch (e) {
+    return { text: null, error: String(e) }
   }
 }

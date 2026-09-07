@@ -120,17 +120,44 @@ pub fn bundled_file(app: &tauri::AppHandle, name: &str) -> Option<PathBuf> {
     }
 }
 
-/// 读取随包资源字节：先文件系统候选（桌面），再 APK assets 回退。
-/// Android 上 bundle.resources 以 asset 形式打进 APK（assets/api/*.json 等），
-/// resource_dir() 指不到文件，必须走 asset_resolver 读取。
+/// 编译期内嵌随包种子（桌面/移动一致可用，不依赖运行时资源目录）。
+/// Android 上 bundle.resources 不会经 resource_dir / asset_resolver 暴露给 Rust 侧，
+/// 故把种子直接打进二进制（共约 17MB，NSIS/APK 分发时均有压缩）。
+fn embedded_seed(rel: &str) -> Option<&'static [u8]> {
+    match rel {
+        "api/regular_tasks.json" => Some(include_bytes!("../resources/api/regular_tasks.json")),
+        "api/pve_tasks.json" => Some(include_bytes!("../resources/api/pve_tasks.json")),
+        "api/season_tasks.json" => Some(include_bytes!("../resources/api/season_tasks.json")),
+        "api/regular_tasks_zh.json" => {
+            Some(include_bytes!("../resources/api/regular_tasks_zh.json"))
+        }
+        "api/pve_tasks_zh.json" => Some(include_bytes!("../resources/api/pve_tasks_zh.json")),
+        "api/regular_maps.json" => Some(include_bytes!("../resources/api/regular_maps.json")),
+        "api/regular_maps_zh.json" => {
+            Some(include_bytes!("../resources/api/regular_maps_zh.json"))
+        }
+        "api/regular_traders.json" => {
+            Some(include_bytes!("../resources/api/regular_traders.json"))
+        }
+        "api/regular_traders_zh.json" => {
+            Some(include_bytes!("../resources/api/regular_traders_zh.json"))
+        }
+        "api/regular_items_zh.json" => {
+            Some(include_bytes!("../resources/api/regular_items_zh.json"))
+        }
+        "maps-skeleton.json" => Some(include_bytes!("../resources/maps-skeleton.json")),
+        _ => None,
+    }
+}
+
+/// 读取随包资源字节：先文件系统候选（桌面），再编译期内嵌种子（全平台兜底）。
 pub fn read_bundled_bytes(app: &tauri::AppHandle, rel: &str) -> Option<Vec<u8>> {
     if let Some(p) = bundled_file(app, rel) {
         if let Ok(b) = std::fs::read(&p) {
             return Some(b);
         }
     }
-    let resp = app.asset_resolver().get(rel.to_string())?;
-    Some(resp.bytes)
+    embedded_seed(rel).map(|b| b.to_vec())
 }
 
 /// 种子目录（resources/api）：桌面文件系统候选；Android 上无对应目录，走 asset 回退

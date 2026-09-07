@@ -424,18 +424,20 @@ export default function SettingsModal() {
               >
                 {busy === 'import' ? '导入中…' : '导入数据'}
               </button>
-              <button
-                onClick={onOpenDataDir}
-                className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700"
-                title="打开持久化文件所在目录（settings.json / quest_state.json）"
-              >
-                打开数据目录
-              </button>
+              {!mobile && (
+                <button
+                  onClick={onOpenDataDir}
+                  className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700"
+                  title="打开持久化文件所在目录（settings.json / quest_state.json）"
+                >
+                  打开数据目录
+                </button>
+              )}
             </div>
             {feedback && (
               <div className="text-[14px] text-ok mt-2">{feedback}</div>
             )}
-            {dataLoc && (
+            {!mobile && dataLoc && (
               <div className="border-t border-line pt-3 mt-3">
                 <div className={`${TITLE_CLS} mb-1.5`}>数据目录位置</div>
                 <div className="space-y-1.5">

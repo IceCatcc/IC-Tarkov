@@ -413,13 +413,39 @@ export function QuestGraphPage() {
   // rAF 每帧绘制函数句柄（必须在早退 return 之前声明，保证 Hooks 顺序稳定）
   const frameRef = useRef<() => void>(() => {})
   const [csize, setCsize] = useState({ w: 0, h: 0 })
+  // 绘制异常（rAF 内抛错会中断循环、画布停在纯黑）；捕获后显示在画布上便于无 console 排查
+  const [drawErr, setDrawErr] = useState<string | null>(null)
+  // 缩略图（右下角小地图）显隐开关（localStorage 持久化）。
+  // 注意：必须在「if (!graph) return」早退之前声明，否则违反 Rules of Hooks 导致黑屏崩溃
+  const [showMiniMap, setShowMiniMap] = useState(() => {
+    try {
+      return localStorage.getItem('ic-tarkov.graphMiniMap.v1') !== '0'
+    } catch {
+      return true
+    }
+  })
+  const toggleMiniMap = () =>
+    setShowMiniMap((v) => {
+      try {
+        localStorage.setItem('ic-tarkov.graphMiniMap.v1', v ? '0' : '1')
+      } catch {
+        /* ignore */
+      }
+      return !v
+    })
 
   // 持续 rAF 绘制循环（硬件加速合成，单画布 ~2000 图元 ≈1ms/帧）。
   // 必须与其它 Hooks 一样位于条件 return 之前，否则触发 Hooks 顺序错误。
   useEffect(() => {
     let raf = 0
     const loop = () => {
-      frameRef.current()
+      try {
+        frameRef.current()
+        setDrawErr((prev) => (prev === null ? prev : null))
+      } catch (e) {
+        const msg = String((e as Error)?.stack ?? e)
+        setDrawErr((prev) => (prev === msg ? prev : msg))
+      }
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)
@@ -1526,24 +1552,6 @@ export function QuestGraphPage() {
   const selectedNode = selectedId ? (graph.nodes.find((n) => n.id === selectedId) ?? null) : null
   const selAvatar = traderImage(selectedNode?.traderId)
 
-  // 缩略图（右下角小地图）显隐开关（localStorage 持久化）
-  const [showMiniMap, setShowMiniMap] = useState(() => {
-    try {
-      return localStorage.getItem('ic-tarkov.graphMiniMap.v1') !== '0'
-    } catch {
-      return true
-    }
-  })
-  const toggleMiniMap = () =>
-    setShowMiniMap((v) => {
-      try {
-        localStorage.setItem('ic-tarkov.graphMiniMap.v1', v ? '0' : '1')
-      } catch {
-        /* ignore */
-      }
-      return !v
-    })
-
   const chip =
     'px-2.5 py-1 rounded-full text-[14px] border transition-colors whitespace-nowrap'
   const chipOff = 'bg-ink-800 border-line text-muted hover:text-[#e6edf3]'
@@ -2221,6 +2229,12 @@ export function QuestGraphPage() {
         onTouchCancel={onTouchEnd}
       >
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
+
+        {drawErr && (
+          <div className="absolute inset-x-3 top-3 z-50 max-h-[60%] overflow-y-auto rounded border border-red-400/40 bg-red-500/10 px-3 py-2 text-[12px] leading-relaxed text-red-300 break-all">
+            图谱绘制出错：{drawErr}
+          </div>
+        )}
 
         {/* 图例：左下角浮动显示 */}
         <div className="absolute bottom-3 left-3 z-40 flex flex-col gap-1 px-2.5 py-2 rounded-md bg-ink-800/85 border border-line shadow-lg backdrop-blur-sm text-[13px] text-muted pointer-events-none">
