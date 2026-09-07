@@ -7,6 +7,7 @@ import { useStore } from '../store'
 import { checkLatestRelease, isNewer, RELEASES_PAGE, type ReleaseInfo } from '../updater'
 import { openUrl } from '../tauri'
 import { LanSyncModal } from './LanSyncModal'
+import { LanConnectModal } from './LanConnectModal'
 
 const win = getCurrentWindow()
 
@@ -58,6 +59,7 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
   const [hasUpdate, setHasUpdate] = useState(false)
   const [releaseOpen, setReleaseOpen] = useState(false)
   const [lanOpen, setLanOpen] = useState(false)
+  const [connectOpen, setConnectOpen] = useState(false)
 
   // 应用版本号（Tauri 运行时；开发环境取不到时静默留空）
   useEffect(() => {
@@ -137,6 +139,13 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
           className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
         >
           局域网同步
+        </button>
+        <button
+          onClick={() => setConnectOpen(true)}
+          title="连接到电脑端：本机作为手机端，实时跟随另一台电脑"
+          className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
+        >
+          连接到电脑
         </button>
         <button
           onClick={openSettings}
@@ -247,6 +256,7 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
       )}
 
       <LanSyncModal open={lanOpen} onClose={() => setLanOpen(false)} />
+      <LanConnectModal open={connectOpen} onClose={() => setConnectOpen(false)} />
     </header>
   )
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import {
   initTauri,
   startWatching,
@@ -8,6 +9,7 @@ import {
   getSettings,
 } from './tauri'
 import { useStore } from './store'
+import { startLanAutoConnect, reloadLocalData, isMobile, loadLanConnect } from './lan'
 import { TopBar } from './components/TopBar'
 import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
@@ -18,6 +20,7 @@ import SettingsModal from './components/SettingsModal'
 import AboutModal from './components/AboutModal'
 import { WikiDrawer } from './components/WikiDrawer'
 import { Toasts } from './components/Toasts'
+import { LanConnectModal } from './components/LanConnectModal'
 
 export default function App() {
   const page = useStore((s) => s.page)
@@ -30,6 +33,8 @@ export default function App() {
   // 避免两个浮层同时出现、设置窗口盖住帮助窗口。
   const pendingOpenSettings = useRef(false)
   const [showAbout, setShowAbout] = useState(false)
+  // 局域网同步：手机端未连接时自动弹出的连接视图
+  const [showConnect, setShowConnect] = useState(false)
   const closeHelp = () => {
     try {
       localStorage.setItem('ic-tarkov.helpSeen.v1', '1')
@@ -112,6 +117,24 @@ export default function App() {
       off?.()
     }
   }, [setWatcher, setSettings, seedPlayerQuests, setUnlockedQuests])
+
+  // 局域网同步（手机端）：启动自动重连已保存的电脑端；监听快照应用后刷新本地数据；
+  // 移动端若尚无保存的连接配置，自动弹出连接视图引导扫码/输入。
+  useEffect(() => {
+    let off: (() => void) | undefined
+    startLanAutoConnect()
+    if (isMobile() && !loadLanConnect()) setShowConnect(true)
+    listen('lan-sync-updated', () => {
+      void reloadLocalData()
+    })
+      .then((u) => {
+        off = u
+      })
+      .catch(() => {})
+    return () => {
+      off?.()
+    }
+  }, [])
 
   // 屏蔽浏览器刷新（F5 / Ctrl+R）与右键菜单
   useEffect(() => {
@@ -214,6 +237,7 @@ export default function App() {
         </div>
       )}
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      <LanConnectModal open={showConnect} onClose={() => setShowConnect(false)} />
       <WikiDrawer />
       <Toasts />
     </div>
