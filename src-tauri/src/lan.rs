@@ -158,6 +158,8 @@ pub fn setup_lan(app: &mut tauri::App) {
         "session-mode",
         "player-position",
         "data-reloaded",
+        // 手机端监控页需显示电脑端的监控状态（watching/error/目录）
+        "watcher-state",
     ] {
         let tx2 = tx.clone();
         let ev_name = ev.to_string();

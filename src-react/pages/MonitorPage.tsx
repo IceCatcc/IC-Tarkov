@@ -1,18 +1,36 @@
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
+import { getLanConnStatus, onLanStatus, type LanConnStatus } from '../lan'
 import { FilterBar } from '../components/FilterBar'
 import { QuestList } from '../components/QuestList'
 import { ActivityFeed } from '../components/ActivityFeed'
 
 export function MonitorPage() {
-  const live = useStore((s) => s.watcher.watching && !s.watcher.error)
+  const watcher = useStore((s) => s.watcher)
+  const [lanConn, setLanConn] = useState<LanConnStatus>(getLanConnStatus())
+  useEffect(() => onLanStatus(setLanConn), [])
+
+  // 本机监控（桌面端）；手机端已连接电脑时，watcher 为 WS 同步来的电脑端真实状态
+  const localLive = watcher.watching && !watcher.error
+  const connected = lanConn === 'connected'
+  const live = connected ? watcher.watching && !watcher.error : localLive
+
+  const statusText = connected
+    ? watcher.watching
+      ? '电脑端监控中'
+      : '电脑端未监控'
+    : localLive
+      ? '实时识别中'
+      : '未监控'
 
   return (
     <div className="h-full relative">
       <div className="h-full overflow-y-auto p-4 space-y-4">
         <div className="flex items-center gap-2">
           <h1 className="text-[17px] font-medium">监控</h1>
-          <span className={`text-[13px] ${live ? 'text-ok' : 'text-muted'}`}>
-            {live ? '实时识别中' : '未监控'}
+          <span className={`text-[13px] flex items-center gap-1.5 ${live ? 'text-ok' : 'text-muted'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${live ? 'bg-ok' : 'bg-red-500'}`} />
+            {statusText}
           </span>
         </div>
         <FilterBar />

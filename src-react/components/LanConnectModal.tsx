@@ -228,7 +228,20 @@ export function LanConnectModal({ open, onClose }: { open: boolean; onClose: () 
             连接状态：{statusText}
           </div>
 
-          {scanMode ? (
+          {connected ? (
+            /* 已连接：只显示连接状态与断开入口，再次打开不再出现扫码/输入界面 */
+            <div className="space-y-3">
+              <div className="rounded-lg border border-ok/40 bg-ok/10 px-3 py-3 text-[13px] text-[#e6edf3]">
+                已连接到电脑端，正在实时同步任务与地图数据
+              </div>
+              <button
+                onClick={() => disconnectLan()}
+                className="w-full py-2 rounded-lg border border-line text-[13px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+              >
+                断开连接
+              </button>
+            </div>
+          ) : scanMode ? (
             <>
               <QrScanner onResult={acceptScan} onError={onScannerError} />
               <button
@@ -302,17 +315,8 @@ export function LanConnectModal({ open, onClose }: { open: boolean; onClose: () 
           )}
         </div>
 
-        {/* 操作 */}
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-line">
-          {connected && (
-            <button
-              onClick={() => disconnectLan()}
-              className="px-3 py-1.5 rounded border border-line text-[13px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
-            >
-              断开连接
-            </button>
-          )}
-        </div>
+        {/* 操作（断开入口已并入已连接面板） */}
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-line" />
       </div>
     </div>
   )

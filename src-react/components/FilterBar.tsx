@@ -50,7 +50,7 @@ export function FilterBar() {
         <button
           key={c.k}
           onClick={() => setFilter(c.k)}
-          className={`px-4 py-2 rounded-lg text-[16px] font-medium border ${
+          className={`rounded-lg font-medium border px-2.5 py-1 text-[13px] sm:px-4 sm:py-2 sm:text-[16px] ${
             filter === c.k
               ? 'bg-amber-soft border-amber text-amber'
               : 'bg-ink-800 border-line text-muted hover:text-[#e6edf3]'

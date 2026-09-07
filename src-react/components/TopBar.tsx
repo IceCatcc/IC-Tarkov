@@ -87,11 +87,12 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
   return (
     <>
       <header
-        className="h-10 flex items-stretch bg-ink-800 border-b border-line shrink-0 select-none"
-        style={mobile ? { paddingTop: 'env(safe-area-inset-top)' } : undefined}
+        className={`flex items-stretch bg-ink-800 border-b border-line shrink-0 select-none`}
+        // 移动端顶部加固定 margin，避免系统状态栏/挖孔遮挡；高度随 padding 自适应（不再固定 h-10）
+        style={mobile ? { paddingTop: 'calc(env(safe-area-inset-top) + 32px)' } : undefined}
       >
-      {/* 左侧：品牌 + 导航（空白处可拖动窗口） */}
-      <div className="flex items-center gap-2 pl-3">
+        {/* 左侧：品牌 + 导航（空白处可拖动窗口） */}
+        <div className="flex h-10 items-center gap-2 pl-3">
         <img src="/icons/icon.png" alt="" className="w-5 h-5 rounded shrink-0" />
         <span className="font-medium text-[15px]">IC Tarkov</span>
         {version && (
@@ -139,7 +140,7 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
       )}
 
       {/* 右侧：错误提示 + 设置 + 窗口控制 */}
-      <div className="flex items-center gap-2 pr-2">
+      <div className="flex h-10 items-center gap-2 pr-2">
         {watcher.error && (
           <span className="text-[11px] text-red-400 truncate max-w-[180px]" title={watcher.error}>
             {watcher.error}
