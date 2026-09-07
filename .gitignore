@@ -17,6 +17,8 @@ check-tauri.bat
 vite.config.ts.timestamp-*.mjs
 .workbuddy
 .codebuddy
+# Android 打包脚本仅本机使用（含 SDK/JDK 绝对路径），不入库
+android-*.bat
 quest_analysis
 # tarkov.dev 原始 API 种子数据下的运行时缓存清单（每次同步重写，不入库）
 src-tauri/resources/api/manifest.json
