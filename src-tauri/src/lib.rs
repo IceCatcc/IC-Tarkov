@@ -6,6 +6,7 @@ mod persist;
 mod screenshots;
 mod store;
 mod watcher;
+mod lan;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -322,12 +323,7 @@ fn save_settings(
         // 保留后端写入的内部字段（如数据位置记录 dataLocation）。
         s.ui_prefs.extend(u);
     }
-    let p = settings_path(&app)?;
-    if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let json = serde_json::to_string_pretty(&s).map_err(|e| e.to_string())?;
-    std::fs::write(&p, json).map_err(|e| e.to_string())?;
+    write_settings(&app, &s)?;
     Ok(s)
 }
 
@@ -791,23 +787,40 @@ fn import_data(app: tauri::AppHandle, path: String) -> Result<(), String> {
         }
         std::fs::write(&p, &content).map_err(|e| e.to_string())?;
     }
+    apply_persisted(&app, &parsed);
+    Ok(())
+}
+
+/// 把一份 Persisted 落地/载入内存并重启 watcher（桌面备份导入保留 offsets；
+/// 跨设备快照导入应在调用前把 offsets 清空，由新设备重扫本地日志重建）。
+pub(crate) fn apply_persisted(app: &tauri::AppHandle, parsed: &persist::Persisted) {
     {
         let binding = app.state::<AppState>();
         let mut store = binding.store.lock().unwrap();
-        store.quests = parsed.quests;
-        store.activity = parsed.activity;
-        store.current_map_nameid = parsed.current_map;
+        store.quests = parsed.quests.clone();
+        store.activity = parsed.activity.clone();
+        store.current_map_nameid = parsed.current_map.clone();
         let mut offsets = binding.offsets.lock().unwrap();
-        *offsets = parsed.offsets;
+        *offsets = parsed.offsets.clone();
         let mut unlocked = binding.unlocked.lock().unwrap();
         *unlocked = parsed.unlocked.iter().cloned().collect();
-        // 收藏进度来自导出文件；同时写回 collected.json 保持两处一致
         let mut collected = binding.collected.lock().unwrap();
         *collected = parsed.collected.iter().cloned().collect();
-        persist::save_collected(&app, &parsed.collected);
+        persist::save_collected(app, &parsed.collected);
     }
-    let dir = read_settings(&app).log_dir;
-    start_watching(app, Some(dir))
+    let dir = read_settings(app).log_dir;
+    let _ = start_watching(app.clone(), Some(dir));
+}
+
+/// 写设置到 settings.json（save_settings 与局域网快照应用共用）
+pub(crate) fn write_settings(app: &tauri::AppHandle, s: &AppSettings) -> Result<(), String> {
+    let p = settings_path(app)?;
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let json = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
+    std::fs::write(&p, json).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1089,6 +1102,8 @@ pub fn run() {
             if st.stale && has_cache {
                 spawn_sync(handle, false);
             }
+            // 局域网同步：生成 token + 广播通道，并把现有事件桥接到广播（供手机端 WS 订阅）
+            crate::lan::setup_lan(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1123,7 +1138,13 @@ pub fn run() {
             get_map_markers,
             get_quest_zones,
             get_map_bosses,
-            get_maps_skeleton
+            get_maps_skeleton,
+            lan::start_lan_sync,
+            lan::stop_lan_sync,
+            lan::get_lan_status,
+            lan::get_connect_info,
+            lan::get_snapshot,
+            lan::apply_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

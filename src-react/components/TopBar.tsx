@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import { useStore } from '../store'
 import { checkLatestRelease, isNewer, RELEASES_PAGE, type ReleaseInfo } from '../updater'
 import { openUrl } from '../tauri'
+import { LanSyncModal } from './LanSyncModal'
 
 const win = getCurrentWindow()
 
@@ -56,6 +57,7 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
   // 是否存在更新版本：仅此项为 true 时才在版本标签上显示绿点
   const [hasUpdate, setHasUpdate] = useState(false)
   const [releaseOpen, setReleaseOpen] = useState(false)
+  const [lanOpen, setLanOpen] = useState(false)
 
   // 应用版本号（Tauri 运行时；开发环境取不到时静默留空）
   useEffect(() => {
@@ -129,6 +131,13 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
             {watcher.error}
           </span>
         )}
+        <button
+          onClick={() => setLanOpen(true)}
+          title="局域网同步：手机扫码连接，实时跟随电脑端"
+          className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
+        >
+          局域网同步
+        </button>
         <button
           onClick={openSettings}
           title="设置"
@@ -236,6 +245,8 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
           </div>
         </div>
       )}
+
+      <LanSyncModal open={lanOpen} onClose={() => setLanOpen(false)} />
     </header>
   )
 }

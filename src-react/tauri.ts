@@ -342,3 +342,47 @@ export async function getMapBosses(): Promise<MapBossesDoc | null> {
 export async function getMapsSkeleton(): Promise<SkeletonDoc> {
   return await invoke<SkeletonDoc>('get_maps_skeleton')
 }
+
+/* ================= 局域网同步（电脑端本地服务） ================= */
+
+export interface ConnectInfo {
+  hosts: string[]
+  port: number
+  token: string
+}
+
+export interface LanStatus {
+  running: boolean
+  port: number
+  connections: number
+}
+
+/** 启动电脑端局域网服务（幂等）；供手机扫码连接 */
+export async function startLanSync(): Promise<void> {
+  await invoke('start_lan_sync')
+}
+
+/** 停止局域网服务 */
+export async function stopLanSync(): Promise<void> {
+  await invoke('stop_lan_sync')
+}
+
+/** 服务运行状态、端口与当前连接数 */
+export async function getLanStatus(): Promise<LanStatus> {
+  return await invoke<LanStatus>('get_lan_status')
+}
+
+/** 本机可连接 IP + 端口 + 配对 token（用于渲染二维码） */
+export async function getConnectInfo(): Promise<ConnectInfo> {
+  return await invoke<ConnectInfo>('get_connect_info')
+}
+
+/** 当前全量快照（settings + 任务进度）JSON 字符串 */
+export async function getSnapshot(): Promise<string> {
+  return await invoke<string>('get_snapshot')
+}
+
+/** 应用手机端推来的快照（反向同步） */
+export async function applySnapshot(json: string): Promise<void> {
+  await invoke('apply_snapshot', { json })
+}
