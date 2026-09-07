@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../store'
+import { isMobile } from '../platform'
 import {
   saveSettings,
   startWatching,
@@ -102,6 +103,8 @@ export default function SettingsModal() {
   const [selLoc, setSelLoc] = useState<DataLocation['kind'] | null>(null)
   const [migrating, setMigrating] = useState(false)
   const [rescanMenu, setRescanMenu] = useState(false)
+  // 移动端关闭监控相关 UI（游戏在 PC，无日志/截图源）
+  const mobile = isMobile()
 
   // 设置项分组视觉：标题(白亮加粗) / 选项(主色) / 说明(灰小字) 三级层级
   const TITLE_CLS = 'text-[14px] font-semibold text-[#e6edf3]'
@@ -186,7 +189,7 @@ export default function SettingsModal() {
   }
 
   const onSave = async () => {
-    if (!logDir.trim()) {
+    if (!mobile && !logDir.trim()) {
       setError('请先选择日志监控目录')
       return
     }
@@ -200,9 +203,11 @@ export default function SettingsModal() {
         deleteShots,
       )
       setSettings(st)
-      // 用新目录重启监控并重新加载任务（历史活动默认不读取）
-      await startWatching(st.logDir)
-      seedPlayerQuests(await getPlayerQuests())
+      // 用新目录重启监控并重新加载任务（历史活动默认不读取）；移动端不启动监控
+      if (!mobile) {
+        await startWatching(st.logDir)
+        seedPlayerQuests(await getPlayerQuests())
+      }
       closeSettings()
     } catch (e) {
       setError(String(e))
@@ -319,7 +324,8 @@ export default function SettingsModal() {
         </div>
 
         <div className="space-y-4 overflow-y-auto pr-1 flex-1 min-h-0">
-          {/* 监控目录 */}
+          {/* 监控目录（移动端关闭监控相关 UI，整块隐藏） */}
+          {!mobile && (
           <div>
             <div className={`${TITLE_CLS} mb-2`}>监控目录</div>
             <DirField label="日志监控目录" value={logDir} onChange={setLogDir} />
@@ -338,6 +344,7 @@ export default function SettingsModal() {
               <span className="text-[15px] text-[#e6edf3]">读取坐标后删除截图</span>
             </label>
           </div>
+          )}
 
           {/* 界面缩放 */}
           <div className="border-t border-line pt-4">
@@ -394,6 +401,7 @@ export default function SettingsModal() {
           <div className="border-t border-line pt-4">
             <div className={`${TITLE_CLS} mb-2`}>数据管理</div>
             <div className="flex flex-wrap gap-2">
+              {!mobile && (
               <button
                 onClick={() => setRescanMenu(true)}
                 disabled={busy !== null}
@@ -401,6 +409,7 @@ export default function SettingsModal() {
               >
                 {busy === 'rescan' ? '读取中…' : '重新读取日志'}
               </button>
+              )}
               <button
                 onClick={onExport}
                 disabled={busy !== null}

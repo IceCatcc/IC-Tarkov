@@ -9,7 +9,8 @@ import {
   getSettings,
 } from './tauri'
 import { useStore } from './store'
-import { startLanAutoConnect, reloadLocalData, isMobile, loadLanConnect } from './lan'
+import { startLanAutoConnect, reloadLocalData, loadLanConnect } from './lan'
+import { isMobile } from './platform'
 import { TopBar } from './components/TopBar'
 import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
@@ -69,9 +70,12 @@ export default function App() {
   const setUnlockedQuests = useStore((s) => s.setUnlockedQuests)
   // 界面缩放（类显示器缩放）：作用于根节点 CSS zoom，固定浮层一并等比缩放
   const uiScale = useStore((s) => s.uiScale)
+  // 移动端 UI 适配分支：底部 Tab、transform 缩放、关闭监控
+  const mobile = isMobile()
   useEffect(() => {
-    document.documentElement.style.zoom = String(uiScale)
-  }, [uiScale])
+    // 移动端用根容器 transform 缩放（见渲染处），桌面保留 document.zoom
+    if (!mobile) document.documentElement.style.zoom = String(uiScale)
+  }, [uiScale, mobile])
 
   useEffect(() => {
     let off: (() => void) | undefined
@@ -89,6 +93,8 @@ export default function App() {
         // 日志目录未配置：不启动监控，引导用户到设置里选择。
         // 若首次启动的帮助窗口正在展示，则先挂起，等帮助关闭后再打开设置，
         // 避免两个浮层叠放（设置窗口层级更高会盖住帮助窗口）。
+        // 移动端不启动日志监控（游戏在 PC，无日志/截图源），也不引导配置日志目录
+        if (mobile) return undefined
         if (!st.logDir) {
           const helpSeen =
             typeof localStorage !== 'undefined' &&
@@ -153,7 +159,22 @@ export default function App() {
   }, [])
 
   return (
-    <div className="h-full flex flex-col">
+    <div
+      className="h-full flex flex-col"
+      style={
+        mobile
+          ? {
+              // 移动端用 transform 缩放替代 CSS zoom；按缩放倒数放大容器避免溢出/留白
+              transform: `scale(${uiScale})`,
+              transformOrigin: 'top left',
+              width: `${100 / uiScale}vw`,
+              height: `${100 / uiScale}dvh`,
+              // 为底部 Tab 导航预留空间（含 iOS 安全区）
+              paddingBottom: 'calc(56px + env(safe-area-inset-bottom))',
+            }
+          : undefined
+      }
+    >
       <TopBar onShowHelp={() => setShowHelp(true)} />
       <main className="flex-1 min-w-0 overflow-hidden">
         {page === 'monitor' && <MonitorPage />}

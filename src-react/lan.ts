@@ -282,9 +282,5 @@ export function startLanAutoConnect(): void {
   if (saved) void connectLan(saved, { auto: true })
 }
 
-/** 粗略判断当前是否移动端（无需额外插件；P3 可改用 @tauri-apps/plugin-os） */
-export function isMobile(): boolean {
-  if (typeof navigator === 'undefined') return false
-  const ua = navigator.userAgent || ''
-  return /android|iphone|ipad|ipod/i.test(ua)
-}
+/** 粗略判断当前是否移动端（实现在 platform.ts，此处转发保持兼容） */
+export { isMobile } from './platform'

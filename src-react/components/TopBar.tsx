@@ -4,6 +4,7 @@ import { getVersion } from '@tauri-apps/api/app'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../store'
+import { isMobile } from '../platform'
 import { checkLatestRelease, isNewer, RELEASES_PAGE, type ReleaseInfo } from '../updater'
 import { openUrl } from '../tauri'
 import { LanSyncModal } from './LanSyncModal'
@@ -82,8 +83,13 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
     }
   }, [])
 
+  const mobile = isMobile()
   return (
-    <header className="h-10 flex items-stretch bg-ink-800 border-b border-line shrink-0 select-none">
+    <>
+      <header
+        className="h-10 flex items-stretch bg-ink-800 border-b border-line shrink-0 select-none"
+        style={mobile ? { paddingTop: 'env(safe-area-inset-top)' } : undefined}
+      >
       {/* 左侧：品牌 + 导航（空白处可拖动窗口） */}
       <div className="flex items-center gap-2 pl-3">
         <img src="/icons/icon.png" alt="" className="w-5 h-5 rounded shrink-0" />
@@ -102,7 +108,8 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
             {hasUpdate && <span className="w-1.5 h-1.5 rounded-full bg-ok" />}
           </button>
         )}
-        {/* 导航：跟在版本号后面 */}
+        {/* 导航：跟在版本号后面（移动端改为底部 Tab，见组件末尾） */}
+        {!mobile && (
         <nav className="flex items-center gap-1 ml-2">
           {NAV_ITEMS.map((it) => (
             <button
@@ -121,10 +128,15 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
             </button>
           ))}
         </nav>
+        )}
       </div>
 
-      {/* 中间：可拖动窗口的空白区域 */}
-      <div data-tauri-drag-region className="flex-1 self-stretch min-w-0" />
+      {/* 中间：可拖动窗口的空白区域（仅桌面；移动端无窗口拖拽概念） */}
+      {mobile ? (
+        <div className="flex-1 self-stretch min-w-0" />
+      ) : (
+        <div data-tauri-drag-region className="flex-1 self-stretch min-w-0" />
+      )}
 
       {/* 右侧：错误提示 + 设置 + 窗口控制 */}
       <div className="flex items-center gap-2 pr-2">
@@ -163,11 +175,15 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
         </button>
       </div>
 
-      {/* 窗口控制按钮 */}
-      <div className="w-px self-stretch bg-line mx-1" />
-      <WinButton onClick={() => win.minimize()} label="─" title="最小化" />
-      <WinButton onClick={() => win.toggleMaximize()} label="▢" title="最大化 / 还原" />
-      <WinButton onClick={() => win.close()} label="✕" title="关闭" danger />
+      {/* 窗口控制按钮（仅桌面） */}
+      {!mobile && (
+        <>
+          <div className="w-px self-stretch bg-line mx-1" />
+          <WinButton onClick={() => win.minimize()} label="─" title="最小化" />
+          <WinButton onClick={() => win.toggleMaximize()} label="▢" title="最大化 / 还原" />
+          <WinButton onClick={() => win.close()} label="✕" title="关闭" danger />
+        </>
+      )}
 
       {/* 版本 / 更新内容 */}
       {releaseOpen && (
@@ -257,6 +273,30 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
 
       <LanSyncModal open={lanOpen} onClose={() => setLanOpen(false)} />
       <LanConnectModal open={connectOpen} onClose={() => setConnectOpen(false)} />
-    </header>
+      </header>
+
+      {/* 移动端底部 Tab 导航 */}
+      {mobile && (
+        <nav
+          className="fixed bottom-0 left-0 right-0 z-[1100] flex bg-ink-800 border-t border-line"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        >
+          {NAV_ITEMS.map((it) => (
+            <button
+              key={it.key}
+              onClick={() => setPage(it.key)}
+              className={`flex-1 h-14 flex items-center justify-center text-[13px] transition-colors ${
+                page === it.key ? 'text-[#d4a174] bg-amber/10' : 'text-muted'
+              }`}
+            >
+              {it.key === 'monitor' && (
+                <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${live ? 'bg-ok' : 'bg-red-500'}`} />
+              )}
+              {it.label}
+            </button>
+          ))}
+        </nav>
+      )}
+    </>
   )
 }
