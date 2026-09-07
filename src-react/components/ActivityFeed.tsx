@@ -66,7 +66,7 @@ export function ActivityFeed() {
       {open && (
         <aside
           className={`absolute right-0 top-0 z-[900] w-[320px] max-w-[85vw] flex flex-col bg-ink-800 border-l border-line shadow-2xl ${
-            mobile ? 'bottom-[56px]' : 'bottom-0'
+            mobile ? 'bottom-[var(--nav-h)]' : 'bottom-0'
           }`}
         >
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-line shrink-0">

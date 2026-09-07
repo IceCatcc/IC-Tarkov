@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
+import { isMobile } from '../platform'
 import { openUrl } from '../tauri'
 
 export function WikiDrawer() {
@@ -7,6 +8,7 @@ export function WikiDrawer() {
   const closeWiki = useStore((s) => s.closeWiki)
   // 挂载后下一帧再滑入，触发 CSS 过渡
   const [shown, setShown] = useState(false)
+  const mobile = isMobile()
 
   useEffect(() => {
     if (wikiUrl) {
@@ -15,6 +17,19 @@ export function WikiDrawer() {
     }
     setShown(false)
   }, [wikiUrl])
+
+  // 移动端：系统返回键关闭抽屉（history 守卫：打开时压入一条记录，
+  // 返回键触发 popstate → 关闭抽屉；用 ✕/遮罩关闭时弹掉该守卫记录）
+  useEffect(() => {
+    if (!mobile || !wikiUrl) return
+    history.pushState({ wikiDrawer: true }, '')
+    const onPop = () => closeWiki()
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      if (history.state?.wikiDrawer) history.back()
+    }
+  }, [mobile, wikiUrl])
 
   if (!wikiUrl) return null
 
@@ -32,10 +47,14 @@ export function WikiDrawer() {
         style={{ opacity: shown ? 1 : 0 }}
         onClick={closeWiki}
       />
-      {/* 右侧抽屉 */}
+      {/* 抽屉：桌面/横屏为右侧 62%；移动端竖屏全屏 */}
       <div
-        className={`absolute right-0 top-0 h-full w-[62%] min-w-[560px] bg-ink-900 border-l border-line shadow-2xl flex flex-col transition-transform duration-250 ${
-          shown ? 'translate-x-0' : 'translate-x-full'
+        className={`absolute bg-ink-900 shadow-2xl flex flex-col transition-transform duration-250 ${
+          mobile
+            ? `inset-0 w-full border-t border-line ${shown ? 'translate-y-0' : 'translate-y-full'}`
+            : `right-0 top-0 h-full w-[62%] min-w-[560px] border-l border-line ${
+                shown ? 'translate-x-0' : 'translate-x-full'
+              }`
         }`}
       >
         <div className="shrink-0 flex items-center gap-3 px-4 py-2.5 bg-ink-800 border-b border-line">

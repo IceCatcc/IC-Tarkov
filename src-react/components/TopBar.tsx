@@ -294,7 +294,10 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
       {mobile && (
         <nav
           className="fixed bottom-0 left-0 right-0 z-[1100] flex bg-ink-800 border-t border-line"
-          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+          style={{
+            height: 'var(--nav-h)',
+            paddingBottom: 'env(safe-area-inset-bottom)',
+          }}
         >
           {NAV_ITEMS.map((it) => (
             <button

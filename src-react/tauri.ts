@@ -249,16 +249,14 @@ export async function saveSettings(
   profile?: PlayerProfile,
   uiPrefs?: Record<string, unknown>,
 ): Promise<AppSettings> {
+  // 档案变化反向同步到电脑端（仅显式携带 profile 时；先发，不依赖本机保存成功）
+  if (profile) sendLanMsg({ type: 'set-profile', profile })
   return await invoke<AppSettings>('save_settings', {
     logDir,
     screenshotDir,
     deleteScreenshots,
     profile,
     uiPrefs,
-  }).then((r) => {
-    // 档案变化反向同步到电脑端（仅显式携带 profile 时）
-    if (profile) sendLanMsg({ type: 'set-profile', profile })
-    return r
   })
 }
 

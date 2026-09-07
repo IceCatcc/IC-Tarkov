@@ -170,7 +170,7 @@ export default function App() {
               width: `${100 / uiScale}vw`,
               height: `${100 / uiScale}dvh`,
               // 为底部 Tab 导航预留空间（含 iOS 安全区）
-              paddingBottom: 'calc(56px + env(safe-area-inset-bottom))',
+              paddingBottom: 'calc(var(--nav-h) + env(safe-area-inset-bottom))',
             }
           : undefined
       }

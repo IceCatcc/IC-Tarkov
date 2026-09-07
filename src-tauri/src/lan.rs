@@ -450,8 +450,16 @@ pub fn get_snapshot(app: AppHandle) -> Result<String, String> {
 /// 跨设备导入一律丢弃 offsets，由新设备重扫本地日志重建；导入前不自动备份（由前端/调用方决定）。
 #[tauri::command]
 pub async fn apply_snapshot(app: AppHandle, json: String) -> Result<(), String> {
-    let parsed: Snapshot =
+    #[allow(unused_mut)] // 移动端会清空目录字段，桌面 target 不需要 mut
+    let mut parsed: Snapshot =
         serde_json::from_str(&json).map_err(|e| format!("快照格式错误：{e}"))?;
+    // 移动端：目录字段是电脑端本机路径，照搬会让手机端后续保存设置时
+    // 因「日志目录不存在」报错，应用快照时直接清空
+    #[cfg(mobile)]
+    {
+        parsed.settings.log_dir.clear();
+        parsed.settings.screenshot_dir.clear();
+    }
     // 写 settings.json
     crate::write_settings(&app, &parsed.settings)?;
     // 写 quest_state.json（丢弃 offsets，由新设备重扫日志重建）

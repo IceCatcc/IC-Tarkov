@@ -4,6 +4,13 @@
 
 :root {
   color-scheme: dark;
+  /* 移动端底部 Tab 高度：竖屏 56px，横屏减半（配合 MainActivity 横屏隐藏状态栏） */
+  --nav-h: 56px;
+}
+@media (orientation: landscape) {
+  :root {
+    --nav-h: 28px;
+  }
 }
 
 html,
