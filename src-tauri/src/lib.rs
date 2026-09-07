@@ -746,23 +746,38 @@ fn set_quest_status(
     })
 }
 
-/// 重新读取日志：清空持久化文件与内存状态（含扫描偏移），再从零全量扫描日志重新生成。
+/// 重新读取日志：支持「覆盖 / 补充」两种模式（通用日志↔数据合并策略）。
+/// - cover（默认）：清空持久化文件与内存状态（含扫描偏移、手动解锁），再从零全量扫描重置到日志真值。
+/// - merge：保留当前进度（含手动改动），仅清空扫描偏移后重扫，把本地日志里缺失的进度补充进 store（apply_* 幂等）。
 /// 初始扫描 emit=false，仅重建内存与落盘，不会向前端刷历史活动。
 #[tauri::command]
-fn reset_and_rescan(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(p) = persist::state_path(&app) {
-        let _ = std::fs::remove_file(p);
-    }
-    {
-        let binding = app.state::<AppState>();
-        let mut store = binding.store.lock().unwrap();
-        store.quests.clear();
-        store.activity.clear();
-        store.current_map_nameid = None;
-        let mut offsets = binding.offsets.lock().unwrap();
-        offsets.clear();
-        let mut unlocked = binding.unlocked.lock().unwrap();
-        unlocked.clear();
+fn reset_and_rescan(app: tauri::AppHandle, mode: Option<String>) -> Result<(), String> {
+    let merge = mode.as_deref() == Some("merge");
+    if merge {
+        // 保留进度：清空扫描偏移并落盘（磁盘 offsets 为空、store 完整），
+        // 随后 start_watching 从 0 重读本地日志，把缺失进度补充进 store。
+        {
+            let binding = app.state::<AppState>();
+            let mut offsets = binding.offsets.lock().unwrap();
+            offsets.clear();
+        }
+        persist::save(&app);
+    } else {
+        // cover（默认）：清空持久化文件与内存状态，全量重扫重置到日志真值
+        if let Some(p) = persist::state_path(&app) {
+            let _ = std::fs::remove_file(p);
+        }
+        {
+            let binding = app.state::<AppState>();
+            let mut store = binding.store.lock().unwrap();
+            store.quests.clear();
+            store.activity.clear();
+            store.current_map_nameid = None;
+            let mut offsets = binding.offsets.lock().unwrap();
+            offsets.clear();
+            let mut unlocked = binding.unlocked.lock().unwrap();
+            unlocked.clear();
+        }
     }
     let dir = read_settings(&app).log_dir;
     start_watching(app, Some(dir))

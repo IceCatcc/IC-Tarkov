@@ -101,6 +101,7 @@ export default function SettingsModal() {
   // 用户点选的目标位置（null = 跟随当前生效位置）
   const [selLoc, setSelLoc] = useState<DataLocation['kind'] | null>(null)
   const [migrating, setMigrating] = useState(false)
+  const [rescanMenu, setRescanMenu] = useState(false)
 
   // 设置项分组视觉：标题(白亮加粗) / 选项(主色) / 说明(灰小字) 三级层级
   const TITLE_CLS = 'text-[14px] font-semibold text-[#e6edf3]'
@@ -108,14 +109,14 @@ export default function SettingsModal() {
 
   const LOC_OPTIONS: { kind: DataLocation['kind']; name: string; desc: string }[] = [
     {
-      kind: 'portable',
-      name: '程序目录 data（便携）',
-      desc: '数据放在程序安装目录旁的 data 里，整包拷贝即可带走',
+      kind: 'appdata',
+      name: '系统目录（AppData）',
+      desc: '数据放在系统用户数据目录，卸载或更换程序位置不丢数据',
     },
     {
-      kind: 'appdata',
-      name: '应用数据目录（AppData）',
-      desc: '数据放在系统用户数据目录，卸载或更换程序位置不丢数据',
+      kind: 'portable',
+      name: '程序目录',
+      desc: '数据放在程序安装目录旁的 data 里，整包拷贝即可带走',
     },
   ]
 
@@ -210,15 +211,19 @@ export default function SettingsModal() {
     }
   }
 
-  const onRescan = async () => {
+  const onRescan = async (mode: 'cover' | 'merge') => {
     setBusy('rescan')
     setError(null)
     setFeedback(null)
     try {
-      await resetAndRescan()
+      await resetAndRescan(mode)
       clearHistorical()
       seedPlayerQuests(await getPlayerQuests())
-      setFeedback('已清空并重新读取日志')
+      setFeedback(
+        mode === 'merge'
+          ? '已补充重扫：本地日志缺失的进度已并入当前数据'
+          : '已覆盖重扫：已重置到日志真值（手动改动已丢弃）',
+      )
     } catch (e) {
       setError(String(e))
     } finally {
@@ -246,8 +251,8 @@ export default function SettingsModal() {
       setSelLoc(null)
       setFeedback(
         info.kind === 'portable'
-          ? '数据已迁移到程序目录 data（便携），设置与缓存均已一并搬走'
-          : '数据已迁移到应用数据目录（AppData），设置与缓存均已一并搬走',
+          ? '数据已迁移到程序目录，设置与缓存均已一并搬走'
+          : '数据已迁移到系统目录（AppData），设置与缓存均已一并搬走',
       )
     } catch (e) {
       setError(String(e))
@@ -390,7 +395,7 @@ export default function SettingsModal() {
             <div className={`${TITLE_CLS} mb-2`}>数据管理</div>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={onRescan}
+                onClick={() => setRescanMenu(true)}
                 disabled={busy !== null}
                 className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
               >
@@ -494,6 +499,47 @@ export default function SettingsModal() {
           </div>
         </div>
       </div>
+
+      {rescanMenu && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setRescanMenu(false)}
+        >
+          <div
+            className="w-[320px] rounded-lg border border-line bg-ink-800 p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-[15px] font-semibold text-[#e6edf3] mb-1">重新读取日志</div>
+            <div className={`${DESC_CLS} mb-4`}>请选择重扫方式：</div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  setRescanMenu(false)
+                  onRescan('cover')
+                }}
+                className="px-3 py-2 rounded border border-line text-left text-[14px] text-[#e6edf3] hover:bg-ink-700"
+              >
+                覆盖重扫：重置到日志真值
+              </button>
+              <button
+                onClick={() => {
+                  setRescanMenu(false)
+                  onRescan('merge')
+                }}
+                className="px-3 py-2 rounded border border-line text-left text-[14px] text-[#e6edf3] hover:bg-ink-700"
+              >
+                补充重扫：并入本地日志缺失进度
+              </button>
+              <button
+                onClick={() => setRescanMenu(false)}
+                className="px-3 py-2 rounded text-[13px] text-muted hover:text-[#e6edf3]"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )
