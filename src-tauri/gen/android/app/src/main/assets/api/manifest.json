@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "source": "https://json.tarkov.dev",
+  "fetchedAt": 1788158234,
+  "files": {
+    "regular_tasks.json": {
+      "path": "regular/tasks",
+      "desc": "任务（PvP 常驻）",
+      "bytes": 2203285
+    },
+    "pve_tasks.json": {
+      "path": "pve/tasks",
+      "desc": "任务（PvE 常驻）",
+      "bytes": 2138381
+    },
+    "season_tasks.json": {
+      "path": "pvp-season/tasks",
+      "desc": "任务（当前赛季，用于判定旧任务）",
+      "bytes": 2084632
+    },
+    "regular_tasks_zh.json": {
+      "path": "regular/tasks_zh",
+      "desc": "任务中文本地化",
+      "bytes": 233201
+    },
+    "pve_tasks_zh.json": {
+      "path": "pve/tasks_zh",
+      "desc": "任务中文本地化（PvE）",
+      "bytes": 237936
+    },
+    "regular_maps.json": {
+      "path": "regular/maps",
+      "desc": "地图 / 撤离点 / 刷新点 / Boss",
+      "bytes": 9577328
+    },
+    "regular_maps_zh.json": {
+      "path": "regular/maps_zh",
+      "desc": "地图与 Boss 中文本地化",
+      "bytes": 22307
+    },
+    "regular_traders.json": {
+      "path": "regular/traders",
+      "desc": "商人",
+      "bytes": 50621
+    },
+    "regular_traders_zh.json": {
+      "path": "regular/traders_zh",
+      "desc": "商人中文本地化",
+      "bytes": 3260
+    },
+    "regular_items_zh.json": {
+      "path": "regular/items_zh",
+      "desc": "物品中文本地化",
+      "bytes": 1595631
+    }
+  }
+}

@@ -1086,6 +1086,9 @@ pub(crate) fn emit_progress(app: &tauri::AppHandle, endpoint: &str, timestamp: &
     let _ = app.emit("quest-event", ev);
 }
 
+// 移动端（Android/iOS）入口：tauri-build 会为移动 target 设置 mobile cfg，
+// 生成 JavaVM 启动符号；桌面端无影响。
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

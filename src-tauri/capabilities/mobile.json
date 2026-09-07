@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "移动端能力：仅保留事件/对话框等通用权限，不含桌面窗口控制（最小化/最大化/拖拽在移动端无意义）",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}

@@ -139,6 +139,19 @@
 18. 安卓 `AndroidManifest`：`INTERNET`（联网更新数据 + WS 客户端）、可选 `POST_NOTIFICATIONS`、相机（若用扫码）。iOS `Info.plist`：ATS 允许 `ws://` 明文（或升级 wss）、网络权限。
 19. `npm run tauri android init` 生成 `src-tauri/gen/android`；配置 SDK/NDK。
 
+> **P4 落地记录（桌面环境可做部分，已完成）**：
+> - 平台配置改用 Tauri 2 官方方式：`src-tauri/tauri.android.conf.json` / `tauri.ios.conf.json`（构建对应平台时与主配置合并；主配置 `app.windows` 不含 label，移动端由平台配置提供 `label: "main"`）。CSP 在平台配置里显式放行：`connect-src 'self' ws: wss: https://api.tarkov.dev https://api.github.com`（GitHub 为前端版本检测）、`img-src` 含 asset 协议（地图/头像本地图标）、`style-src 'unsafe-inline'`（Leaflet/内联样式）。计划原写的 `app.android/app.ios` 配置块在 Tauri 2 schema 中不存在，故用平台配置文件替代。
+> - `capabilities/default.json` 加 `"platforms": ["windows","macOS","linux"]`；新增 `capabilities/mobile.json`（platforms android/iOS，仅 `core:default` + `dialog:default`，无窗口控制权限）。`mobile-schema.json` 需 `tauri android init` 生成后才存在，此前仅编辑器提示，不影响构建。
+> - 前端版本检测请求的是 `api.github.com`（updater.ts），CSP 已含；数据下载（json.tarkov.dev）走 Rust 端 ureq，不受 CSP 约束。
+>
+> **P4 遗留（需移动构建环境）**：
+> - ~~`npm run tauri android init` 生成 `src-tauri/gen/android`~~ ✅ 已完成（SDK cmdline-tools + platform-tools + android-34/36 + build-tools 34/36 + NDK 27.2.12479018 已装到 `C:\Users\lsscf\AppData\Local\Android\Sdk`；JAVA_HOME 已切到 Microsoft JDK 21 `C:\Users\lsscf\java\jdk-21`——模板 Gradle 8.14 不支持 Java 25；4 个 Android Rust target 已由 init 自动安装）。
+> - ~~Android 明文 `ws://`~~ ✅ 已完成：`gen/android/app/build.gradle.kts` 的 `manifestPlaceholders["usesCleartextTraffic"]` 由默认 `"false"`（仅 debug true）改为恒 `"true"`，局域网配对的明文 WS 在 release 包同样放行；`INTERNET` 权限模板自带。
+> - **`.gitignore` 调整**：`gen/android` 工程文件入库（含上述定制），仅忽略 `gen/schemas`、`gen/android` 的 build 产物 / `.gradle` / `local.properties` / `.idea`。
+> - ~~iOS `gen/ios/.../Info.plist`：ATS 例外~~ 已取消（iOS 不在范围内）。
+> - `tauri-plugin-barcode-scanner` 插件接入与 capabilities 追加（届时移动端连接页补扫码按钮）。
+> - 环境变量（用户级已持久化）：`ANDROID_HOME` / `NDK_HOME` / `JAVA_HOME`。新开终端生效；首次 `tauri android build` 时 Gradle 还需联网下载依赖。
+
 ### P5 · 实测调优
 20. 桌面 ↔ 安卓真机局域网联调；iOS 模拟器联调。
 21. 低端安卓地图页（Leaflet）性能；WS 重连与电量。
@@ -160,6 +173,7 @@
 | 数据冲突 | 覆盖可能丢手动改动 / 补充可能留旧进度 | 导入时用户选「覆盖」或「补充」；两种均自动备份 `backup_*.json`；后续可按 updatedAt last-write-wins |
 
 **待确认决策**：
+- [x] **iOS 不在范围内**：仅做 Android（`tauri.ios.conf.json` 不创建、Info.plist ATS 例外不做、iOS 联调取消），文档中 iOS 相关条目保留仅作存档。
 - [x] 手机端连接以**扫码为主**（`tauri-plugin-barcode-scanner`），手动输入 IP 兜底。
 - [x] 传输用 **`ws://` 明文**（本地局域网，不引证书）；iOS 侧配 ATS 例外。
 - [x] 反向同步（手机 → 新电脑一键）纳入 **V2**（协议从 V1 起对称预留，V2 仅补 UI 按钮）。

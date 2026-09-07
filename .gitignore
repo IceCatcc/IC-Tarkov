@@ -3,12 +3,20 @@ dist
 src-react/dist
 dist-verify*
 src-tauri/target
-src-tauri/gen
+# gen/android 工程文件需入库（含 AndroidManifest / gradle 定制），只忽略生成物与机器相关文件
+src-tauri/gen/schemas
+src-tauri/gen/android/.gradle
+src-tauri/gen/android/build
+src-tauri/gen/android/app/build
+src-tauri/gen/android/local.properties
+src-tauri/gen/android/.idea
+src-tauri/gen/android/*.iml
 *.log
 .DS_Store
 check-tauri.bat
 vite.config.ts.timestamp-*.mjs
 .workbuddy
+.codebuddy
 quest_analysis
 # tarkov.dev 原始 API 种子数据下的运行时缓存清单（每次同步重写，不入库）
 src-tauri/resources/api/manifest.json
