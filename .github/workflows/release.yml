@@ -134,28 +134,14 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
 
-      # 构建 release APK（体积小）并用 CI 临时生成的 debug 级密钥签名（可直接安装）。
-      # 产物与本地约定一致，输出到 apks/ 目录。
-      # 正式分发签名：配置 keystore secrets 后替换此签名步骤。
+      # 构建并签名（scripts/sign-apk.mjs：zipalign + CI 临时 debug 密钥，产物在 apks/）
+      # 正式分发签名：配置 keystore secrets 后替换脚本内签名步骤。
       - name: Build and sign Android APK (arm64)
-        shell: bash
-        run: |
-          mkdir -p apks "$HOME/.android"
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            keytool -genkeypair -keystore "$HOME/.android/debug.keystore" \
-              -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" \
-              -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000
-          fi
-          npm run tauri:android
-          BT="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
-          RAW="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk"
-          "$BT/zipalign" -f 4 "$RAW" apks/aligned.tmp.apk
-          "$BT/apksigner" sign \
-            --ks "$HOME/.android/debug.keystore" \
-            --ks-pass pass:android --key-pass pass:android \
-            --out "apks/IC-Tarkov_v${{ steps.version.outputs.version }}_android_arm64.apk" apks/aligned.tmp.apk
+        run: npm run tauri:android
 
       - name: Upload APK to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ steps.version.outputs.tag }}" "apks/IC-Tarkov_v${{ steps.version.outputs.version }}_android_arm64.apk" --clobber
+        run: |
+          cp apks/IC-Tarkov-arm64.apk "IC-Tarkov_v${{ steps.version.outputs.version }}_android_arm64.apk"
+          gh release upload "${{ steps.version.outputs.tag }}" "IC-Tarkov_v${{ steps.version.outputs.version }}_android_arm64.apk" --clobber
