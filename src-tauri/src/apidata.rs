@@ -120,27 +120,46 @@ pub fn bundled_file(app: &tauri::AppHandle, name: &str) -> Option<PathBuf> {
     }
 }
 
-/// 种子目录（resources/api）
+/// 读取随包资源字节：先文件系统候选（桌面），再 APK assets 回退。
+/// Android 上 bundle.resources 以 asset 形式打进 APK（assets/api/*.json 等），
+/// resource_dir() 指不到文件，必须走 asset_resolver 读取。
+pub fn read_bundled_bytes(app: &tauri::AppHandle, rel: &str) -> Option<Vec<u8>> {
+    if let Some(p) = bundled_file(app, rel) {
+        if let Ok(b) = std::fs::read(&p) {
+            return Some(b);
+        }
+    }
+    let resp = app.asset_resolver().get(rel.to_string())?;
+    Some(resp.bytes)
+}
+
+/// 种子目录（resources/api）：桌面文件系统候选；Android 上无对应目录，走 asset 回退
+#[allow(dead_code)]
 fn seed_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
     bundled_dir(app, Some("api"))
 }
 
-/// 保证缓存目录里有完整可用的一套原始 JSON：缺失的从随包种子复制
+/// 保证缓存目录里有完整可用的一套原始 JSON：缺失的从随包种子复制（桌面走文件，
+/// Android 走 APK assets 回退）；地图骨架 maps-skeleton.json 一并物化进缓存目录
 pub fn ensure_cache(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = cache_dir(app)?;
-    let seed = seed_dir(app);
-    for ep in ENDPOINTS {
-        let dst = dir.join(ep.file);
+    let materialize = |rel: &str, dst: &Path| {
         if dst.is_file() {
-            continue;
+            return;
         }
-        let Some(src) = seed.as_ref().map(|s| s.join(ep.file)).filter(|p| p.is_file()) else {
-            continue;
-        };
-        if let Err(e) = std::fs::copy(&src, &dst) {
-            eprintln!("[apidata] 复制种子失败 {}: {e}", ep.file);
+        match read_bundled_bytes(app, rel) {
+            Some(bytes) => {
+                if let Err(e) = std::fs::write(dst, &bytes) {
+                    eprintln!("[apidata] 复制种子失败 {rel}: {e}");
+                }
+            }
+            None => eprintln!("[apidata] 随包种子缺失：{rel}"),
         }
+    };
+    for ep in ENDPOINTS {
+        materialize(&format!("api/{}", ep.file), &dir.join(ep.file));
     }
+    materialize("maps-skeleton.json", &dir.join("maps-skeleton.json"));
     // 首轮种子复制后补写清单，保证「更新时间」有值
     let mut manifest = read_manifest(&dir);
     let mut changed = false;

@@ -1183,7 +1183,12 @@ pub fn build_from_dir(dir: &Path, skeleton: Option<&Path>) -> Result<Store, Stri
 /// 从缓存目录重建全部派生数据并装载
 pub fn rebuild(app: &tauri::AppHandle) -> Result<(usize, usize), String> {
     let dir = apidata::ensure_cache(app)?;
-    let skeleton = apidata::bundled_file(app, "maps-skeleton.json");
+    // ensure_cache 会把 maps-skeleton.json 物化进缓存目录（Android 走 assets 回退），
+    // 这里依次找：随包文件系统 → 缓存目录副本
+    let skeleton = apidata::bundled_file(app, "maps-skeleton.json").or_else(|| {
+        let p = dir.join("maps-skeleton.json");
+        p.is_file().then_some(p)
+    });
     let store = build_from_dir(&dir, skeleton.as_deref())?;
     let qn = store.quests.len();
     let mn = store.maps.len();

@@ -90,11 +90,11 @@ struct WsQuery {
 
 // ---------------- 工具 ----------------
 
-/// 生成随机配对 token（hex）
+/// 生成 4 位数字配对码（0000-9999）。局域网内使用，短码便于手动输入
 fn generate_token() -> String {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
-    (0..16).map(|_| format!("{:02x}", rng.gen::<u8>())).collect()
+    let n: u32 = rand::thread_rng().gen_range(0..10000);
+    format!("{:04}", n)
 }
 
 /// 枚举本机非回环 IPv4 地址，供手机端逐个尝试连接

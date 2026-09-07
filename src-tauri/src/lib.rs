@@ -1090,8 +1090,10 @@ pub(crate) fn emit_progress(app: &tauri::AppHandle, endpoint: &str, timestamp: &
 // 生成 JavaVM 启动符号；桌面端无影响。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+    builder
         .setup(|app| {
             // 数据根目录在每次需要时按「程序目录 data → AppData → 新建程序目录 data」自动探测，
             // 不依赖任何标记文件，此处无需提前设置，直接进入状态初始化。

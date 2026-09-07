@@ -30,6 +30,10 @@ futures-util = "0.3"
 if-addrs = "0.13"
 rand = "0.8"
 
+# 扫码（手机端连接电脑）：仅移动平台编译，桌面无此依赖
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2"
+
 # rustc 1.98 在 Windows 上增量编译会触发 ICE（metadata encoder panic），禁用之
 [profile.dev]
 incremental = false

@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from 'react'
+import type { MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from 'react'
 import { useStore, useTopPad } from '../store'
 import { getQuestGraph, getQuestDetail, setQuestStatus, getMaps } from '../tauri'
 import { traderImage } from '../traderImages'
@@ -1363,22 +1363,123 @@ export function QuestGraphPage() {
     dragRef.current = null
     setCursor(hover ? 'pointer' : 'grab')
     if (d && !d.moved) {
-      const el = canvasRef.current
-      if (!el) return
-      const { wx, wy } = screenToWorld(e.clientX, e.clientY, el)
-      const n = hitTest(wx, wy)
-      if (n) {
-        select(n.id)
-      } else if (selectedId) {
-        // 点击空白区域关闭详情弹窗（拖动已在 moved 判定中被排除）
-        setSelected(null, null)
-      }
+      selectAt(e.clientX, e.clientY)
     }
   }
   const onMouseLeave = () => {
     dragRef.current = null
     setHover(null)
     setCursor('grab')
+  }
+
+  // 点选：命中节点则选中，否则关闭详情弹窗（鼠标与触摸共用）
+  const selectAt = (clientX: number, clientY: number) => {
+    const el = canvasRef.current
+    if (!el) return
+    const { wx, wy } = screenToWorld(clientX, clientY, el)
+    const n = hitTest(wx, wy)
+    if (n) {
+      select(n.id)
+    } else if (selectedId) {
+      setSelected(null, null)
+    }
+  }
+
+  // —— 触摸（移动端）：单指拖动/点选，双指捏合以中点为锚缩放 ——
+  const touchRef = useRef<{
+    mode: 'drag' | 'pinch'
+    sx: number
+    sy: number
+    vx: number
+    vy: number
+    moved: boolean
+    // pinch：起始距离 / 起始缩放 / 起始锚点与视图位置
+    dist0: number
+    scale0: number
+    ax0: number
+    ay0: number
+    x0: number
+    y0: number
+  } | null>(null)
+
+  const touchDist = (t: React.TouchList) =>
+    Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+
+  const onTouchStart = (e: ReactTouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 1) {
+      const t = e.touches[0]
+      touchRef.current = {
+        mode: 'drag',
+        sx: t.clientX,
+        sy: t.clientY,
+        vx: view.x,
+        vy: view.y,
+        moved: false,
+        dist0: 0,
+        scale0: view.scale,
+        ax0: 0,
+        ay0: 0,
+        x0: view.x,
+        y0: view.y,
+      }
+    } else if (e.touches.length >= 2) {
+      const rect = canvasRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const ax = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left
+      const ay = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top
+      touchRef.current = {
+        mode: 'pinch',
+        sx: 0,
+        sy: 0,
+        vx: 0,
+        vy: 0,
+        moved: false,
+        dist0: touchDist(e.touches),
+        scale0: view.scale,
+        ax0: ax,
+        ay0: ay,
+        x0: view.x,
+        y0: view.y,
+      }
+    }
+  }
+
+  const onTouchMove = (e: ReactTouchEvent<HTMLDivElement>) => {
+    const s = touchRef.current
+    if (!s) return
+    if (s.mode === 'drag' && e.touches.length === 1) {
+      const t = e.touches[0]
+      const dx = t.clientX - s.sx
+      const dy = t.clientY - s.sy
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) s.moved = true
+      setView((v) => ({
+        ...v,
+        ...clampView({ scale: v.scale, x: s.vx + dx, y: s.vy + dy }, width, height, csize.w, csize.h),
+      }))
+    } else if (s.mode === 'pinch' && e.touches.length >= 2) {
+      const rect = canvasRef.current?.getBoundingClientRect()
+      if (!rect || s.dist0 <= 0) return
+      const ax = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left
+      const ay = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top
+      const ns = Math.min(2, Math.max(0.12, s.scale0 * (touchDist(e.touches) / s.dist0)))
+      // 保持捏合起始锚点下的世界坐标不动
+      const wx = (s.ax0 - s.x0) / s.scale0
+      const wy = (s.ay0 - s.y0) / s.scale0
+      setView(() => {
+        const c = clampView({ scale: ns, x: ax - wx * ns, y: ay - wy * ns }, width, height, csize.w, csize.h)
+        return { scale: ns, ...c }
+      })
+    }
+  }
+
+  const onTouchEnd = (e: ReactTouchEvent<HTMLDivElement>) => {
+    const s = touchRef.current
+    touchRef.current = null
+    if (!s) return
+    if (s.mode === 'drag' && !s.moved) {
+      const t = e.changedTouches[0]
+      if (t) selectAt(t.clientX, t.clientY)
+    }
   }
 
   // 以鼠标位置为锚点缩放
@@ -1424,6 +1525,24 @@ export function QuestGraphPage() {
 
   const selectedNode = selectedId ? (graph.nodes.find((n) => n.id === selectedId) ?? null) : null
   const selAvatar = traderImage(selectedNode?.traderId)
+
+  // 缩略图（右下角小地图）显隐开关（localStorage 持久化）
+  const [showMiniMap, setShowMiniMap] = useState(() => {
+    try {
+      return localStorage.getItem('ic-tarkov.graphMiniMap.v1') !== '0'
+    } catch {
+      return true
+    }
+  })
+  const toggleMiniMap = () =>
+    setShowMiniMap((v) => {
+      try {
+        localStorage.setItem('ic-tarkov.graphMiniMap.v1', v ? '0' : '1')
+      } catch {
+        /* ignore */
+      }
+      return !v
+    })
 
   const chip =
     'px-2.5 py-1 rounded-full text-[14px] border transition-colors whitespace-nowrap'
@@ -2067,6 +2186,17 @@ export function QuestGraphPage() {
           className="shrink-0 bg-ink-700 border border-line text-[14px] rounded px-2 py-1 text-[#e6edf3] w-44 placeholder:text-muted"
         />
 
+        {/* 缩略图显隐开关 */}
+        <button
+          onClick={toggleMiniMap}
+          title="显示 / 隐藏右下角缩略图"
+          className={`${chip} shrink-0 ${
+            showMiniMap ? 'bg-amber/15 text-[#d4a174] border-amber/60' : chipOff
+          }`}
+        >
+          缩略图
+        </button>
+
         {/* 重置视图：右对齐 */}
         <button
           onClick={() => setView({ x: 30, y: 30, scale: DEFAULT_SCALE })}
@@ -2076,15 +2206,19 @@ export function QuestGraphPage() {
         </button>
       </div>
 
-      {/* 画布 */}
+      {/* 画布：touch-action none 屏蔽浏览器默认手势，触摸交互由上方 handler 接管 */}
       <div
         className="relative flex-1 min-h-0 overflow-hidden bg-ink-900"
-        style={{ cursor }}
+        style={{ cursor, touchAction: 'none' }}
         onWheel={onWheel}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseLeave}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
       >
         <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
 
@@ -2419,7 +2553,8 @@ export function QuestGraphPage() {
           </div>
         )}
 
-        {/* 缩略图（右下角）：尺寸随世界包围盒宽高比动态变化 */}
+        {/* 缩略图（右下角）：尺寸随世界包围盒宽高比动态变化；可开关 */}
+        {showMiniMap && (
         <div
           className="absolute rounded-md border border-line bg-ink-800/90 shadow-xl z-40 select-none cursor-crosshair overflow-hidden"
           style={{ right: 12, bottom: 12, width: miniDim.w, height: miniDim.h }}
@@ -2439,6 +2574,7 @@ export function QuestGraphPage() {
         >
           <canvas ref={miniRef} style={{ width: miniDim.w, height: miniDim.h }} />
         </div>
+        )}
       </div>
     </div>
   )

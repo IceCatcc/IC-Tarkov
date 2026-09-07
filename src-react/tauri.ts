@@ -386,3 +386,17 @@ export async function getSnapshot(): Promise<string> {
 export async function applySnapshot(json: string): Promise<void> {
   await invoke('apply_snapshot', { json })
 }
+
+/**
+ * 调起摄像头扫码（仅移动端；桌面未装扫码插件，动态 import 避免桌面加载插件代码）。
+ * 返回二维码内容字符串；失败/取消返回 null。
+ */
+export async function scanQr(): Promise<string | null> {
+  try {
+    const mod = await import('@tauri-apps/plugin-barcode-scanner')
+    const text = await mod.scan()
+    return typeof text === 'string' && text ? text : null
+  } catch {
+    return null
+  }
+}

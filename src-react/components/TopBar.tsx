@@ -145,20 +145,26 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
             {watcher.error}
           </span>
         )}
-        <button
-          onClick={() => setLanOpen(true)}
-          title="局域网同步：手机扫码连接，实时跟随电脑端"
-          className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
-        >
-          局域网同步
-        </button>
-        <button
-          onClick={() => setConnectOpen(true)}
-          title="连接到电脑端：本机作为手机端，实时跟随另一台电脑"
-          className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
-        >
-          连接到电脑
-        </button>
+        {/* 局域网同步（做服务端）：仅桌面；手机端无意义 */}
+        {!mobile && (
+          <button
+            onClick={() => setLanOpen(true)}
+            title="局域网同步：手机扫码连接，实时跟随电脑端"
+            className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
+          >
+            局域网同步
+          </button>
+        )}
+        {/* 连接到电脑（做客户端）：仅移动端；桌面无摄像头扫码场景 */}
+        {mobile && (
+          <button
+            onClick={() => setConnectOpen(true)}
+            title="扫码连接电脑端，实时跟随电脑"
+            className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
+          >
+            连接电脑
+          </button>
+        )}
         <button
           onClick={openSettings}
           title="设置"
