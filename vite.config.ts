@@ -19,8 +19,9 @@ export default defineConfig({
     sourcemap: false,
     // 前端产物输出到 src-react/dist，与 tauri.conf.json 的 frontendDist 保持一致。
     outDir: 'src-react/dist',
-    // 不自动清空 dist：dist/item-icons 含数千图标，触发 IDE safe-delete 批量确认而中断 CI/构建。
-    // 改用构建前手动删除 dist（见 build.bat / 脚本）。
+    // 不自动清空 dist：dist/item-icons 含数千图标，逐文件删除会触发 IDE safe-delete 批量确认而中断构建。
+    // 改为构建前由 scripts/clean-dist.mjs 整目录 rename+删除（已挂到 react:build / tauri:android 前置）。
+    // 切勿改回 true：历史 hash 产物残留会让本地包比 CI 大几十 MB。
     emptyOutDir: false,
   },
 })

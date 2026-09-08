@@ -1,6 +1,8 @@
 node_modules
 dist
 src-react/dist
+# clean-dist.mjs 的暂存目录（rename 后待删，异常时可能短时残留）
+src-react/.dist-trash*
 dist-verify*
 src-tauri/target
 # gen/android 工程文件需入库（含 AndroidManifest / gradle 定制），只忽略生成物与机器相关文件
