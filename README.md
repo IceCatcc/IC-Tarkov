@@ -12,6 +12,22 @@
 - **游戏档案**：维护角色等级、商人好感与地图解锁状态，地图标记与任务可用性随之联动
 - **自动更新提示**：启动时检测 GitHub Releases，有新版本时提示；点击可查看更新说明并前往下载
 - **收藏家物品管理**：支持收藏家物品的追踪管理，手动勾选已有的物品。
+- **移动端（Android）**：提供 Android 版本，手机也能随时查看任务、地图与游戏档案，与桌面端共享同一套数据与交互。
+- **局域网同步 / 数据迁移**：手机与电脑通过局域网「同步」功能双向同步任务、收藏与档案；支持将任务状态 / 收藏 / 设置打包为 zip 导入导出，便于备份与跨端迁移。
+- **日志重新扫描**：重新扫描日志支持「覆盖」与「补充」两种模式，灵活应对不同存档情况。
+
+## 移动端（Android）
+
+除 Windows 桌面端外，本项目也构建 Android 应用，可在手机上使用核心的任务、地图与档案功能，并通过局域网与电脑端同步数据。
+
+构建 APK（需自行配置 `JAVA_HOME` / `ANDROID_HOME` / `NDK_HOME`，见仓库内 `android-build.bat` / `android-release.bat`）：
+
+```powershell
+npm run tauri:android          # 构建并自动签名 aarch64 APK
+npm run tauri:android:dev      # 真机 / 模拟器开发调试
+```
+
+CI（`.github/workflows/release.yml`）也提供 Android APK 构建发布 job，推送 `v<version>` tag 后会一并产出桌面安装包与 Android APK。
 
 ## 关于
 
@@ -29,7 +45,7 @@
 ![alt text](imgs/2.png)
 ![alt text](imgs/3.png)
 ![alt text](imgs/4.png)
-
+![alt text](imgs/5.png)
 
 ## 技术栈
 
