@@ -81,8 +81,8 @@ jobs:
 
   # Android APK（仅 arm64）。needs 串行：Release 由 build-windows 的 tauri-action 创建，
   # 本 job 只追加 APK 资产（gh release upload --clobber），避免竞争创建。
-  # 说明：当前构建 debug 签名 APK（可直接安装分发）；正式签名为未签名包不可安装，
-  # 后续接入 keystore secrets + gradle signingConfig 后再切换 release。
+  # 签名：复用本地 debug.keystore（base64 存于 Secret ANDROID_KEYSTORE_BASE64），
+  # 与本地 android-release.bat 使用同一把密钥，保证本地与 CI 构建的 APK 签名一致、可互相覆盖更新。
   build-android:
     permissions:
       contents: write
@@ -134,9 +134,17 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
 
-      # 构建并签名（scripts/sign-apk.mjs：zipalign + CI 临时 debug 密钥，产物在 apks/）
-      # 正式分发签名：配置 keystore secrets 后替换脚本内签名步骤。
+      # 将 Secret 里的 keystore（base64）解码为本地文件，供 sign-apk.mjs 签名。
+      # 密钥库口令/别名与本地 debug.keystore 一致（android / androiddebugkey）。
+      - name: Decode signing keystore
+        shell: bash
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+
       - name: Build and sign Android APK (arm64)
+        env:
+          ANDROID_KEYSTORE_PATH: keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: android
+          ANDROID_KEY_ALIAS: androiddebugkey
         run: npm run tauri:android
 
       - name: Upload APK to release

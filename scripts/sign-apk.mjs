@@ -46,15 +46,34 @@ const keytool = path.join(
 const zipalign = path.join(bt, win ? 'zipalign.exe' : 'zipalign')
 const apksigner = path.join(bt, win ? 'apksigner.bat' : 'apksigner')
 
-// debug 密钥：不存在则生成（与 Android Studio/AGP 默认行为一致）
-const ks = path.join(homedir(), '.android', 'debug.keystore')
-if (!existsSync(ks)) {
-  mkdirSync(path.dirname(ks), { recursive: true })
-  run(
-    `"${keytool}" -genkeypair -keystore "${ks}" -alias androiddebugkey ` +
-      `-dname "CN=Android Debug,O=Android,C=US" -storepass android -keypass android ` +
-      `-keyalg RSA -keysize 2048 -validity 10000`,
-  )
+// 优先使用环境变量指定的发布密钥（本地与 CI 共用同一份，保证签名一致）：
+//   ANDROID_KEYSTORE_PATH      密钥库路径（必填，若设置则以它为签名密钥）
+//   ANDROID_KEYSTORE_PASSWORD  密钥库口令（默认 android）
+//   ANDROID_KEY_PASSWORD       密钥口令（默认同密钥库口令）
+//   ANDROID_KEY_ALIAS          密钥别名（默认 androiddebugkey）
+// 未设置 ANDROID_KEYSTORE_PATH 时，回退到 Android 默认 debug.keystore
+// （不存在则生成，与 Android Studio/AGP 默认行为一致），用于本地开发。
+const KS_PATH = process.env.ANDROID_KEYSTORE_PATH
+const KS_PASS = process.env.ANDROID_KEYSTORE_PASSWORD || 'android'
+const KEY_ALIAS = process.env.ANDROID_KEY_ALIAS || 'androiddebugkey'
+const KEY_PASS = process.env.ANDROID_KEY_PASSWORD || KS_PASS
+
+let ks
+if (KS_PATH) {
+  ks = KS_PATH
+  if (!existsSync(ks)) {
+    fail(`指定的签名密钥不存在：${ks}（请检查 ANDROID_KEYSTORE_PATH 或 CI Secret 是否正确解码）`)
+  }
+} else {
+  ks = path.join(homedir(), '.android', 'debug.keystore')
+  if (!existsSync(ks)) {
+    mkdirSync(path.dirname(ks), { recursive: true })
+    run(
+      `"${keytool}" -genkeypair -keystore "${ks}" -alias androiddebugkey ` +
+        `-dname "CN=Android Debug,O=Android,C=US" -storepass android -keypass android ` +
+        `-keyalg RSA -keysize 2048 -validity 10000`,
+    )
+  }
 }
 
 mkdirSync('apks', { recursive: true })
@@ -62,7 +81,8 @@ const aligned = 'apks/aligned.tmp.apk'
 run(`"${zipalign}" -f 4 "${RAW}" "${aligned}"`)
 rmSync(OUT, { force: true })
 run(
-  `"${apksigner}" sign --ks "${ks}" --ks-pass pass:android --key-pass pass:android ` +
+  `"${apksigner}" sign --ks "${ks}" --ks-key-alias "${KEY_ALIAS}" ` +
+    `--ks-pass pass:${KS_PASS} --key-pass pass:${KEY_PASS} ` +
     `--out "${OUT}" "${aligned}"`,
 )
 rmSync(aligned, { force: true })
