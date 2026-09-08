@@ -29,6 +29,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync",
 futures-util = "0.3"
 if-addrs = "0.13"
 rand = "0.8"
+# 数据导入导出：多份 json（quest_state/collected/settings）打包 zip；仅 deflate，压缩比足够且依赖最小
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # 扫码（手机端连接电脑）：仅移动平台编译，桌面无此依赖
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]

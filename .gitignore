@@ -13,12 +13,11 @@ src-tauri/gen/android/.idea
 src-tauri/gen/android/*.iml
 *.log
 .DS_Store
-check-tauri.bat
+*.bat
 vite.config.ts.timestamp-*.mjs
 .workbuddy
 .codebuddy
-# Android 打包脚本仅本机使用（含 SDK/JDK 绝对路径），不入库
-android-*.bat
+
 # 本机打包的 APK 成品
 /apks/
 quest_analysis

@@ -1,12 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { isMobile } from '../platform'
 import { getActivity } from '../tauri'
 import type { ActivityItem } from '../types'
 
 /**
- * 实时活动侧栏：占布局空间（挤压内容区），按钮通过切换容器宽度实现显示/隐藏。
- * 收起时为右上角浮动按钮（带未读事件数），展开后为右侧定宽栏。
+ * 实时活动侧栏：
+ * - 桌面端 / 移动端横屏：占布局空间（挤压内容区），按钮通过切换容器宽度实现显示/隐藏；
+ * - 移动端竖屏：屏幕太窄，占位会把关闭按钮挤出屏外，改用浮动抽屉（覆盖内容 + 遮罩）。
  */
 export function ActivityFeed() {
   const [open, setOpen] = useState(false)
@@ -33,8 +34,67 @@ export function ActivityFeed() {
     }
   }
 
-  // 移动端需避开底部 Tab 栏（56px + 间距）
   const mobile = isMobile()
+  // 竖屏检测（matchMedia 响应式，旋转即时生效）
+  const [portrait, setPortrait] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(orientation: portrait)').matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(orientation: portrait)')
+    const onChange = () => setPortrait(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  // 移动端竖屏：抽屉模式
+  const drawer = mobile && portrait
+
+  const content = (
+    <>
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-line shrink-0">
+        <span className="text-[15px] font-medium">实时活动</span>
+        <button
+          onClick={() => setOpen(false)}
+          className="w-7 h-7 grid place-items-center rounded-md text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+          aria-label="收起"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
+        {activities.length === 0 && !historicalLoaded && (
+          <div className="text-[13px] text-muted">等待事件…</div>
+        )}
+        {activities.map((a) => (
+          <div key={a.id} className="text-[13px] leading-relaxed break-words">
+            <span className="text-muted">{a.ts} </span>
+            <span className={color(a.kind)}>{a.text}</span>
+          </div>
+        ))}
+
+        {!historicalLoaded ? (
+          <button
+            onClick={() => void onLoadMore()}
+            className="mt-3 w-full text-[13px] text-amber hover:underline"
+          >
+            加载更多
+          </button>
+        ) : histShown.length > 0 ? (
+          <>
+            <div className="mt-4 mb-2 text-[13px] text-muted border-t border-line pt-3">
+              历史活动
+            </div>
+            {histShown.map((a) => (
+              <div key={a.id} className="text-[13px] leading-relaxed break-words">
+                <span className="text-muted">{a.ts} </span>
+                <span className={color(a.kind)}>{a.text}</span>
+              </div>
+            ))}
+          </>
+        ) : null}
+      </div>
+    </>
+  )
 
   return (
     <>
@@ -54,60 +114,33 @@ export function ActivityFeed() {
         </button>
       )}
 
-      {/* 侧栏：宽度在 0 / 320px 间过渡，展开时挤占内容区 */}
-      <aside
-        className={`shrink-0 h-full overflow-hidden transition-[width] duration-200 ease-out ${
-          mobile ? 'pb-[var(--nav-h)]' : ''
-        } ${open ? 'border-l border-line bg-ink-800' : ''}`}
-        style={{ width: open ? 320 : 0 }}
-        aria-hidden={!open}
-      >
-        {/* 内容定宽，宽度过渡时文字不回流 */}
-        <div className="w-[320px] h-full flex flex-col">
-          <div className="flex items-center justify-between px-3 py-2.5 border-b border-line shrink-0">
-            <span className="text-[15px] font-medium">实时活动</span>
-            <button
-              onClick={() => setOpen(false)}
-              className="w-7 h-7 grid place-items-center rounded-md text-muted hover:text-[#e6edf3] hover:bg-ink-700"
-              aria-label="收起"
-            >
-              ✕
-            </button>
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
-            {activities.length === 0 && !historicalLoaded && (
-              <div className="text-[13px] text-muted">等待事件…</div>
-            )}
-            {activities.map((a) => (
-              <div key={a.id} className="text-[13px] leading-relaxed break-words">
-                <span className="text-muted">{a.ts} </span>
-                <span className={color(a.kind)}>{a.text}</span>
-              </div>
-            ))}
-
-            {!historicalLoaded ? (
-              <button
-                onClick={() => void onLoadMore()}
-                className="mt-3 w-full text-[13px] text-amber hover:underline"
-              >
-                加载更多
-              </button>
-            ) : histShown.length > 0 ? (
-              <>
-                <div className="mt-4 mb-2 text-[13px] text-muted border-t border-line pt-3">
-                  历史活动
-                </div>
-                {histShown.map((a) => (
-                  <div key={a.id} className="text-[13px] leading-relaxed break-words">
-                    <span className="text-muted">{a.ts} </span>
-                    <span className={color(a.kind)}>{a.text}</span>
-                  </div>
-                ))}
-              </>
-            ) : null}
+      {/* 移动端竖屏：居中弹窗（遮罩点击关闭） */}
+      {open && drawer && (
+        <div
+          className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="w-[360px] max-w-full max-h-[70vh] flex flex-col rounded-xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {content}
           </div>
         </div>
-      </aside>
+      )}
+
+      {/* 桌面 / 移动端横屏：占布局侧栏，宽度在 0 / 320px 间过渡 */}
+      {!drawer && (
+        <aside
+          className={`shrink-0 h-full overflow-hidden transition-[width] duration-200 ease-out ${
+            mobile ? 'pb-[var(--nav-h)]' : ''
+          } ${open ? 'border-l border-line bg-ink-800' : ''}`}
+          style={{ width: open ? 320 : 0 }}
+          aria-hidden={!open}
+        >
+          <div className="w-[320px] h-full flex flex-col">{content}</div>
+        </aside>
+      )}
     </>
   )
 }

@@ -222,8 +222,9 @@ export async function resetAndRescan(mode?: string): Promise<void> {
   await invoke('reset_and_rescan', { mode })
 }
 
-export async function exportData(path: string): Promise<void> {
-  await invoke('export_data', { path })
+/** 导出数据 zip。path 省略时（移动端）自动导出到数据目录，返回实际导出路径 */
+export async function exportData(path?: string): Promise<string> {
+  return await invoke<string>('export_data', { path: path ?? null })
 }
 
 export async function importData(path: string): Promise<void> {

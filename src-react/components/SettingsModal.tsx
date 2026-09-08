@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { useStore } from '../store'
 import { isMobile } from '../platform'
 import {
@@ -15,6 +15,7 @@ import {
   refreshGameData,
   getDataLocation,
   setDataLocation,
+  getSettings,
   type DataLocation,
 } from '../tauri'
 import type { DataStatus, DataSyncProgress, DataSyncReport } from '../types'
@@ -271,14 +272,21 @@ export default function SettingsModal() {
     setError(null)
     setFeedback(null)
     try {
-      const p = await open({
-        save: true,
-        title: '导出数据',
-        defaultPath: 'quest_state.json',
-      })
-      if (typeof p === 'string') {
-        await exportData(p)
-        setFeedback('数据已导出')
+      if (isMobile()) {
+        // 移动端无「保存文件」对话框：直接导出到数据目录并回显路径
+        const saved = await exportData()
+        setFeedback(`已导出：${saved}`)
+      } else {
+        // 注意：保存对话框必须用 plugin-dialog 的 save()，open({ save }) 是 v1 写法不生效
+        const p = await save({
+          title: '导出数据（zip 压缩包）',
+          defaultPath: 'ic-tarkov-data.zip',
+          filters: [{ name: 'ZIP', extensions: ['zip'] }],
+        })
+        if (typeof p === 'string') {
+          await exportData(p)
+          setFeedback('数据已导出为压缩包')
+        }
       }
     } catch (e) {
       setError(String(e))
@@ -295,12 +303,21 @@ export default function SettingsModal() {
       const p = await open({
         multiple: false,
         title: '导入数据',
-        filters: [{ name: 'JSON', extensions: ['json'] }],
+        filters: [
+          { name: '数据包（zip）', extensions: ['zip'] },
+          { name: '旧版 JSON', extensions: ['json'] },
+        ],
       })
       if (typeof p === 'string') {
         await importData(p)
         clearHistorical()
         seedPlayerQuests(await getPlayerQuests())
+        // 导入的 settings.json（含档案/UI 偏好）覆盖了本地，需重新拉取并应用
+        const st = await getSettings()
+        setSettings(st)
+        if (st.uiPrefs && Object.keys(st.uiPrefs).length > 0) {
+          useStore.getState().applyUiPrefs(st.uiPrefs)
+        }
         setFeedback('数据已导入')
       }
     } catch (e) {

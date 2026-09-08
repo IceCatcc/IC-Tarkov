@@ -2,7 +2,7 @@
 //! 避免每次启动都全量重扫日志；下次启动仅扫描偏移之后的新增内容。
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
@@ -93,28 +93,4 @@ pub fn save(app: &tauri::AppHandle) {
             let _ = std::fs::write(&path, json);
         }
     }
-}
-
-/// 把当前内存状态 + 扫描偏移导出到任意路径（「导出数据」用）
-pub fn save_to_path(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
-    let st = app.state::<AppState>();
-    let store = st.store.lock().unwrap();
-    let offsets = st.offsets.lock().unwrap();
-    let snapshot = Persisted {
-        quests: store.quests.clone(),
-        activity: store.activity.clone(),
-        current_map: store.current_map_nameid.clone(),
-        offsets: offsets.clone(),
-        unlocked: st.unlocked.lock().unwrap().iter().cloned().collect(),
-        collected: st.collected.lock().unwrap().iter().cloned().collect(),
-    };
-    drop(store);
-    drop(offsets);
-
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())?;
-    Ok(())
 }

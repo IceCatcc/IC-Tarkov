@@ -89,8 +89,22 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
   }, [])
 
   const mobile = isMobile()
+  // 横屏检测：移动端横屏 + 地图页时隐藏顶部工具栏（logo/设置那条），全屏看图
+  const [landscape, setLandscape] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(orientation: landscape)').matches,
+  )
+  useEffect(() => {
+    const mq = window.matchMedia('(orientation: landscape)')
+    const onChange = () => setLandscape(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  const hideBar = mobile && landscape && page === 'map'
+
   return (
     <>
+      {!hideBar && (
       <header
         className="flex items-stretch bg-ink-800 border-b border-line shrink-0 select-none"
       >
@@ -199,6 +213,8 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
           <WinButton onClick={() => win.close()} label="✕" title="关闭" danger />
         </>
       )}
+      </header>
+      )}
 
       {/* 版本 / 更新内容 */}
       {releaseOpen && (
@@ -288,7 +304,6 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
 
       <LanSyncModal open={lanOpen} onClose={() => setLanOpen(false)} />
       <LanConnectModal open={connectOpen} onClose={() => setConnectOpen(false)} />
-      </header>
 
       {/* 移动端底部 Tab 导航 */}
       {mobile && (
@@ -303,7 +318,7 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
             <button
               key={it.key}
               onClick={() => setPage(it.key)}
-              className={`flex-1 h-14 flex items-center justify-center text-[13px] transition-colors ${
+              className={`flex-1 h-full flex items-center justify-center text-[13px] transition-colors ${
                 page === it.key ? 'text-[#d4a174] bg-amber/10' : 'text-muted'
               }`}
             >

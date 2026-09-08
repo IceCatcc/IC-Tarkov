@@ -33,6 +33,9 @@ export type LanConnStatus = 'disconnected' | 'connecting' | 'connected'
 let ws: WebSocket | null = null
 let status: LanConnStatus = 'disconnected'
 let autoConnect = false
+// 本次会话是否成功连上过：断线重连提示只在此为真时弹出。
+// 软件刚启动就重连失败（电脑端没开）属于常态，静默处理不弹提示。
+let everConnected = false
 let current: ParsedConnect | null = null
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 let retries = 0
@@ -207,6 +210,7 @@ export async function connectLan(c: ParsedConnect, opts?: { auto?: boolean }): P
   }
   ws = sock
   retries = 0
+  everConnected = true
   setStatus('connected')
   startHeartbeat(sock)
   useStore.getState().pushToast('已连接到电脑端', 'done')
@@ -236,7 +240,8 @@ function scheduleRetry(c: ParsedConnect): void {
   // 无限重连（指数退避，封顶 30s）：同步应持续自动恢复
   retries += 1
   const delay = Math.min(30000, 2000 * 2 ** (retries - 1))
-  if (retries === 1) {
+  // 仅「曾连上后断线」才提示；软件启动时的首次重连失败（电脑端未开）保持静默
+  if (retries === 1 && everConnected) {
     useStore.getState().pushToast('与电脑端连接断开，正在自动重连…', 'info')
   }
   retryTimer = setTimeout(() => {

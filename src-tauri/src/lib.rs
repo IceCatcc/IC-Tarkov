@@ -790,26 +790,102 @@ fn reset_and_rescan(app: tauri::AppHandle, mode: Option<String>) -> Result<(), S
     start_watching(app, Some(dir))
 }
 
-/// 导出数据：把当前内存状态 + 扫描偏移写入指定路径（JSON 文件）
+/// 导出数据：先把内存态落盘，再把 quest_state / collected / settings 三份 json 打包为 zip。
+/// path 为空时（移动端无保存对话框）自动导出到数据目录下的 ic-tarkov-data.zip，返回实际路径。
 #[tauri::command]
-fn export_data(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    persist::save_to_path(&app, Path::new(&path))
+fn export_data(app: tauri::AppHandle, path: Option<String>) -> Result<String, String> {
+    persist::save(&app);
+    let target = match path.as_deref() {
+        Some(p) if !p.trim().is_empty() => PathBuf::from(p),
+        _ => data_root(&app)?.join("ic-tarkov-data.zip"),
+    };
+    let path = target;
+    let mut entries: Vec<(String, PathBuf)> = Vec::new();
+    if let Some(p) = persist::state_path(&app) {
+        if p.exists() {
+            entries.push(("quest_state.json".into(), p));
+        }
+    }
+    if let Some(p) = persist::collected_path(&app) {
+        if p.exists() {
+            entries.push(("collected.json".into(), p));
+        }
+    }
+    let sp = settings_path(&app)?;
+    if sp.exists() {
+        entries.push(("settings.json".into(), sp));
+    }
+    if entries.is_empty() {
+        return Err("没有可导出的数据".into());
+    }
+    let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    for (name, p) in entries {
+        let data = std::fs::read(&p).map_err(|e| e.to_string())?;
+        zip.start_file(name, opts).map_err(|e| e.to_string())?;
+        std::io::Write::write_all(&mut zip, &data).map_err(|e| e.to_string())?;
+    }
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
-/// 导入数据：读取指定路径的 quest_state.json，覆盖持久化文件并载入内存，
-/// 随后重启监控（按导入的偏移增量续读，不全量重扫）。
+/// 导入数据：读取 zip 包（quest_state / collected / settings.json），覆盖对应持久化文件并载入内存；
+/// 兼容旧版单文件 quest_state.json 直接导入。随后重启监控（按导入的偏移增量续读）。
 #[tauri::command]
 fn import_data(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let parsed: persist::Persisted =
-        serde_json::from_str(&content).map_err(|e| format!("文件格式错误：{e}"))?;
-    if let Some(p) = persist::state_path(&app) {
-        if let Some(parent) = p.parent() {
+    let src = Path::new(&path);
+    // 旧版兼容：单 JSON 文件（仅任务状态）
+    if src
+        .extension()
+        .map_or(false, |e| e.eq_ignore_ascii_case("json"))
+    {
+        let content = std::fs::read_to_string(src).map_err(|e| e.to_string())?;
+        let parsed: persist::Persisted =
+            serde_json::from_str(&content).map_err(|e| format!("文件格式错误：{e}"))?;
+        if let Some(p) = persist::state_path(&app) {
+            if let Some(parent) = p.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            std::fs::write(&p, &content).map_err(|e| e.to_string())?;
+        }
+        apply_persisted(&app, &parsed);
+        return Ok(());
+    }
+
+    let file = std::fs::File::open(src).map_err(|e| e.to_string())?;
+    let mut zip =
+        zip::ZipArchive::new(file).map_err(|e| format!("无法读取压缩包：{e}"))?;
+    let root = data_root(&app)?;
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
+        let name = entry.name().to_string();
+        // 只接受平铺的已知文件名（防路径穿越 / 意外条目）
+        let dest = match name.as_str() {
+            "quest_state.json" => persist::state_path(&app),
+            "collected.json" => persist::collected_path(&app),
+            "settings.json" => settings_path(&app).ok(),
+            _ => continue,
+        };
+        let Some(dest) = dest else { continue };
+        let mut content = String::new();
+        std::io::Read::read_to_string(&mut entry, &mut content)
+            .map_err(|e| format!("{name} 读取失败：{e}"))?;
+        serde_json::from_str::<serde_json::Value>(&content)
+            .map_err(|e| format!("{name} 不是有效的 JSON：{e}"))?;
+        if let Some(parent) = dest.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        std::fs::write(&p, &content).map_err(|e| e.to_string())?;
+        std::fs::write(&dest, content).map_err(|e| e.to_string())?;
     }
+    // 覆盖完成后统一载入内存（settings.json 变化由前端导入后自行刷新）
+    let parsed = persist::load(&app);
     apply_persisted(&app, &parsed);
+    // 归一化数据位置记录：导入的 settings 可能来自另一台机器/位置
+    let portable = portable_data_root()?;
+    let kind = if root == portable { "portable" } else { "appdata" };
+    record_data_location(&root, kind);
     Ok(())
 }
 
