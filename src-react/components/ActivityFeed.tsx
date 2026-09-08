@@ -5,8 +5,8 @@ import { getActivity } from '../tauri'
 import type { ActivityItem } from '../types'
 
 /**
- * 实时活动侧边抽屉：平时收起为浮动按钮（带未读事件数），点击从右侧展开。
- * 抽屉为浮动面板（fixed/absolute），不挤压页面其他内容。
+ * 实时活动侧栏：占布局空间（挤压内容区），按钮通过切换容器宽度实现显示/隐藏。
+ * 收起时为右上角浮动按钮（带未读事件数），展开后为右侧定宽栏。
  */
 export function ActivityFeed() {
   const [open, setOpen] = useState(false)
@@ -33,12 +33,12 @@ export function ActivityFeed() {
     }
   }
 
-  // 移动端需避开底部 Tab 栏（56px + 间距）；定位用确定性类值，不依赖 env() 内联计算
+  // 移动端需避开底部 Tab 栏（56px + 间距）
   const mobile = isMobile()
 
   return (
     <>
-      {/* 浮动按钮：右上角（弱化样式，与全局按钮统一） */}
+      {/* 收起时：右上角浮动按钮（弱化样式，与全局按钮统一） */}
       {!open && (
         <button
           onClick={() => setOpen(true)}
@@ -54,21 +54,16 @@ export function ActivityFeed() {
         </button>
       )}
 
-      {/* 遮罩：点击空白区域关闭抽屉 */}
-      {open && (
-        <div
-          className="absolute inset-0 z-[890] bg-black/40"
-          onClick={() => setOpen(false)}
-        />
-      )}
-
-      {/* 浮动抽屉面板：右侧滑出，覆盖在内容之上 */}
-      {open && (
-        <aside
-          className={`absolute right-0 top-0 z-[900] w-[320px] max-w-[85vw] flex flex-col bg-ink-800 border-l border-line shadow-2xl ${
-            mobile ? 'bottom-[var(--nav-h)]' : 'bottom-0'
-          }`}
-        >
+      {/* 侧栏：宽度在 0 / 320px 间过渡，展开时挤占内容区 */}
+      <aside
+        className={`shrink-0 h-full overflow-hidden transition-[width] duration-200 ease-out ${
+          mobile ? 'pb-[var(--nav-h)]' : ''
+        } ${open ? 'border-l border-line bg-ink-800' : ''}`}
+        style={{ width: open ? 320 : 0 }}
+        aria-hidden={!open}
+      >
+        {/* 内容定宽，宽度过渡时文字不回流 */}
+        <div className="w-[320px] h-full flex flex-col">
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-line shrink-0">
             <span className="text-[15px] font-medium">实时活动</span>
             <button
@@ -111,8 +106,8 @@ export function ActivityFeed() {
               </>
             ) : null}
           </div>
-        </aside>
-      )}
+        </div>
+      </aside>
     </>
   )
 }

@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 import { useStore } from '../store'
-import { traderDisplayName } from '../traderMeta'
 
 export function FilterBar() {
   const filter = useStore((s) => s.filter as 'all' | 'in_progress' | 'completed')
@@ -8,21 +7,12 @@ export function FilterBar() {
   // 任务关键字：在已选分类（进行中 / 已完成 / 全部）内再过滤
   const search = useStore((s) => s.searchMonitor)
   const setSearch = useStore((s) => s.setSearchMonitor)
-  const traderFilter = useStore((s) => s.traderFilter)
-  const setTraderFilter = useStore((s) => s.setTraderFilter)
   const mapFilter = useStore((s) => s.mapFilter)
   const setMapFilter = useStore((s) => s.setMapFilter)
+  const traderFilter = useStore((s) => s.traderFilter)
   const list = useStore((s) => s.playerQuests)
   const mapNames = useStore((s) => s.mapNames)
 
-  // 商人名按 id 换成统一的「中文名-英文名」展示；筛选值仍用 traderName
-  const traderIdByName = new Map<string, string>()
-  for (const q of list) {
-    if (q.traderName && q.traderId && !traderIdByName.has(q.traderName)) {
-      traderIdByName.set(q.traderName, q.traderId)
-    }
-  }
-  const traders = Array.from(new Set(list.map((q) => q.traderName).filter(Boolean))).sort()
   // 地图选项：来自任务自带的地图 id（显示中文名）
   const maps = useMemo(() => {
     const set = new Set<string>()
@@ -32,10 +22,12 @@ export function FilterBar() {
     )
   }, [list, mapNames])
 
+  // 分类计数：先按商人 tab 过滤（与右侧任务列表口径一致），再按状态统计
+  const counted = traderFilter ? list.filter((q) => q.traderName === traderFilter) : list
   const counts = {
-    in_progress: list.filter((q) => q.status === 'in_progress').length,
-    completed: list.filter((q) => q.status === 'completed').length,
-    all: list.length,
+    in_progress: counted.filter((q) => q.status === 'in_progress').length,
+    completed: counted.filter((q) => q.status === 'completed').length,
+    all: counted.length,
   }
 
   const chips = [
@@ -76,19 +68,6 @@ export function FilterBar() {
         {maps.map((m) => (
           <option key={m} value={m}>
             {mapNames[m] ?? m}
-          </option>
-        ))}
-      </select>
-      <select
-        value={traderFilter ?? ''}
-        onChange={(e) => setTraderFilter(e.target.value || null)}
-        className="bg-ink-800 border border-line text-[14px] rounded px-2 py-1.5 text-muted"
-        title="按商人筛选任务"
-      >
-        <option value="">全部商人</option>
-        {traders.map((t) => (
-          <option key={t} value={t}>
-            {traderDisplayName(traderIdByName.get(t) ?? '', t)}
           </option>
         ))}
       </select>
