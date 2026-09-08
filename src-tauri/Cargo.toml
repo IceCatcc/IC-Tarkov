@@ -37,14 +37,13 @@ tauri-plugin-barcode-scanner = "2"
 # std::fs 打不开，由前端用 plugin-fs 读取字节后传给 import_data_bytes
 tauri-plugin-fs = "2"
 
-# 局域网同步服务端（axum + tokio + 广播通道；if_addrs 枚举网卡 IP；rand 生成配对 token）。
+# 局域网同步服务端（axum + tokio + 广播通道；if_addrs 枚举网卡 IP）。
 # 仅电脑端需要：手机端是纯 WebSocket 客户端，不编译这套服务端依赖可显著缩小移动端 .so。
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
 futures-util = "0.3"
 if-addrs = "0.13"
-rand = "0.8"
 
 # rustc 1.98 在 Windows 上增量编译会触发 ICE（metadata encoder panic），禁用之
 [profile.dev]

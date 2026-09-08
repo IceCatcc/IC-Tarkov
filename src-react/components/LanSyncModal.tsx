@@ -1,18 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import * as QRCode from 'qrcode'
 import {
   startLanSync,
   stopLanSync,
   getConnectInfo,
-  getLanStatus,
   type ConnectInfo,
-  type LanStatus,
 } from '../tauri'
 
-/** 电脑端「同步」连接页：扫码让手机连接，实时跟随电脑端任务/地图。 */
+/** 电脑端「连接」页：扫码让手机连接（仅限一台），实时跟随电脑端任务/地图。 */
 export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [info, setInfo] = useState<ConnectInfo | null>(null)
-  const [status, setStatus] = useState<LanStatus | null>(null)
   const [qr, setQr] = useState<string>('')
   const [err, setErr] = useState<string>('')
 
@@ -20,9 +18,6 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
     getConnectInfo()
       .then(setInfo)
       .catch((e) => setErr(String(e)))
-    getLanStatus()
-      .then(setStatus)
-      .catch(() => {})
   }
 
   useEffect(() => {
@@ -41,30 +36,29 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
 
   useEffect(() => {
     if (!info) return
-    const url = `ictarkov://connect?hosts=${info.hosts.join(',')}&port=${info.port}&token=${encodeURIComponent(info.token)}`
+    const url = `ictarkov://connect?hosts=${info.hosts.join(',')}&port=${info.port}`
     QRCode.toDataURL(url)
       .then(setQr)
       .catch(() => setQr(''))
   }, [info])
 
-  // 手机端扫码连上后自动关闭本窗口：窗口打开时记录基线连接数，
-  // 一旦有「新连接」到达（连接数超过基线）即关闭窗口（服务保持运行，手机端不断连）。
-  // 用基线避免「重开后窗口内已有连接」被误判为新增而立刻关闭。
-  const baselineRef = useRef(0)
-  const baselinedRef = useRef(false)
-  useEffect(() => {
-    if (open) baselinedRef.current = false
-  }, [open])
+  // 手机端连上后自动关闭本窗口：服务端在连接建立时发 lan-client-connected 事件。
+  // 服务保持运行，手机端连接不会因此断开。
   useEffect(() => {
     if (!open) return
-    const n = status?.connections ?? 0
-    if (!baselinedRef.current) {
-      baselineRef.current = n
-      baselinedRef.current = true
-      return
+    let disposed = false
+    let off: (() => void) | undefined
+    listen('lan-client-connected', () => onClose())
+      .then((u) => {
+        if (disposed) u()
+        else off = u
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+      off?.()
     }
-    if (n > baselineRef.current) onClose()
-  }, [open, status?.connections, onClose])
+  }, [open, onClose])
 
   if (!open) return null
 
@@ -85,9 +79,9 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
           >
             ✕
           </button>
-          <div className="text-[17px] font-semibold text-[#e6edf3]">同步</div>
+          <div className="text-[17px] font-semibold text-[#e6edf3]">连接</div>
           <div className="mt-1 text-[13px] text-muted">
-            手机端 App 扫码即可连接，实时跟随本机的任务 / 地图 / 模式变化。
+            手机端 App 扫码即可连接（仅限一台设备），实时跟随本机的任务 / 地图 / 模式变化。
           </div>
         </div>
 
@@ -108,14 +102,6 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
             <div className="flex justify-between gap-2">
               <span className="shrink-0">端口</span>
               <span className="text-[#e6edf3] break-all">{info?.port ?? '—'}</span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="shrink-0">配对码</span>
-              <span className="text-[#e6edf3] break-all">{info?.token ?? '—'}</span>
-            </div>
-            <div className="flex justify-between gap-2">
-              <span className="shrink-0">已连接</span>
-              <span className="text-[#e6edf3]">{status?.connections ?? 0} 台</span>
             </div>
             <div>
               <div className="mb-1">可连接地址：</div>
@@ -145,7 +131,7 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
               onClose()
             }}
             className="px-3 py-1.5 rounded border border-[#5c2b2b] text-[13px] text-red-400 hover:bg-[#1a1214]"
-            title="停止同步服务，断开所有手机端"
+            title="停止同步服务，断开手机端"
           >
             停止服务
           </button>

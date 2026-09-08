@@ -134,7 +134,6 @@ function QrScanner({
 export function LanConnectModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [hosts, setHosts] = useState('')
   const [port, setPort] = useState('9527')
-  const [token, setToken] = useState('')
   const [status, setStatus] = useState<LanConnStatus>(getLanConnStatus())
   const [scanning, setScanning] = useState(false)
   const [scanMode, setScanMode] = useState(false)
@@ -222,11 +221,11 @@ export function LanConnectModal({ open, onClose }: { open: boolean; onClose: () 
       .map((x) => x.trim())
       .filter(Boolean)
     const p = Number(port)
-    if (!hostList.length || !p || !token.trim()) {
-      pushToast('请填写 IP、端口与配对码', 'info')
+    if (!hostList.length || !p) {
+      pushToast('请填写 IP 与端口', 'info')
       return
     }
-    startConnect({ hosts: hostList, port: p, token: token.trim() }, false)
+    startConnect({ hosts: hostList, port: p }, false)
   }
 
   const statusText =
@@ -258,7 +257,7 @@ export function LanConnectModal({ open, onClose }: { open: boolean; onClose: () 
           </button>
           <div className="text-[17px] font-semibold text-[#e6edf3]">连接到电脑端</div>
           <div className="mt-1 text-[13px] text-muted">
-            {scanMode ? '对准电脑端「同步」里的二维码' : '扫描电脑端「同步」里的二维码'}
+            {scanMode ? '对准电脑端「连接」里的二维码' : '扫描电脑端「连接」里的二维码'}
           </div>
         </div>
 
@@ -336,25 +335,14 @@ export function LanConnectModal({ open, onClose }: { open: boolean; onClose: () 
                       className="mt-1 w-full px-3 py-2 rounded-lg bg-ink-900 border border-line text-[13px] text-[#e6edf3] outline-none focus:border-amber/60"
                     />
                   </div>
-                  <div className="flex gap-3">
-                    <div className="flex-1">
-                      <label className="text-[13px] text-[#c9d1d9]">端口</label>
-                      <input
-                        value={port}
-                        onChange={(e) => setPort(e.target.value)}
-                        inputMode="numeric"
-                        className="mt-1 w-full px-3 py-2 rounded-lg bg-ink-900 border border-line text-[13px] text-[#e6edf3] outline-none focus:border-amber/60"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-[13px] text-[#c9d1d9]">配对码</label>
-                      <input
-                        value={token}
-                        onChange={(e) => setToken(e.target.value)}
-                        placeholder="电脑端显示的一串字符"
-                        className="mt-1 w-full px-3 py-2 rounded-lg bg-ink-900 border border-line text-[13px] text-[#e6edf3] outline-none focus:border-amber/60"
-                      />
-                    </div>
+                  <div>
+                    <label className="text-[13px] text-[#c9d1d9]">端口</label>
+                    <input
+                      value={port}
+                      onChange={(e) => setPort(e.target.value)}
+                      inputMode="numeric"
+                      className="mt-1 w-full px-3 py-2 rounded-lg bg-ink-900 border border-line text-[13px] text-[#e6edf3] outline-none focus:border-amber/60"
+                    />
                   </div>
                   <button
                     onClick={doManualConnect}

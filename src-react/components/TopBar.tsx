@@ -65,7 +65,6 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
   const [lanConn, setLanConn] = useState(getLanConnStatus())
 
   useEffect(() => onLanStatus(setLanConn), [])
-  const lanConnected = lanConn === 'connected'
 
   // 应用版本号（Tauri 运行时；开发环境取不到时静默留空）
   useEffect(() => {
@@ -163,29 +162,35 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
             {watcher.error}
           </span>
         )}
-        {/* 同步（做服务端）：仅桌面；手机端无意义 */}
+        {/* 连接（做服务端）：仅桌面；手机端无意义 */}
         {!mobile && (
           <button
             onClick={() => setLanOpen(true)}
-            title="同步：手机扫码连接，实时跟随电脑端"
+            title="连接：手机扫码连接本机，实时同步任务与地图"
             className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
           >
-            同步
+            连接
           </button>
         )}
-        {/* 连接到电脑（做客户端）：仅移动端；桌面无摄像头扫码场景 */}
+        {/* 连接（做客户端）：仅移动端；桌面无摄像头扫码场景。文本三态：连接/连接中/已连接 */}
         {mobile && (
           <button
             onClick={() => setConnectOpen(true)}
-            title={lanConnected ? '已连接电脑端，点击管理连接' : '扫码连接电脑端，实时跟随电脑'}
+            title={
+              lanConn === 'connected'
+                ? '已连接电脑端，点击管理连接'
+                : lanConn === 'connecting'
+                  ? '正在连接电脑端…'
+                  : '连接电脑端，实时跟随电脑'
+            }
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[12px] transition-colors ${
-              lanConnected
+              lanConn === 'connected'
                 ? 'border-ok/50 bg-ok/10 text-ok'
                 : 'border-line hover:bg-ink-700 text-[#e6edf3]'
             }`}
           >
-            {lanConnected && <span className="w-1.5 h-1.5 rounded-full bg-ok" />}
-            {lanConnected ? '已连接' : '连接电脑'}
+            {lanConn === 'connected' && <span className="w-1.5 h-1.5 rounded-full bg-ok" />}
+            {lanConn === 'connected' ? '已连接' : lanConn === 'connecting' ? '连接中' : '连接'}
           </button>
         )}
         <button

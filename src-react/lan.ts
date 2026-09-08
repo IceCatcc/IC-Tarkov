@@ -8,7 +8,8 @@
  *   调用后端 `applySnapshot` 写盘 + 载入内存 + 重启 watcher，再刷新前端 store。
  * 连接后先发 `{ type: "pull" }` 拉全量快照，之后持续收增量事件。
  *
- * 连接配置持久化到 localStorage，启动自动重连（指数退避），重连失败仅轻量提示不阻塞。
+ * 连接配置持久化到 localStorage，启动自动重连（指数退避）；重连全程静默，
+ * 连接状态仅由「连接」按钮文本（连接/连接中/已连接）体现。
  */
 import { emit } from '@tauri-apps/api/event'
 import { useStore } from './store'
@@ -23,7 +24,8 @@ import {
 export interface ParsedConnect {
   hosts: string[]
   port: number
-  token: string
+  /** 旧版二维码可能带配对码；新版服务端已不校验，保留仅为兼容 */
+  token?: string
 }
 
 const STORE_KEY = 'ic-tarkov.lanConnect.v1'
@@ -33,9 +35,6 @@ export type LanConnStatus = 'disconnected' | 'connecting' | 'connected'
 let ws: WebSocket | null = null
 let status: LanConnStatus = 'disconnected'
 let autoConnect = false
-// 本次会话是否成功连上过：断线重连提示只在此为真时弹出。
-// 软件刚启动就重连失败（电脑端没开）属于常态，静默处理不弹提示。
-let everConnected = false
 let current: ParsedConnect | null = null
 let retryTimer: ReturnType<typeof setTimeout> | undefined
 let retries = 0
@@ -94,7 +93,7 @@ export function loadLanConnect(): ParsedConnect | null {
     const v = localStorage.getItem(STORE_KEY)
     if (v) {
       const p = JSON.parse(v) as ParsedConnect
-      if (p && Array.isArray(p.hosts) && p.port && p.token) return p
+      if (p && Array.isArray(p.hosts) && p.port) return p
     }
   } catch {
     /* ignore */
@@ -124,7 +123,7 @@ export function parseConnectUrl(raw: string): ParsedConnect | null {
     .filter(Boolean)
   const port = Number(q.get('port') || '')
   const token = q.get('token') || ''
-  if (hosts.length && port > 0 && token) return { hosts, port, token }
+  if (hosts.length && port > 0) return { hosts, port, token: token || undefined }
   return null
 }
 
@@ -159,9 +158,10 @@ export function disconnectLan(): void {
   setStatus('disconnected')
 }
 
-function tryConnectOne(host: string, port: number, token: string): Promise<WebSocket> {
+function tryConnectOne(host: string, port: number, token?: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const url = `ws://${host}:${port}/ws?token=${encodeURIComponent(token)}`
+    const qs = token ? `?token=${encodeURIComponent(token)}` : ''
+    const url = `ws://${host}:${port}/ws${qs}`
     let sock: WebSocket
     try {
       sock = new WebSocket(url)
@@ -210,7 +210,6 @@ export async function connectLan(c: ParsedConnect, opts?: { auto?: boolean }): P
   }
   ws = sock
   retries = 0
-  everConnected = true
   setStatus('connected')
   startHeartbeat(sock)
   useStore.getState().pushToast('已连接到电脑端', 'done')
@@ -237,13 +236,10 @@ export async function connectLan(c: ParsedConnect, opts?: { auto?: boolean }): P
 }
 
 function scheduleRetry(c: ParsedConnect): void {
-  // 无限重连（指数退避，封顶 30s）：同步应持续自动恢复
+  // 无限重连（指数退避，封顶 30s）：同步应持续自动恢复。
+  // 重连过程完全静默，状态由「连接」按钮文本（连接/连接中/已连接）体现。
   retries += 1
   const delay = Math.min(30000, 2000 * 2 ** (retries - 1))
-  // 仅「曾连上后断线」才提示；软件启动时的首次重连失败（电脑端未开）保持静默
-  if (retries === 1 && everConnected) {
-    useStore.getState().pushToast('与电脑端连接断开，正在自动重连…', 'info')
-  }
   retryTimer = setTimeout(() => {
     void connectLan(c, { auto: true })
   }, delay)

@@ -379,7 +379,6 @@ export async function getMapsSkeleton(): Promise<SkeletonDoc> {
 export interface ConnectInfo {
   hosts: string[]
   port: number
-  token: string
 }
 
 export interface LanStatus {
@@ -403,7 +402,7 @@ export async function getLanStatus(): Promise<LanStatus> {
   return await invoke<LanStatus>('get_lan_status')
 }
 
-/** 本机可连接 IP + 端口 + 配对 token（用于渲染二维码） */
+/** 本机可连接 IP + 端口（用于渲染二维码） */
 export async function getConnectInfo(): Promise<ConnectInfo> {
   return await invoke<ConnectInfo>('get_connect_info')
 }

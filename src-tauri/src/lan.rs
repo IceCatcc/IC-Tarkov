@@ -1,10 +1,12 @@
 //! 同步：电脑端本地 HTTP/WebSocket 服务（移动端作为 WS 客户端连接）。
 //!
 //! 路由：
-//! - `GET /ws?token=<t>` ：升级 WebSocket，双向通道。实时把后端事件转发给手机端；
+//! - `GET /ws`           ：升级 WebSocket，双向通道。实时把后端事件转发给手机端；
 //!   手机端可发指令：`{"type":"pull"}` 拉全量快照、`{"type":"refresh"}` 请求刷新。
+//!   单设备限制：新连接会顶掉旧连接。连接建立时发 `lan-client-connected` 事件，
+//!   电脑端「连接」窗口据此自动关闭。
 //! - `GET /api/snapshot` ：返回全量用户数据快照（settings + Persisted，已丢弃 offsets）。
-//! - `GET /api/info`     ：返回本机可连接 IP 列表 + 端口 + token，供渲染二维码。
+//! - `GET /api/info`     ：返回本机可连接 IP 列表 + 端口，供渲染二维码。
 //!
 //! 事件桥接在 `lib.rs` 的 `setup` 中通过 `app.listen` 订阅现有 Tauri 事件并 `send` 到
 //! 广播通道，watcher/screenshots 零改动。手机端连上后先 `pull` 拿全量，再持续收增量事件。
@@ -13,7 +15,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::extract::{State, WebSocketUpgrade};
 use axum::extract::ws::{Message, WebSocket};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -33,16 +35,14 @@ const BROADCAST_CAP: usize = 1024;
 
 /// 全局 LAN 服务状态，由 `lib.rs::setup` 中 manage。
 pub struct LanState {
-    pub token: Mutex<String>,
     pub port: Mutex<u16>,
     pub broadcast_tx: Mutex<Option<broadcast::Sender<String>>>,
     pub server: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
 
 impl LanState {
-    pub fn new(token: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            token: Mutex::new(token),
             port: Mutex::new(DEFAULT_PORT),
             broadcast_tx: Mutex::new(None),
             server: Mutex::new(None),
@@ -50,11 +50,19 @@ impl LanState {
     }
 }
 
+/// 活跃连接登记（单设备限制）：新连接顶掉旧连接。
+#[derive(Default)]
+struct ActiveConn {
+    next_id: u64,
+    /// (连接代次, 关闭通知通道)：向该通道发 () 即让对应旧连接退出
+    current: Option<(u64, tokio::sync::mpsc::UnboundedSender<()>)>,
+}
+
 /// 传给 axum handler 的共享上下文
 struct ServerCtx {
-    token: String,
     tx: broadcast::Sender<String>,
     app: AppHandle,
+    active: Arc<Mutex<ActiveConn>>,
 }
 
 /// `/api/info` 与 `get_connect_info` 返回结构
@@ -63,7 +71,6 @@ struct ServerCtx {
 pub struct ConnectInfo {
     pub hosts: Vec<String>,
     pub port: u16,
-    pub token: String,
 }
 
 /// `get_lan_status` 返回结构
@@ -83,19 +90,7 @@ pub struct Snapshot {
     pub persisted: Persisted,
 }
 
-#[derive(Deserialize)]
-struct WsQuery {
-    token: String,
-}
-
 // ---------------- 工具 ----------------
-
-/// 生成 4 位数字配对码（0000-9999）。局域网内使用，短码便于手动输入
-fn generate_token() -> String {
-    use rand::Rng;
-    let n: u32 = rand::thread_rng().gen_range(0..10000);
-    format!("{:04}", n)
-}
 
 /// 枚举本机非回环 IPv4 地址，供手机端逐个尝试连接
 fn local_ipv4_hosts() -> Vec<String> {
@@ -124,12 +119,10 @@ fn find_free_port(start: u16) -> u16 {
 }
 
 fn build_connect_info(state: &LanState) -> ConnectInfo {
-    let token = state.token.lock().unwrap().clone();
     let port = *state.port.lock().unwrap();
     ConnectInfo {
         hosts: local_ipv4_hosts(),
         port,
-        token,
     }
 }
 
@@ -144,11 +137,10 @@ fn build_snapshot(app: &AppHandle) -> Result<String, String> {
 
 // ---------------- setup（由 lib.rs 的 run() 调用） ----------------
 
-/// 在 app setup 阶段：生成 token + 广播通道，订阅现有事件桥接到广播。
+/// 在 app setup 阶段：建广播通道，订阅现有事件桥接到广播。
 pub fn setup_lan(app: &mut tauri::App) {
-    let token = generate_token();
     let (tx, _rx) = broadcast::channel::<String>(BROADCAST_CAP);
-    let lan = LanState::new(token);
+    let lan = LanState::new();
     *lan.broadcast_tx.lock().unwrap() = Some(tx.clone());
     app.manage(lan);
 
@@ -176,18 +168,7 @@ pub fn setup_lan(app: &mut tauri::App) {
 
 // ---------------- HTTP handlers ----------------
 
-async fn ws_handler(
-    State(ctx): State<Arc<ServerCtx>>,
-    Query(q): Query<WsQuery>,
-    ws: WebSocketUpgrade,
-) -> Response {
-    if q.token != ctx.token {
-        return (
-            axum::http::StatusCode::UNAUTHORIZED,
-            "invalid token",
-        )
-            .into_response();
-    }
+async fn ws_handler(State(ctx): State<Arc<ServerCtx>>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, ctx))
 }
 
@@ -208,7 +189,21 @@ async fn info_handler(State(ctx): State<Arc<ServerCtx>>) -> axum::Json<ConnectIn
 }
 
 async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
-    eprintln!("[lan] 客户端接入，当前连接数 {}", ctx.tx.receiver_count());
+    // 单设备：登记本连接并顶掉旧连接（旧连接收到关闭通知后自行退出）
+    let (close_tx, mut close_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let my_id = {
+        let mut a = ctx.active.lock().unwrap();
+        if let Some((_, prev)) = a.current.take() {
+            let _ = prev.send(());
+        }
+        let id = a.next_id;
+        a.next_id += 1;
+        a.current = Some((id, close_tx));
+        id
+    };
+    eprintln!("[lan] 客户端接入（id {my_id}）");
+    // 通知前端有设备连上：电脑端「连接」窗口据此自动关闭
+    let _ = ctx.app.emit("lan-client-connected", ());
     let mut rx = ctx.tx.subscribe();
     let (mut sender, mut receiver) = socket.split();
     // 手机端 pull 指令的单播回包通道（与广播事件复用同一条 socket 出站）
@@ -240,7 +235,7 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
     });
 
     // 入站：手机端指令。90s 无任何消息视为死连接（客户端每 25s 有心跳），
-    // 主动断开以回收资源并让「已连接数」正确回落。
+    // 主动断开以回收资源；被新连接顶掉时也会收到关闭通知而退出。
     let app = ctx.app.clone();
     let recv_task = tauri::async_runtime::spawn(async move {
         loop {
@@ -249,6 +244,10 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
             let res = tokio::select! {
                 _ = &mut idle => {
                     eprintln!("[lan] 客户端 90s 无活动，断开");
+                    break;
+                }
+                _ = close_rx.recv() => {
+                    eprintln!("[lan] 被新连接顶掉，断开旧连接");
                     break;
                 }
                 msg = receiver.next() => msg,
@@ -348,6 +347,13 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
         Either::Left((_, recv)) => recv.abort(),
         Either::Right((_, send)) => send.abort(),
     }
+    // 连接结束：仅当登记的仍是本连接时清除（避免误清后来新连接的登记）
+    {
+        let mut a = ctx.active.lock().unwrap();
+        if a.current.as_ref().map(|(id, _)| *id) == Some(my_id) {
+            a.current = None;
+        }
+    }
     eprintln!("[lan] 客户端断开，当前连接数 {}", ctx.tx.receiver_count());
 }
 
@@ -373,7 +379,6 @@ pub async fn start_lan_sync(app: AppHandle) -> Result<(), String> {
             return Ok(());
         }
     }
-    let token = lan.token.lock().unwrap().clone();
     let tx = lan
         .broadcast_tx
         .lock()
@@ -384,9 +389,9 @@ pub async fn start_lan_sync(app: AppHandle) -> Result<(), String> {
     *lan.port.lock().unwrap() = port;
 
     let ctx = Arc::new(ServerCtx {
-        token,
         tx,
         app: app.clone(),
+        active: Arc::new(Mutex::new(ActiveConn::default())),
     });
     let router = build_router(ctx);
 
