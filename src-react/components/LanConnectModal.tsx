@@ -217,7 +217,7 @@ export function LanConnectModal({ open, onClose }: { open: boolean; onClose: () 
           </button>
           <div className="text-[17px] font-semibold text-[#e6edf3]">连接到电脑端</div>
           <div className="mt-1 text-[13px] text-muted">
-            {scanMode ? '对准电脑端「局域网同步」里的二维码' : '扫描电脑端「局域网同步」里的二维码'}
+            {scanMode ? '对准电脑端「同步」里的二维码' : '扫描电脑端「同步」里的二维码'}
           </div>
         </div>
 

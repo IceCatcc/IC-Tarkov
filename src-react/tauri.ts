@@ -50,7 +50,7 @@ export async function initTauri(): Promise<UnlistenFn> {
       setWatcher(e.payload)
     }),
   )
-  // 局域网同步：电脑端的收藏进度 / 档案变化（本机操作的后端事件回声为同值，无害）
+  // 同步：电脑端的收藏进度 / 档案变化（本机操作的后端事件回声为同值，无害）
   track(
     await listen<string[]>('collected-changed', (e) => {
       useStore.getState().setCollectedItems(e.payload)
@@ -368,7 +368,7 @@ export async function getMapsSkeleton(): Promise<SkeletonDoc> {
   return await invoke<SkeletonDoc>('get_maps_skeleton')
 }
 
-/* ================= 局域网同步（电脑端本地服务） ================= */
+/* ================= 同步（电脑端本地服务） ================= */
 
 export interface ConnectInfo {
   hosts: string[]

@@ -149,14 +149,14 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
             {watcher.error}
           </span>
         )}
-        {/* 局域网同步（做服务端）：仅桌面；手机端无意义 */}
+        {/* 同步（做服务端）：仅桌面；手机端无意义 */}
         {!mobile && (
           <button
             onClick={() => setLanOpen(true)}
-            title="局域网同步：手机扫码连接，实时跟随电脑端"
+            title="同步：手机扫码连接，实时跟随电脑端"
             className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
           >
-            局域网同步
+            同步
           </button>
         )}
         {/* 连接到电脑（做客户端）：仅移动端；桌面无摄像头扫码场景 */}

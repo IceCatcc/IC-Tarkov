@@ -9,7 +9,7 @@ import {
   type LanStatus,
 } from '../tauri'
 
-/** 电脑端「局域网同步」连接页：扫码让手机连接，实时跟随电脑端任务/地图。 */
+/** 电脑端「同步」连接页：扫码让手机连接，实时跟随电脑端任务/地图。 */
 export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [info, setInfo] = useState<ConnectInfo | null>(null)
   const [status, setStatus] = useState<LanStatus | null>(null)
@@ -66,7 +66,7 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
           >
             ✕
           </button>
-          <div className="text-[17px] font-semibold text-[#e6edf3]">局域网同步</div>
+          <div className="text-[17px] font-semibold text-[#e6edf3]">同步</div>
           <div className="mt-1 text-[13px] text-muted">
             手机端 App 扫码即可连接，实时跟随本机的任务 / 地图 / 模式变化。
           </div>
@@ -126,7 +126,7 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
               onClose()
             }}
             className="px-3 py-1.5 rounded border border-[#5c2b2b] text-[13px] text-red-400 hover:bg-[#1a1214]"
-            title="停止局域网同步服务，断开所有手机端"
+            title="停止同步服务，断开所有手机端"
           >
             停止服务
           </button>

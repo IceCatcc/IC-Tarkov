@@ -1,4 +1,4 @@
-# IC Tarkov 移动端（局域网同步）实施计划
+# IC Tarkov 移动端（同步）实施计划
 
 > 分支：`feat/mobile-lan-sync`
 > 目标：让安卓/iOS 端作为「查阅 / 规划」伴随端，通过局域网连接电脑端，实时接收监控事件并同步数据。
@@ -37,7 +37,7 @@
 
 ## 2. 设计点评估结论（已确认）
 
-### 2.1 局域网同步方案 —— 可行
+### 2.1 同步方案 —— 可行
 - 电脑端嵌入 `axum` + `tokio-tungstenite`，用 `tauri::async_runtime::spawn` 启动（Tauri 2 自带 tokio）。
 - 事件桥接在 `setup` 用 `app.listen(...)` 订阅现有事件并转发到 `broadcast::channel`，**`watcher.rs` / `screenshots.rs` 零改动**。
 - 手机端前端用浏览器原生 `WebSocket` 直连，Rust 改动最小（仅持久化连接配置）。

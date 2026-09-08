@@ -34,7 +34,7 @@ export default function App() {
   // 避免两个浮层同时出现、设置窗口盖住帮助窗口。
   const pendingOpenSettings = useRef(false)
   const [showAbout, setShowAbout] = useState(false)
-  // 局域网同步：手机端未连接时自动弹出的连接视图
+  // 同步：手机端未连接时自动弹出的连接视图
   const [showConnect, setShowConnect] = useState(false)
   const closeHelp = () => {
     try {
@@ -124,7 +124,7 @@ export default function App() {
     }
   }, [setWatcher, setSettings, seedPlayerQuests, setUnlockedQuests])
 
-  // 局域网同步（手机端）：启动自动重连已保存的电脑端；监听快照应用后刷新本地数据；
+  // 同步（手机端）：启动自动重连已保存的电脑端；监听快照应用后刷新本地数据；
   // 移动端若尚无保存的连接配置，自动弹出连接视图引导扫码/输入。
   useEffect(() => {
     let off: (() => void) | undefined

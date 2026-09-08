@@ -1,4 +1,4 @@
-//! 局域网同步：电脑端本地 HTTP/WebSocket 服务（移动端作为 WS 客户端连接）。
+//! 同步：电脑端本地 HTTP/WebSocket 服务（移动端作为 WS 客户端连接）。
 //!
 //! 路由：
 //! - `GET /ws?token=<t>` ：升级 WebSocket，双向通道。实时把后端事件转发给手机端；

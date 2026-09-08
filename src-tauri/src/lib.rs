@@ -325,7 +325,7 @@ fn save_settings(
         s.ui_prefs.extend(u);
     }
     write_settings(&app, &s)?;
-    // 档案变化广播给局域网同步的手机端
+    // 档案变化广播给同步的手机端
     if profile_changed {
         let _ = app.emit("profile-changed", &s.profile);
     }
@@ -607,7 +607,7 @@ fn set_item_collected(
         c.iter().cloned().collect::<Vec<String>>()
     };
     persist::save_collected(&app, &all);
-    // 广播给局域网同步的手机端（桌面前端自身已就地更新，重复设置同值无害）
+    // 广播给同步的手机端（桌面前端自身已就地更新，重复设置同值无害）
     let _ = app.emit("collected-changed", &all);
     all
 }
@@ -1134,7 +1134,7 @@ pub fn run() {
             if st.stale && has_cache {
                 spawn_sync(handle, false);
             }
-            // 局域网同步：生成 token + 广播通道，并把现有事件桥接到广播（供手机端 WS 订阅）
+            // 同步：生成 token + 广播通道，并把现有事件桥接到广播（供手机端 WS 订阅）
             crate::lan::setup_lan(app);
             Ok(())
         })

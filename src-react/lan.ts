@@ -1,5 +1,5 @@
 /**
- * 局域网同步：手机端（前端）WebSocket 客户端。
+ * 同步：手机端（前端）WebSocket 客户端。
  *
  * 连接电脑端本地服务（P1 的 axum 服务），约定协议：
  * - 收到 `{ type: "event", event, payload }`：把后端事件重新派发为本地 Tauri 事件，
@@ -233,7 +233,7 @@ export async function connectLan(c: ParsedConnect, opts?: { auto?: boolean }): P
 }
 
 function scheduleRetry(c: ParsedConnect): void {
-  // 无限重连（指数退避，封顶 30s）：局域网同步应持续自动恢复
+  // 无限重连（指数退避，封顶 30s）：同步应持续自动恢复
   retries += 1
   const delay = Math.min(30000, 2000 * 2 ** (retries - 1))
   if (retries === 1) {

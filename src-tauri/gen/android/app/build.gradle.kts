@@ -17,7 +17,7 @@ android {
     compileSdk = 36
     namespace = "com.icecat.ictarkov"
     defaultConfig {
-        // 局域网同步用 ws:// 明文（连接电脑端），release 也需放行
+        // 同步用 ws:// 明文（连接电脑端），release 也需放行
         manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "com.icecat.ictarkov"
         minSdk = 24
