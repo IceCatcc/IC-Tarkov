@@ -151,6 +151,30 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     border: 1px solid rgba(255, 255, 255, 0.25);
     text-shadow: none;
 }
+/* 撤离点名称后的内联小图标（开关 / 物品如纸条、卢布） */
+.extract-req-icon-wrap {
+    display: inline-block;
+    margin-left: 4px;
+    vertical-align: middle;
+    user-select: none;
+    pointer-events: auto;
+}
+.extract-req-icon {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    vertical-align: -3px;
+    /* 描边：8 向 drop-shadow 合成一圈轮廓，颜色跟随所属撤离点的字体色（--req-outline） */
+    filter:
+        drop-shadow(1px 0 0 var(--req-outline, rgba(0, 0, 0, 0.95))) drop-shadow(-1px 0 0 var(--req-outline, rgba(0, 0, 0, 0.95)))
+        drop-shadow(0 1px 0 var(--req-outline, rgba(0, 0, 0, 0.95))) drop-shadow(0 -1px 0 var(--req-outline, rgba(0, 0, 0, 0.95)));
+}
+svg.extract-req-icon {
+    color: #9ec5ff; /* 开关图标：蓝，与原 req-switch 配色一致 */
+}
+img.extract-req-icon {
+    border-radius: 4px;
+}
 .req-coop { background: rgba(188, 140, 255, 0.22); color: #d9b8ff; border-color: rgba(188, 140, 255, 0.6); }
 .req-flare { background: rgba(255, 99, 99, 0.20); color: #ff9b9b; border-color: rgba(255, 99, 99, 0.6); }
 .req-pay { background: rgba(240, 180, 80, 0.20); color: #ffcf80; border-color: rgba(240, 180, 80, 0.6); }

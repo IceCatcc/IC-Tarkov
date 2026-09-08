@@ -8,7 +8,7 @@
     "tauri:build": "tauri build",
     "tauri:build:nobundle": "tauri build --no-bundle",
     "tauri:android": "tauri android build --apk --target aarch64 && node scripts/sign-apk.mjs",
-    "tauri:android:dev": "tauri android dev",
+    "tauri:android:dev": "tauri android dev -- 127.0.0.1:7555  --host 0.0.0.0",
     "react:dev": "vite",
     "react:build": "tsc && vite build",
     "react:build:fast": "vite build",

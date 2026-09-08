@@ -9,8 +9,10 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
-    hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
+    // 默认监听所有网卡(0.0.0.0)，确保走虚拟网卡的安卓模拟器(MuMu 等)能访问开发服务器；
+    // 若 tauri android dev 通过 TAURI_DEV_HOST 指定了具体 IP，则优先监听该 IP，HMR 也指向它。
+    host: host || '0.0.0.0',
+    hmr: host && host !== '0.0.0.0' ? { protocol: 'ws', host, port: 1421 } : undefined,
     watch: { ignored: ['**/src-tauri/**'] },
   },
   build: {

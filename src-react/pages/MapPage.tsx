@@ -24,8 +24,7 @@ import type {
   QuestZonesDoc,
   MapBossesDoc,
 } from '../types'
-import { useStore, useTopPad } from '../store'
-import { isMobile } from '../platform'
+import { useStore } from '../store'
 import { QuestCard } from '../components/QuestCard'
 import { bossImage } from '../bossImages'
 
@@ -181,6 +180,28 @@ function reqHtml(r: Requirement): string {
   return reqText(r)
 }
 
+/**
+ * 撤离点名称后的内联小图标（HTML）：
+ * - switch：开关图标（SVG）
+ * - 带 itemId 的要求（卢布付费 / 纸条等）：物品图标
+ * 返回 null 表示该要求无图标，落到名称下方的文字标签。
+ */
+function extractReqIconHtml(r: Requirement): string | null {
+  if (r.type === 'switch') {
+    return (
+      '<svg class="extract-req-icon" viewBox="0 0 24 24" fill="none" aria-hidden>' +
+      '<rect x="2.5" y="7" width="19" height="10" rx="5" stroke="currentColor" stroke-width="2.6"/>' +
+      '<circle cx="15.5" cy="12" r="3.6" fill="currentColor"/>' +
+      '</svg>'
+    )
+  }
+  if (r.itemId) {
+    const nm = r.name ?? r.value ?? ''
+    return `<img class="extract-req-icon extract-req-item" src="/item-icons/${r.itemId}.webp" alt="" title="${nm}"/>`
+  }
+  return null
+}
+
 type ChipKey =
   | 'quests'
   | 'extract_pmc'
@@ -313,8 +334,6 @@ export function MapPage() {
   const [qzDoc, setQzDoc] = useState<QuestZonesDoc | null>(null)
   const [bossDoc, setBossDoc] = useState<MapBossesDoc | null>(null)
   const [loadErr, setLoadErr] = useState('')
-  // 侧边栏折叠时，顶部工具条为左上角浮动按钮预留空位
-  const topPad = useTopPad()
   const [selected, setSelected] = useState<string>(() => useStore.getState().currentMap ?? 'factory')
   const autoZoomMap = useStore((s) => s.autoZoomMap)
   const setAutoZoomMap = useStore((s) => s.setAutoZoomMap)
@@ -331,10 +350,9 @@ export function MapPage() {
   const [floorOpen, setFloorOpen] = useState(false) // 层级切换浮层
   const [mapMenuOpen, setMapMenuOpen] = useState(false) // 左下角地图选单浮层
   const [tasksOpen, setTasksOpen] = useState(false) // 右下角任务浮窗
-  const [infoOpen, setInfoOpen] = useState(false) // 右下角地图信息浮窗
-  const [focusOpen, setFocusOpen] = useState(false) // 工具栏「自动聚焦」展开面板
-  const [chipsOpen, setChipsOpen] = useState(false) // 移动端「标记」浮动选单（左下角）
-  const mobile = isMobile()
+  const [infoOpen, setInfoOpen] = useState(true) // 右下角地图信息浮窗（默认展开）
+  const [focusOpen, setFocusOpen] = useState(false) // 左下角「聚焦」浮动按钮展开面板
+  const [chipsOpen, setChipsOpen] = useState(false) // 左下角「标记」浮动选单
 
   const [cursorCoord, setCursorCoord] = useState<{ x: number; z: number } | null>(null)
   // 三个浮窗（地图选单/任务/层级）的容器 ref：点击外部自动关闭
@@ -824,15 +842,27 @@ export function MapPage() {
           coordMeta(en),
         ),
       )
-      // 永久标签：名称（按阵营配色）+ 撤离要求小标签，无需点击即可见
+      // 永久标签：名称（按阵营配色）+ 名称后的小图标（开关/物品），其余要求以小标签显示在下方
       const wrap = document.createElement('div')
       wrap.className = 'extract-label'
       const nameEl = document.createElement('div')
       nameEl.className = 'extract-name'
       nameEl.textContent = en.nameZh ?? en.name ?? ''
       nameEl.style.color = color
+      // 图标描边与字体同色（按阵营）：CSS 里用 var(--req-outline) 合成描边
+      nameEl.style.setProperty('--req-outline', color)
+      for (const r of reqs) {
+        const iconHtml = extractReqIconHtml(r)
+        if (iconHtml) {
+          const holder = document.createElement('span')
+          holder.className = 'extract-req-icon-wrap'
+          holder.innerHTML = iconHtml
+          nameEl.appendChild(holder)
+        }
+      }
       wrap.appendChild(nameEl)
       for (const r of reqs) {
+        if (r.type === 'switch' || r.itemId) continue
         const chip = document.createElement('span')
         chip.className = `extract-req ${reqClass(r)}`
         chip.textContent = reqText(r)
@@ -1145,71 +1175,11 @@ export function MapPage() {
 
   return (
     <div className="h-full flex flex-col bg-ink-900">
-      {/* 工具条（地图选单在左上角任务按钮右侧） */}
-      <div
-        className="shrink-0 flex items-center flex-wrap gap-x-3 gap-y-1 px-3 py-2 border-b border-line bg-ink-800"
-        style={{ paddingLeft: 12 + topPad }}
-      >
-        {/* 标记开关：桌面端在工具条；移动端收进左下角浮动选单 */}
-        {!mobile && (
-          <div className="flex items-center gap-1 flex-wrap">
-            {CHIP_DEFS.map((c) => (
-              <button
-                key={c.key}
-                onClick={() => setMapChip(c.key, !chips[c.key])}
-                className={`px-2 py-[3px] rounded text-[13px] border ${
-                  chips[c.key]
-                    ? 'border-amber text-[#d4a174] bg-amber/10'
-                    : 'border-line text-muted hover:text-[#e6edf3]'
-                }`}
-              >
-                {c.label}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="flex-1" />
-        {/* 自动聚焦：桌面端在工具条；移动端收进左下角浮动选单 */}
-        {!mobile && (
-        <div className="relative shrink-0" ref={focusRef} onMouseDown={(e) => e.stopPropagation()}>
-          <button
-            onClick={() => setFocusOpen((v) => !v)}
-            title="自动聚焦：定位后自动居中地图（可选自动缩放）"
-            className={`flex items-center gap-1.5 px-2 py-[3px] rounded text-[13px] border ${
-              autoCenter
-                ? 'border-amber text-[#d4a174] bg-amber/10'
-                : 'border-line text-muted hover:text-[#e6edf3]'
-            }`}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <circle cx="11" cy="11" r="6.4" stroke="currentColor" strokeWidth="1.8" />
-              <path
-                d="M20 20l-4.4-4.4M11 8.4v5.2M8.4 11h5.2"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              />
-            </svg>
-            自动聚焦
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden className={`transition-transform ${focusOpen ? 'rotate-180' : ''}`}>
-              <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          {focusOpen && (
-            <div className="absolute right-0 top-[calc(100%+6px)] z-[700] w-60 rounded-md border border-line bg-ink-800 p-3 shadow-lg shadow-black/40">
-              {focusBody}
-            </div>
-          )}
-        </div>
-        )}
-      </div>
-
       {/* 地图区 */}
       <div className="relative flex-1 min-h-0">
         <div id={mapDivId} className="absolute inset-0" />
-        {/* 标记开关浮动选单：移动端左下角 */}
-        {mobile && (
-          <div className="absolute left-3 bottom-3 z-[600] flex flex-col items-start gap-2">
+        {/* 标记开关浮动选单：左下角（桌面与移动端共用） */}
+        <div className="absolute left-3 bottom-3 z-[600] flex flex-col items-start gap-2">
             {chipsOpen && (
               <div className="flex flex-col gap-1 p-2 rounded-md border border-line bg-ink-800/90 shadow-lg backdrop-blur-sm">
                 {CHIP_DEFS.map((c) => (
@@ -1227,25 +1197,6 @@ export function MapPage() {
                 ))}
               </div>
             )}
-            {focusOpen && (
-              <div className="w-60 rounded-md border border-line bg-ink-800 p-3 shadow-lg shadow-black/40">
-                {focusBody}
-              </div>
-            )}
-            <button
-              onClick={() => {
-                setFocusOpen((v) => !v)
-                setChipsOpen(false)
-              }}
-              title="自动聚焦：定位后自动居中地图（可选自动缩放）"
-              className={`px-2.5 py-1.5 rounded border bg-ink-800/80 shadow-lg text-[13px] transition-colors ${
-                focusOpen
-                  ? 'border-amber text-[#d4a174] bg-amber/10'
-                  : 'border-line text-[#e6edf3] hover:border-amber/70'
-              }`}
-            >
-              聚焦
-            </button>
             <button
               onClick={() => {
                 setFocusOpen(false)
@@ -1260,11 +1211,34 @@ export function MapPage() {
             >
               标记 {chipsOpen ? '▾' : '▴'}
             </button>
+        </div>
+        {/* 右上角浮动按钮组：聚焦 + 层级切换 */}
+        <div className="absolute right-3 top-3 z-[600] flex items-start gap-1.5">
+          {/* 聚焦（层级切换左侧） */}
+          <div ref={focusRef} className="relative flex flex-col items-end gap-1.5">
+            <button
+              onClick={() => {
+                setFocusOpen((v) => !v)
+                setChipsOpen(false)
+              }}
+              title="自动聚焦：定位后自动居中地图（可选自动缩放）"
+              className={`px-2.5 py-1.5 rounded border bg-ink-800/80 shadow-lg text-[13px] transition-colors ${
+                focusOpen
+                  ? 'border-amber text-[#d4a174] bg-amber/10'
+                  : 'border-line text-[#e6edf3] hover:border-amber/70'
+              }`}
+            >
+              聚焦
+            </button>
+            {focusOpen && (
+              <div className="w-60 rounded-md border border-line bg-ink-800 p-3 shadow-lg shadow-black/40">
+                {focusBody}
+              </div>
+            )}
           </div>
-        )}
-        {/* 层级切换：地图右上浮动按钮（tarkov.dev 风格，自定义非原生组件） */}
-        {floors.length > 0 && (
-          <div ref={floorRef} className="absolute right-3 top-3 z-[600] flex flex-col items-end gap-1.5">
+          {/* 层级切换：地图右上浮动按钮（tarkov.dev 风格，自定义非原生组件） */}
+          {floors.length > 0 && (
+          <div ref={floorRef} className="flex flex-col items-end gap-1.5">
             <button
               onClick={() => setFloorOpen((o) => !o)}
               title="切换地图层级"
@@ -1315,7 +1289,8 @@ export function MapPage() {
               </div>
             )}
           </div>
-        )}
+          )}
+        </div>
 
         {/* 左上角浮窗行：任务 + 地图选单 */}
         <div

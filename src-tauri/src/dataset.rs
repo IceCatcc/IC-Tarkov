@@ -627,16 +627,18 @@ fn entry_val(e: &Value, raw: &Raw) -> Value {
     Value::Object(m)
 }
 
-/// 撤离要求：开关 / 付费 / 提交物品
-fn extract_requirements(x: &Value, zh_items: &HashMap<String, String>) -> Vec<Value> {
+/// 撤离要求：开关 / 付费 / 提交物品。
+/// `ignore_switch`：上游脏数据兜底——整张图所有撤离点共用同一个开关 id 时传 true，
+/// 一律视为不需要开关（2026-09 起 json.tarkov.dev 曾把海关/实验室全部撤离点填成同一开关 id）。
+fn extract_requirements(x: &Value, zh_items: &HashMap<String, String>, ignore_switch: bool) -> Vec<Value> {
     let mut reqs: Vec<Value> = Vec::new();
     // switch 字段可能是布尔，也可能是开关 id（非空字符串），两者都表示「需要先开开关」
-    let needs_switch = match x.get("switch") {
-        Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => !s.is_empty(),
-        Some(v) => !v.is_null(),
-        None => false,
-    };
+    let needs_switch = !ignore_switch
+        && match x.get("switch") {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::String(s)) => !s.is_empty(),
+            _ => false,
+        };
     if needs_switch {
         reqs.push(serde_json::json!({ "type": "switch", "value": null }));
     }
@@ -684,7 +686,21 @@ fn build_markers(raw: &Raw, map_meta: &HashMap<String, MapEntry>) -> Value {
             .unwrap_or_else(|| nn.clone());
         let mut out = Map::new();
 
-        let extracts: Vec<Value> = arr(m, "extracts")
+        let extracts_raw = arr(m, "extracts");
+        // 上游脏数据兜底：所有撤离点共用同一个非空 switch 值时，视为无效（真实开关只作用于个别撤离点）
+        let mut switch_vals: Vec<String> = extracts_raw
+            .iter()
+            .filter_map(|x| match x.get("switch") {
+                Some(Value::Bool(true)) => Some("true".into()),
+                Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+                _ => None,
+            })
+            .collect();
+        switch_vals.sort();
+        switch_vals.dedup();
+        let ignore_switch = extracts_raw.len() > 1 && switch_vals.len() == 1;
+
+        let extracts: Vec<Value> = extracts_raw
             .iter()
             .map(|x| {
                 let mut e = entry_val(x, raw);
@@ -699,7 +715,7 @@ fn build_markers(raw: &Raw, map_meta: &HashMap<String, MapEntry>) -> Value {
                     );
                     o.insert(
                         "requirements".into(),
-                        Value::Array(extract_requirements(x, &raw.zh_items)),
+                        Value::Array(extract_requirements(x, &raw.zh_items, ignore_switch)),
                     );
                 }
                 e
