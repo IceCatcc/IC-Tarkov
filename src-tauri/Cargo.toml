@@ -11,6 +11,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# 编译期内嵌种子 JSON 的 gzip（与运行时解压共用同一 crate）
+flate2 = "1"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -23,18 +25,26 @@ regex = "1"
 notify = "6"
 once_cell = "1"
 chrono = "0.4"
-# 同步（电脑端本地 WS/HTTP 服务）：axum + tokio + 广播通道；if_addrs 枚举网卡 IP；rand 生成配对 token
+# 数据导入导出：多份 json（quest_state/collected/settings）打包 zip；仅 deflate，压缩比足够且依赖最小
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# 内嵌种子 JSON 的运行时解压（编译期 gzip 在 build.rs，用 build-dependencies 里的同名 crate）
+flate2 = "1"
+
+# 扫码（手机端连接电脑）：仅移动平台编译，桌面无此依赖
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = "2"
+# 移动端文件选择：对话框返回 content://（Android）/ file://（iOS）URI，
+# std::fs 打不开，由前端用 plugin-fs 读取字节后传给 import_data_bytes
+tauri-plugin-fs = "2"
+
+# 局域网同步服务端（axum + tokio + 广播通道；if_addrs 枚举网卡 IP；rand 生成配对 token）。
+# 仅电脑端需要：手机端是纯 WebSocket 客户端，不编译这套服务端依赖可显著缩小移动端 .so。
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
 futures-util = "0.3"
 if-addrs = "0.13"
 rand = "0.8"
-# 数据导入导出：多份 json（quest_state/collected/settings）打包 zip；仅 deflate，压缩比足够且依赖最小
-zip = { version = "2", default-features = false, features = ["deflate"] }
-
-# 扫码（手机端连接电脑）：仅移动平台编译，桌面无此依赖
-[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
-tauri-plugin-barcode-scanner = "2"
 
 # rustc 1.98 在 Windows 上增量编译会触发 ICE（metadata encoder panic），禁用之
 [profile.dev]
@@ -42,8 +52,14 @@ incremental = false
 
 # 发布构建：裁剪符号 + LTO，缩小体积并降低杀软（360 等）对未签名 exe 的启发式误报面。
 # 分发给他人时务必用 release 构建，不要用 target/debug 下的 exe。
-# 注：lto 用 thin 而非 fat（true），codegen-units 用默认（16 并行），
-#     构建速度显著变快，体积/优化差异可忽略；strip 才是减少误报的主要手段。
+# 体积优先（APK/安装包瘦身）：
+#   lto = "fat"          全量跨 crate 内联，体积更小、编译更慢（原 thin）
+#   opt-level = "z"      为体积而非速度优化（原默认 3）
+#   codegen-units = 1    单代码生成单元，便于跨函数去重，体积更小、编译更慢
+#   panic = "abort"      去掉 unwind 栈展开基础设施，省数 MB；panic 时直接终止进程
 [profile.release]
 strip = true
-lto = "thin"
+lto = "fat"
+opt-level = "z"
+codegen-units = 1
+panic = "abort"

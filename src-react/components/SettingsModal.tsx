@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
+import { readFile } from '@tauri-apps/plugin-fs'
 import { useStore } from '../store'
 import { isMobile } from '../platform'
 import {
@@ -10,6 +11,7 @@ import {
   resetAndRescan,
   exportData,
   importData,
+  importDataBytes,
   openDataDir,
   getDataStatus,
   refreshGameData,
@@ -164,7 +166,8 @@ export default function SettingsModal() {
     track(
       listen<DataSyncReport>('data-synced', (e) => {
         setSyncing(false)
-        setSyncMsg(e.payload.message)
+        // 成功后由下方「最近更新」时间行接管展示；仅失败时保留原因提示
+        setSyncMsg(e.payload.ok ? null : e.payload.message)
         loadDataStatus()
       }),
     )
@@ -309,7 +312,14 @@ export default function SettingsModal() {
         ],
       })
       if (typeof p === 'string') {
-        await importData(p)
+        // 移动端对话框返回 content://（Android）/ file://（iOS）URI，std::fs 打不开，
+        // 用 plugin-fs 读取字节后由 import_data_bytes 导入；桌面端直接按路径导入。
+        if (mobile) {
+          const bytes = await readFile(p)
+          await importDataBytes(bytes)
+        } else {
+          await importData(p)
+        }
         clearHistorical()
         seedPlayerQuests(await getPlayerQuests())
         // 导入的 settings.json（含档案/UI 偏好）覆盖了本地，需重新拉取并应用
@@ -402,11 +412,20 @@ export default function SettingsModal() {
               </button>
               <span className={DESC_CLS}>
                 {dataStatus
-                  ? `${fmtTime(dataStatus.updatedAt)} · ${dataStatus.questCount} 个任务 / ${dataStatus.mapCount} 张地图`
+                  ? `${dataStatus.questCount} 个任务 / ${dataStatus.mapCount} 张地图`
                   : '读取中…'}
               </span>
             </div>
-            {syncMsg && <div className={`${DESC_CLS} mt-2`}>{syncMsg}</div>}
+            {/* 更新中显示进度；失败显示原因；其他时候（含更新完成后）显示最近更新时间 */}
+            {syncing ? (
+              <div className="mt-2 text-[12px] text-muted/80">{syncMsg ?? '正在更新…'}</div>
+            ) : syncMsg ? (
+              <div className="mt-2 text-[12px] text-red-400">{syncMsg}</div>
+            ) : dataStatus?.updatedAt ? (
+              <div className="mt-2 text-[12px] text-muted/80">
+                最近更新：{fmtTime(dataStatus.updatedAt)}
+              </div>
+            ) : null}
             {dataStatus && !dataStatus.cached && (
               <div className="text-[14px] text-amber mt-2">
                 缓存为空或不完整：请点击上方「更新数据」联网获取（首次使用需联网）。

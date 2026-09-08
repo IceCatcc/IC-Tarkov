@@ -1475,6 +1475,7 @@ version = "0.1.9"
 dependencies = [
  "axum",
  "chrono",
+ "flate2",
  "futures-util",
  "if-addrs",
  "notify",
@@ -1487,6 +1488,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-barcode-scanner",
  "tauri-plugin-dialog",
+ "tauri-plugin-fs",
  "tokio",
  "ureq",
  "zip",

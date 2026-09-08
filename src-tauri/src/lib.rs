@@ -6,6 +6,8 @@ mod persist;
 mod screenshots;
 mod store;
 mod watcher;
+// 局域网同步服务端（axum 等）仅电脑端编译；手机端是纯 WS 客户端，不编译该模块
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod lan;
 
 use std::collections::HashMap;
@@ -834,38 +836,33 @@ fn export_data(app: tauri::AppHandle, path: Option<String>) -> Result<String, St
 /// 导入数据：读取 zip 包（quest_state / collected / settings.json），覆盖对应持久化文件并载入内存；
 /// 兼容旧版单文件 quest_state.json 直接导入。随后重启监控（按导入的偏移增量续读）。
 #[tauri::command]
-fn import_data(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    let src = Path::new(&path);
-    // 旧版兼容：单 JSON 文件（仅任务状态）
-    if src
-        .extension()
-        .map_or(false, |e| e.eq_ignore_ascii_case("json"))
-    {
-        let content = std::fs::read_to_string(src).map_err(|e| e.to_string())?;
-        let parsed: persist::Persisted =
-            serde_json::from_str(&content).map_err(|e| format!("文件格式错误：{e}"))?;
-        if let Some(p) = persist::state_path(&app) {
-            if let Some(parent) = p.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            std::fs::write(&p, &content).map_err(|e| e.to_string())?;
+// 旧版兼容：单 JSON 文件（仅任务状态）
+fn import_json(app: &tauri::AppHandle, content: &str) -> Result<(), String> {
+    let parsed: persist::Persisted =
+        serde_json::from_str(content).map_err(|e| format!("文件格式错误：{e}"))?;
+    if let Some(p) = persist::state_path(app) {
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
         }
-        apply_persisted(&app, &parsed);
-        return Ok(());
+        std::fs::write(&p, content).map_err(|e| e.to_string())?;
     }
+    apply_persisted(app, &parsed);
+    Ok(())
+}
 
-    let file = std::fs::File::open(src).map_err(|e| e.to_string())?;
+// 从 zip 读取器导入数据包（内存字节或文件皆可）
+fn import_zip(app: &tauri::AppHandle, reader: impl std::io::Read + std::io::Seek) -> Result<(), String> {
     let mut zip =
-        zip::ZipArchive::new(file).map_err(|e| format!("无法读取压缩包：{e}"))?;
-    let root = data_root(&app)?;
+        zip::ZipArchive::new(reader).map_err(|e| format!("无法读取压缩包：{e}"))?;
+    let root = data_root(app)?;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.name().to_string();
         // 只接受平铺的已知文件名（防路径穿越 / 意外条目）
         let dest = match name.as_str() {
-            "quest_state.json" => persist::state_path(&app),
-            "collected.json" => persist::collected_path(&app),
-            "settings.json" => settings_path(&app).ok(),
+            "quest_state.json" => persist::state_path(app),
+            "collected.json" => persist::collected_path(app),
+            "settings.json" => settings_path(app).ok(),
             _ => continue,
         };
         let Some(dest) = dest else { continue };
@@ -880,13 +877,40 @@ fn import_data(app: tauri::AppHandle, path: String) -> Result<(), String> {
         std::fs::write(&dest, content).map_err(|e| e.to_string())?;
     }
     // 覆盖完成后统一载入内存（settings.json 变化由前端导入后自行刷新）
-    let parsed = persist::load(&app);
-    apply_persisted(&app, &parsed);
+    let parsed = persist::load(app);
+    apply_persisted(app, &parsed);
     // 归一化数据位置记录：导入的 settings 可能来自另一台机器/位置
     let portable = portable_data_root()?;
     let kind = if root == portable { "portable" } else { "appdata" };
     record_data_location(&root, kind);
     Ok(())
+}
+
+#[tauri::command]
+fn import_data(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let src = Path::new(&path);
+    // 旧版兼容：单 JSON 文件（仅任务状态）
+    if src
+        .extension()
+        .map_or(false, |e| e.eq_ignore_ascii_case("json"))
+    {
+        let content = std::fs::read_to_string(src).map_err(|e| e.to_string())?;
+        import_json(&app, &content)
+    } else {
+        let file = std::fs::File::open(src).map_err(|e| e.to_string())?;
+        import_zip(&app, file)
+    }
+}
+
+/// 移动端导入：对话框返回的是 content://（Android）/ file://（iOS）URI，
+/// std::fs 无法直接打开，由前端用 plugin-fs 读取字节后传入本命令。
+#[tauri::command]
+fn import_data_bytes(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String> {
+    if bytes.len() >= 2 && &bytes[0..2] == b"PK" {
+        import_zip(&app, std::io::Cursor::new(bytes))
+    } else {
+        import_json(&app, &String::from_utf8_lossy(&bytes))
+    }
 }
 
 /// 把一份 Persisted 落地/载入内存并重启 watcher（桌面备份导入保留 offsets；
@@ -1180,7 +1204,9 @@ pub(crate) fn emit_progress(app: &tauri::AppHandle, endpoint: &str, timestamp: &
 pub fn run() {
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     #[cfg(mobile)]
-    let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+    let builder = builder
+        .plugin(tauri_plugin_barcode_scanner::init())
+        .plugin(tauri_plugin_fs::init());
     builder
         .setup(|app| {
             // 数据根目录在每次需要时按「程序目录 data → AppData → 新建程序目录 data」自动探测，
@@ -1210,50 +1236,98 @@ pub fn run() {
             if st.stale && has_cache {
                 spawn_sync(handle, false);
             }
-            // 同步：生成 token + 广播通道，并把现有事件桥接到广播（供手机端 WS 订阅）
+            // 同步：生成 token + 广播通道，并把现有事件桥接到广播（供手机端 WS 订阅）。
+            // 仅电脑端启动服务端；手机端为客户端，无此步骤。
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             crate::lan::setup_lan(app);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            start_watching,
-            stop_watching,
-            get_state,
-            get_stats,
-            get_player_quests,
-            get_activity,
-            get_quest_graph,
-            get_quest_detail,
-            get_settings,
-            save_settings,
-            get_player_position,
-            get_current_map,
-            get_session_mode,
-            get_maps,
-            open_url,
-            open_data_dir,
-            get_data_location,
-            set_data_location,
-            reset_and_rescan,
-            export_data,
-            import_data,
-            get_unlocked,
-            get_collector_quest_id,
-            get_collected_items,
-            set_item_collected,
-            set_quest_status,
-            get_data_status,
-            refresh_game_data,
-            get_map_markers,
-            get_quest_zones,
-            get_map_bosses,
-            get_maps_skeleton,
-            lan::start_lan_sync,
-            lan::stop_lan_sync,
-            lan::get_lan_status,
-            lan::get_connect_info,
-            lan::get_snapshot,
-            lan::apply_snapshot
-        ])
+        .invoke_handler({
+            // 电脑端：含局域网同步服务端命令
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                tauri::generate_handler![
+                    start_watching,
+                    stop_watching,
+                    get_state,
+                    get_stats,
+                    get_player_quests,
+                    get_activity,
+                    get_quest_graph,
+                    get_quest_detail,
+                    get_settings,
+                    save_settings,
+                    get_player_position,
+                    get_current_map,
+                    get_session_mode,
+                    get_maps,
+                    open_url,
+                    open_data_dir,
+                    get_data_location,
+                    set_data_location,
+                    reset_and_rescan,
+                    export_data,
+                    import_data,
+                    import_data_bytes,
+                    get_unlocked,
+                    get_collector_quest_id,
+                    get_collected_items,
+                    set_item_collected,
+                    set_quest_status,
+                    get_data_status,
+                    refresh_game_data,
+                    get_map_markers,
+                    get_quest_zones,
+                    get_map_bosses,
+                    get_maps_skeleton,
+                    lan::start_lan_sync,
+                    lan::stop_lan_sync,
+                    lan::get_lan_status,
+                    lan::get_connect_info,
+                    lan::get_snapshot,
+                    lan::apply_snapshot
+                ]
+            }
+            // 手机端：纯 WS 客户端，不注册局域网同步服务端命令
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                tauri::generate_handler![
+                    start_watching,
+                    stop_watching,
+                    get_state,
+                    get_stats,
+                    get_player_quests,
+                    get_activity,
+                    get_quest_graph,
+                    get_quest_detail,
+                    get_settings,
+                    save_settings,
+                    get_player_position,
+                    get_current_map,
+                    get_session_mode,
+                    get_maps,
+                    open_url,
+                    open_data_dir,
+                    get_data_location,
+                    set_data_location,
+                    reset_and_rescan,
+                    export_data,
+                    import_data,
+                    import_data_bytes,
+                    get_unlocked,
+                    get_collector_quest_id,
+                    get_collected_items,
+                    set_item_collected,
+                    set_quest_status,
+                    get_data_status,
+                    refresh_game_data,
+                    get_map_markers,
+                    get_quest_zones,
+                    get_map_bosses,
+                    get_maps_skeleton
+                ]
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

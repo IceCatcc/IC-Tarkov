@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as QRCode from 'qrcode'
 import {
   startLanSync,
@@ -46,6 +46,25 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
       .then(setQr)
       .catch(() => setQr(''))
   }, [info])
+
+  // 手机端扫码连上后自动关闭本窗口：窗口打开时记录基线连接数，
+  // 一旦有「新连接」到达（连接数超过基线）即关闭窗口（服务保持运行，手机端不断连）。
+  // 用基线避免「重开后窗口内已有连接」被误判为新增而立刻关闭。
+  const baselineRef = useRef(0)
+  const baselinedRef = useRef(false)
+  useEffect(() => {
+    if (open) baselinedRef.current = false
+  }, [open])
+  useEffect(() => {
+    if (!open) return
+    const n = status?.connections ?? 0
+    if (!baselinedRef.current) {
+      baselineRef.current = n
+      baselinedRef.current = true
+      return
+    }
+    if (n > baselineRef.current) onClose()
+  }, [open, status?.connections, onClose])
 
   if (!open) return null
 

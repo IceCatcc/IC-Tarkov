@@ -231,6 +231,11 @@ export async function importData(path: string): Promise<void> {
   await invoke('import_data', { path })
 }
 
+/** 移动端导入：前端用 plugin-fs 读取 content:// URI 字节后传入 */
+export async function importDataBytes(bytes: Uint8Array): Promise<void> {
+  await invoke('import_data_bytes', { bytes })
+}
+
 export async function getQuestGraph(): Promise<QuestGraph> {
   return await invoke<QuestGraph>('get_quest_graph')
 }

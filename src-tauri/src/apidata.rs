@@ -122,32 +122,54 @@ pub fn bundled_file(app: &tauri::AppHandle, name: &str) -> Option<PathBuf> {
 
 /// 编译期内嵌随包种子（桌面/移动一致可用，不依赖运行时资源目录）。
 /// Android 上 bundle.resources 不会经 resource_dir / asset_resolver 暴露给 Rust 侧，
-/// 故把种子直接打进二进制（共约 17MB，NSIS/APK 分发时均有压缩）。
-fn embedded_seed(rel: &str) -> Option<&'static [u8]> {
-    match rel {
-        "api/regular_tasks.json" => Some(include_bytes!("../resources/api/regular_tasks.json")),
-        "api/pve_tasks.json" => Some(include_bytes!("../resources/api/pve_tasks.json")),
-        "api/season_tasks.json" => Some(include_bytes!("../resources/api/season_tasks.json")),
-        "api/regular_tasks_zh.json" => {
-            Some(include_bytes!("../resources/api/regular_tasks_zh.json"))
+/// 故把种子直接打进二进制。种子在编译期由 build.rs 用 gzip 压成
+/// `<OUT_DIR>/api-gz/<rel 中 '/' 换成 '__'>.gz` 再内嵌，运行时解压，
+/// 17MB 原始 JSON 仅以约 4MB 的压缩形态入 .so（APK/NSIS 不再膨胀 13MB+）。
+fn embedded_seed(rel: &str) -> Option<Vec<u8>> {
+    let gz: &[u8] = match rel {
+        "api/regular_tasks.json" => {
+            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_tasks.json.gz")).as_slice()
         }
-        "api/pve_tasks_zh.json" => Some(include_bytes!("../resources/api/pve_tasks_zh.json")),
-        "api/regular_maps.json" => Some(include_bytes!("../resources/api/regular_maps.json")),
+        "api/pve_tasks.json" => {
+            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__pve_tasks.json.gz")).as_slice()
+        }
+        "api/season_tasks.json" => {
+            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__season_tasks.json.gz")).as_slice()
+        }
+        "api/regular_tasks_zh.json" => {
+            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_tasks_zh.json.gz")).as_slice()
+        }
+        "api/pve_tasks_zh.json" => {
+            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__pve_tasks_zh.json.gz")).as_slice()
+        }
+        "api/regular_maps.json" => {
+            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_maps.json.gz")).as_slice()
+        }
         "api/regular_maps_zh.json" => {
-            Some(include_bytes!("../resources/api/regular_maps_zh.json"))
+            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_maps_zh.json.gz")).as_slice()
         }
         "api/regular_traders.json" => {
-            Some(include_bytes!("../resources/api/regular_traders.json"))
+            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_traders.json.gz")).as_slice()
         }
         "api/regular_traders_zh.json" => {
-            Some(include_bytes!("../resources/api/regular_traders_zh.json"))
+            include_bytes!(concat!(
+                env!("OUT_DIR"),
+                "/api-gz/api__regular_traders_zh.json.gz"
+            ))
+            .as_slice()
         }
         "api/regular_items_zh.json" => {
-            Some(include_bytes!("../resources/api/regular_items_zh.json"))
+            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_items_zh.json.gz")).as_slice()
         }
-        "maps-skeleton.json" => Some(include_bytes!("../resources/maps-skeleton.json")),
-        _ => None,
-    }
+        "maps-skeleton.json" => {
+            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/maps-skeleton.json.gz")).as_slice()
+        }
+        _ => return None,
+    };
+    let mut dec = flate2::read::GzDecoder::new(&gz[..]);
+    let mut out = Vec::with_capacity(gz.len() * 4);
+    dec.read_to_end(&mut out).ok()?;
+    Some(out)
 }
 
 /// 读取随包资源字节：先文件系统候选（桌面），再编译期内嵌种子（全平台兜底）。
@@ -157,7 +179,7 @@ pub fn read_bundled_bytes(app: &tauri::AppHandle, rel: &str) -> Option<Vec<u8>> 
             return Some(b);
         }
     }
-    embedded_seed(rel).map(|b| b.to_vec())
+    embedded_seed(rel)
 }
 
 /// 种子目录（resources/api）：桌面文件系统候选；Android 上无对应目录，走 asset 回退
