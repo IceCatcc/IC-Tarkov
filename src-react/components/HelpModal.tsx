@@ -26,7 +26,7 @@ export function HelpModal({
       onClick={onClose}
     >
       <div
-        className="w-[460px] max-w-[calc(100vw-32px)] rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
+        className="w-[460px] max-w-[calc((100vw-32px)/var(--ui-scale,1))] rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部 */}
@@ -36,7 +36,7 @@ export function HelpModal({
         </div>
 
         {/* 步骤 */}
-        <div className="px-5 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
+        <div className="px-5 py-4 space-y-3 max-h-[calc(60dvh/var(--ui-scale,1))] overflow-y-auto">
           {[
             {
               t: '1. 配置日志目录',

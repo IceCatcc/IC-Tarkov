@@ -2095,7 +2095,7 @@ export function QuestGraphPage() {
             title="筛选条件：仅好感达标 / 仅等级达标 / 仅地图解锁 / 已完成 / 赛季任务（点击展开勾选）"
           />
           {filterOpen && (
-            <div className="absolute left-0 top-full mt-1.5 z-50 bg-ink-800 border border-line rounded-lg shadow-xl p-1.5 space-y-0.5 min-w-[180px] max-w-[260px] max-h-[70vh] overflow-y-auto">
+            <div className="absolute left-0 top-full mt-1.5 z-50 bg-ink-800 border border-line rounded-lg shadow-xl p-1.5 space-y-0.5 min-w-[180px] max-w-[260px] max-h-[calc(70dvh/var(--ui-scale,1))] overflow-y-auto">
               <FilterCheck
                 label="仅好感达标"
                 checked={repMet}
@@ -2160,7 +2160,7 @@ export function QuestGraphPage() {
             title="选择要显示的商人（点击展开勾选）"
           />
           {traderOpen && (
-            <div className="absolute left-0 top-full mt-1.5 z-50 bg-ink-800 border border-line rounded-lg shadow-xl p-1.5 space-y-0.5 min-w-[170px] max-w-[220px] max-h-[70vh] overflow-y-auto">
+            <div className="absolute left-0 top-full mt-1.5 z-50 bg-ink-800 border border-line rounded-lg shadow-xl p-1.5 space-y-0.5 min-w-[170px] max-w-[220px] max-h-[calc(70dvh/var(--ui-scale,1))] overflow-y-auto">
               {TRADERS.map((t) => (
                 <FilterCheck
                   key={t.id}

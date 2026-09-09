@@ -39,7 +39,7 @@ export default function AboutModal({ onClose, z = 1300 }: { onClose: () => void;
       onClick={onClose}
     >
       <div
-        className="w-[440px] max-w-[calc(100vw-32px)] rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
+        className="w-[440px] max-w-[calc((100vw-32px)/var(--ui-scale,1))] max-h-[calc(82dvh/var(--ui-scale,1))] overflow-y-auto rounded-2xl border border-line bg-ink-800 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部：图标 + 标题 + 版本 */}

@@ -121,7 +121,7 @@ export function ActivityFeed() {
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-[360px] max-w-full max-h-[70vh] flex flex-col rounded-xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
+            className="w-[360px] max-w-full max-h-[calc(70dvh/var(--ui-scale,1))] flex flex-col rounded-xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {content}

@@ -68,7 +68,7 @@ export function LanSyncModal({ open, onClose }: { open: boolean; onClose: () => 
       onClick={onClose}
     >
       <div
-        className="w-[460px] max-w-[calc(100vw-32px)] max-h-[82vh] flex flex-col rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
+        className="w-[460px] max-w-[calc((100vw-32px)/var(--ui-scale,1))] max-h-[calc(82dvh/var(--ui-scale,1))] flex flex-col rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="relative px-5 pt-5 pb-4 border-b border-line">

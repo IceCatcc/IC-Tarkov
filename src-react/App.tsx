@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import {
   initTauri,
@@ -79,8 +79,13 @@ export default function App() {
   // 移动端 UI 适配分支：底部 Tab、transform 缩放、关闭监控
   const mobile = isMobile()
   useEffect(() => {
-    // 移动端用根容器 transform 缩放（见渲染处），桌面保留 document.zoom
-    if (!mobile) document.documentElement.style.zoom = String(uiScale)
+    // 移动端用根容器 transform 缩放（见渲染处），桌面保留 document.zoom。
+    // 同时把缩放值写进 CSS 变量：浮层的 vh 高度需按缩放反算，
+    // 否则放大后弹窗实际高度超出屏幕，底部的确认按钮会被挤到屏幕外（见各弹窗的 max-h）。
+    if (!mobile) {
+      document.documentElement.style.zoom = String(uiScale)
+      document.documentElement.style.setProperty('--ui-scale', String(uiScale))
+    }
   }, [uiScale, mobile])
 
   useEffect(() => {
@@ -209,7 +214,7 @@ export default function App() {
       className="h-full flex flex-col"
       style={
         mobile
-          ? {
+          ? ({
               // 移动端用 transform 缩放替代 CSS zoom；按缩放倒数放大容器避免溢出/留白
               transform: `scale(${uiScale})`,
               transformOrigin: 'top left',
@@ -217,7 +222,9 @@ export default function App() {
               height: `${100 / uiScale}dvh`,
               // 为底部 Tab 导航预留空间（含 iOS 安全区）
               paddingBottom: 'calc(var(--nav-h) + env(safe-area-inset-bottom))',
-            }
+              // 供浮层按缩放反算 vh 高度（见各弹窗的 max-h）
+              '--ui-scale': String(uiScale),
+            } as CSSProperties)
           : undefined
       }
     >

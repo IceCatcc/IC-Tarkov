@@ -1059,8 +1059,9 @@ export function MapPage() {
               图标 {chipsOpen ? '▾' : '▴'}
             </button>
         </div>
-        {/* 右上角浮动按钮组：聚焦 + 层级切换 */}
-        <div className="absolute right-3 top-3 z-[600] flex items-start gap-1.5">
+        {/* 右上角浮动按钮组：聚焦 + 层级切换。
+            层级 z 需高于右下角「地图信息」浮窗（z-600），否则展开的楼层选单会被它盖住 */}
+        <div className="absolute right-3 top-3 z-[620] flex items-start gap-1.5">
           {/* 聚焦（层级切换左侧） */}
           <div ref={focusRef} className="relative flex flex-col items-end gap-1.5">
             <button
@@ -1176,8 +1177,9 @@ export function MapPage() {
             </span>
           </button>
           {tasksOpen && (
-            // 底部预留左下角「图标」按钮的高度（约 3.5rem）+ 间距，避免被面板盖住
-            <div className="absolute left-0 top-[calc(100%+6px)] z-[610] w-[380px] max-w-[calc(100vw-24px)] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-xl border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm p-2.5 space-y-2">
+            // 宽高都按缩放反算：用 dvh 而非 vh（移动端 vh 含地址栏，会高估可用高度）；
+            // 11rem 预留：面板顶部起点（按钮+间距）+ 底部左下角「图标」按钮，避免溢出屏幕
+            <div className="absolute left-0 top-[calc(100%+6px)] z-[610] w-[380px] max-w-[calc((100vw-24px)/var(--ui-scale,1))] max-h-[calc((100dvh-11rem)/var(--ui-scale,1))] overflow-y-auto rounded-xl border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm p-2.5 space-y-2">
               {mapInProgressQuests.length === 0 ? (
                 <div className="text-[13px] text-muted px-0.5 py-3 text-center">
                   本地图暂无进行中任务
@@ -1235,7 +1237,7 @@ export function MapPage() {
               </span>
             </button>
             {mapMenuOpen && (
-              <div className="absolute left-0 top-[calc(100%+6px)] z-[610] w-[120px] max-h-[45vh] overflow-y-auto py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
+              <div className="absolute left-0 top-[calc(100%+6px)] z-[610] w-[120px] max-h-[calc(45dvh/var(--ui-scale,1))] overflow-y-auto py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
                 {skeleton.groups
                   .filter((g) => g.maps.some((m) => m.projection === 'interactive'))
                   .map((g) => (
@@ -1270,7 +1272,7 @@ export function MapPage() {
           onWheel={(e) => e.stopPropagation()}
         >
           {infoOpen && (
-            <div className="pointer-events-none w-[180px] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/60 shadow-xl p-2.5 space-y-2.5">
+            <div className="pointer-events-none w-[180px] max-h-[calc(60dvh/var(--ui-scale,1))] overflow-y-auto rounded-xl border border-line bg-ink-800/60 shadow-xl p-2.5 space-y-2.5">
               <div>
                 <div className="text-[13px] text-muted mb-1">Boss 刷新率</div>
                 {mapBosses.length === 0 ? (

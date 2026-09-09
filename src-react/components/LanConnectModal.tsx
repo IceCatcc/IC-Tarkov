@@ -239,7 +239,7 @@ export function LanConnectModal({ open, onClose }: { open: boolean; onClose: () 
       onClick={onClose}
     >
       <div
-        className="w-[440px] max-w-[calc(100vw-32px)] rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
+        className="w-[440px] max-w-[calc((100vw-32px)/var(--ui-scale,1))] rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部 */}

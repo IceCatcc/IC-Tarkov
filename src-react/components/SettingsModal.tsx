@@ -386,7 +386,7 @@ export default function SettingsModal() {
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60">
-      <div className="w-[560px] max-w-[calc(100vw-24px)] max-h-[90vh] flex flex-col bg-ink-800 border border-line rounded-xl p-5 shadow-2xl">
+      <div className="w-[560px] max-w-[calc((100vw-24px)/var(--ui-scale,1))] max-h-[calc(90dvh/var(--ui-scale,1))] flex flex-col bg-ink-800 border border-line rounded-xl p-5 shadow-2xl">
         <div className="flex items-center mb-4 shrink-0">
           <span className="text-[17px] font-medium">设置</span>
           <button

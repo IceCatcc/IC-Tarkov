@@ -72,7 +72,7 @@ export function MapIconPanel({ groups }: { groups: IconGroup[] }) {
   }
 
   return (
-    <div className="flex flex-col gap-0.5 p-1.5 w-[240px] max-h-[52vh] overflow-y-auto rounded-md border border-line bg-ink-800/95 shadow-lg backdrop-blur-sm">
+    <div className="flex flex-col gap-0.5 p-1.5 w-[240px] max-h-[calc(52dvh/var(--ui-scale,1))] overflow-y-auto rounded-md border border-line bg-ink-800/95 shadow-lg backdrop-blur-sm">
       {inProgress.length > 0 && (
         <div className={ROW}>
           <TriState

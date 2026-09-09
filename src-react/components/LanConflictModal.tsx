@@ -58,7 +58,7 @@ export function LanConflictModal() {
 
   return (
     <div className="fixed inset-0 z-[1600] flex items-center justify-center bg-black/60">
-      <div className="w-[480px] max-w-[calc(100vw-32px)] max-h-[82vh] flex flex-col rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden">
+      <div className="w-[480px] max-w-[calc((100vw-32px)/var(--ui-scale,1))] max-h-[calc(82dvh/var(--ui-scale,1))] flex flex-col rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden">
         <div className="px-5 pt-5 pb-4 border-b border-line">
           <div className="text-[17px] font-semibold text-[#e6edf3]">
             手机端与本机数据不一致

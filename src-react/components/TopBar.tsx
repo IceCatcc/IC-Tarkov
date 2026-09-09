@@ -261,7 +261,7 @@ export function TopBar() {
           onClick={() => setReleaseOpen(false)}
         >
           <div
-            className="w-[520px] max-w-[calc(100vw-32px)] max-h-[70vh] flex flex-col rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
+            className="w-[520px] max-w-[calc((100vw-32px)/var(--ui-scale,1))] max-h-[calc(70dvh/var(--ui-scale,1))] flex flex-col rounded-2xl border border-line bg-ink-800 shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="relative px-5 pt-5 pb-4 border-b border-line bg-gradient-to-b from-ink-700/60 to-transparent">
