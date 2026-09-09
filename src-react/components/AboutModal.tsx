@@ -22,7 +22,8 @@ function ExtLink({ href, children }: { href: string; children: React.ReactNode }
 }
 
 // 关于弹窗：应用信息、数据来源、致谢与开源仓库
-export default function AboutModal({ onClose }: { onClose: () => void }) {
+// 入口在设置页左下角「关于」；z 可调（从设置页打开时需高于设置窗口的 z-2000）
+export default function AboutModal({ onClose, z = 1300 }: { onClose: () => void; z?: number }) {
   const [appVersion, setAppVersion] = useState('')
 
   useEffect(() => {
@@ -33,7 +34,8 @@ export default function AboutModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[1300] flex items-center justify-center bg-black/60"
+      className="fixed inset-0 flex items-center justify-center bg-black/60"
+      style={{ zIndex: z }}
       onClick={onClose}
     >
       <div

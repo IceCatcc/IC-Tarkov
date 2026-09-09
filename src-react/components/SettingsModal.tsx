@@ -4,6 +4,8 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { useStore } from '../store'
 import { isMobile, isAndroid } from '../platform'
+import { HelpModal } from './HelpModal'
+import AboutModal from './AboutModal'
 import {
   saveSettings,
   startWatching,
@@ -107,6 +109,9 @@ export default function SettingsModal() {
   const [selLoc, setSelLoc] = useState<DataLocation['kind'] | null>(null)
   const [migrating, setMigrating] = useState(false)
   const [rescanMenu, setRescanMenu] = useState(false)
+  // 左下角入口：帮助（首次启动引导的同一份内容）与关于
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
   // 移动端关闭监控相关 UI（游戏在 PC，无日志/截图源）
   const mobile = isMobile()
   // 屏幕常亮：仅 Android 有原生实现（iOS 无原生工程），只在 Android 上展示开关
@@ -357,7 +362,7 @@ export default function SettingsModal() {
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/60">
-      <div className="w-[560px] max-h-[90vh] flex flex-col bg-ink-800 border border-line rounded-xl p-5 shadow-2xl">
+      <div className="w-[560px] max-w-[calc(100vw-24px)] max-h-[90vh] flex flex-col bg-ink-800 border border-line rounded-xl p-5 shadow-2xl">
         <div className="flex items-center mb-4 shrink-0">
           <span className="text-[17px] font-medium">设置</span>
           <button
@@ -565,7 +570,22 @@ export default function SettingsModal() {
           </div>
         </div>
 
-        <div className="flex justify-end items-center gap-2 pt-3 mt-3 border-t border-line shrink-0">
+        <div className="flex items-center gap-2 pt-3 mt-3 border-t border-line shrink-0">
+          {/* 左下角：帮助 / 关于（关于入口原先在帮助窗口里，现统一放这里） */}
+          <div className="flex gap-2 mr-auto">
+            <button
+              onClick={() => setHelpOpen(true)}
+              className="px-3 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+            >
+              帮助
+            </button>
+            <button
+              onClick={() => setAboutOpen(true)}
+              className="px-3 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+            >
+              关于
+            </button>
+          </div>
           <div className="flex gap-2">
             <button
               onClick={closeSettings}
@@ -583,6 +603,10 @@ export default function SettingsModal() {
           </div>
         </div>
       </div>
+
+      {/* 层级需高于设置窗口本身（z-2000），否则会被盖住 */}
+      <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} z={2100} />
+      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} z={2200} />}
 
       {rescanMenu && (
         <div

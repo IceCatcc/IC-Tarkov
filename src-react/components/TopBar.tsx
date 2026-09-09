@@ -49,7 +49,8 @@ function WinButton({
   )
 }
 
-export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
+// 顶部栏不再放帮助按钮：帮助入口统一在设置页左下角（另有首次启动自动弹出）
+export function TopBar() {
   const page = useStore((s) => s.page)
   const setPage = useStore((s) => s.setPage)
   const watcher = useStore((s) => s.watcher)
@@ -238,13 +239,6 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
           className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
         >
           ⚙ 设置
-        </button>
-        <button
-          onClick={onShowHelp}
-          title="帮助 / 使用说明"
-          className="px-1 text-[14px] text-muted hover:text-[#e6edf3] transition-colors"
-        >
-          ?
         </button>
       </div>
 
