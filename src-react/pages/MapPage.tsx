@@ -972,7 +972,7 @@ export function MapPage() {
       </label>
       {/* 自动缩放是自动聚焦的从属选项：未开启聚焦时缩放无从谈起，故隐藏 */}
       {autoCenter && (
-        <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1 pl-3 border-l border-line ml-1">
+        <label className="flex items-center justify-between gap-2 text-[13px] text-[#e6edf3] py-1">
           <span>自动缩放</span>
           <input
             type="checkbox"
@@ -1085,7 +1085,8 @@ export function MapPage() {
           </div>
           {/* 层级切换：地图右上浮动按钮（tarkov.dev 风格，自定义非原生组件） */}
           {floors.length > 0 && (
-          <div ref={floorRef} className="flex flex-col items-end gap-1.5">
+          // 面板改为 absolute 浮层：展开时不撑宽容器，否则会把左边的「聚焦」按钮顶开
+          <div ref={floorRef} className="relative flex flex-col items-end gap-1.5">
             <button
               onClick={() => setFloorOpen((o) => !o)}
               title="切换地图层级"
@@ -1116,7 +1117,7 @@ export function MapPage() {
             </button>
 
             {floorOpen && (
-              <div className="min-w-[110px] py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
+              <div className="absolute right-0 top-[calc(100%+6px)] z-[610] min-w-[110px] py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
                 {floorItems.map(({ lyr, i }) => (
                   <button
                     key={lyr?.name ?? 'main'}
@@ -1175,7 +1176,8 @@ export function MapPage() {
             </span>
           </button>
           {tasksOpen && (
-            <div className="absolute left-0 top-[calc(100%+6px)] z-[610] w-[380px] max-w-[calc(100vw-24px)] max-h-[60vh] overflow-y-auto rounded-xl border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm p-2.5 space-y-2">
+            // 底部预留左下角「图标」按钮的高度（约 3.5rem）+ 间距，避免被面板盖住
+            <div className="absolute left-0 top-[calc(100%+6px)] z-[610] w-[380px] max-w-[calc(100vw-24px)] max-h-[calc(100vh-9rem)] overflow-y-auto rounded-xl border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm p-2.5 space-y-2">
               {mapInProgressQuests.length === 0 ? (
                 <div className="text-[13px] text-muted px-0.5 py-3 text-center">
                   本地图暂无进行中任务
