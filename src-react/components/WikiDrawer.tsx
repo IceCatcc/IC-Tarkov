@@ -80,9 +80,6 @@ export function WikiDrawer() {
             className="absolute inset-0 w-full h-full border-0"
             sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
           />
-          <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 text-[13px] text-muted/70 bg-black/40 px-2 py-0.5 rounded">
-            若页面空白说明站点禁止内嵌，请点右上「浏览器打开」
-          </div>
         </div>
       </div>
     </div>

@@ -101,6 +101,7 @@ export function CollectorPage() {
   const collectedItems = useStore((s) => s.collectedItems)
   const setCollectedItems = useStore((s) => s.setCollectedItems)
   const openWiki = useStore((s) => s.openWiki)
+  const wikiUrlFor = useStore((s) => s.wikiUrlFor)
 
   // 收藏家任务 id：由后端从数据集里定位（已知 id 优先，兜底按名称查找）
   const [questId, setQuestId] = useState<string | null>(null)
@@ -330,9 +331,12 @@ export function CollectorPage() {
         {/* 头部：任务名 + 进度 */}
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-[17px] font-medium">收藏家</h1>
-          {detail?.wiki && (
+          {detail && wikiUrlFor(detail.id) && (
             <button
-              onClick={() => openWiki(detail.wiki)}
+              onClick={() => {
+                const u = wikiUrlFor(detail.id)
+                if (u) openWiki(u)
+              }}
               className="text-[13px] text-amber hover:underline"
               title="在侧边栏打开 Wiki 资料"
             >

@@ -123,6 +123,8 @@ export async function initTauri(): Promise<UnlistenFn> {
     'untrackedQuests',
     'mapChips',
     'uiScale',
+    'wikiSite',
+    'wikiCustom',
   ] as const
   const snapState = (s: ReturnType<typeof useStore.getState>) =>
     JSON.stringify(Object.fromEntries(prefFields.map((k) => [k, s[k]])))

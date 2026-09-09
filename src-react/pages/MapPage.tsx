@@ -1003,6 +1003,8 @@ export function MapPage() {
     if (!chips.quests) return
     const lg = L.layerGroup()
     const untracked = untrackedRef.current
+    // 按设置里的 Wiki 站点生成链接（取快照即可：切换站点后下次重绘生效）
+    const wikiUrlFor = useStore.getState().wikiUrlFor
     for (const [tid, t] of Object.entries(qzDoc.tasks)) {
       if (!inProgressIds.has(tid)) continue // 只显示正在进行的任务
       if (untracked.has(tid)) continue // 用户取消跟踪的任务不绘制
@@ -1041,7 +1043,7 @@ export function MapPage() {
                   ...(o.descZh ? [o.descZh] : []),
                   ...(o.optional ? ['可选目标'] : []),
                 ],
-                t.wiki,
+                wikiUrlFor(tid),
                 [
                   ...(typeof z.top === 'number' || typeof z.bottom === 'number'
                     ? [`高度 ${fmtNum(z.top)} ~ ${fmtNum(z.bottom)}`]

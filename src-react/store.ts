@@ -14,6 +14,7 @@ import type {
   ToastKind,
 } from './types'
 import { getQuestDetail } from './tauri'
+import { buildWikiUrl, type WikiSite } from './wiki'
 
 interface AppState {
   page: 'monitor' | 'graph' | 'map' | 'profile' | 'collector'
@@ -140,6 +141,15 @@ interface AppState {
   /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2，作用于根节点 CSS zoom */
   uiScale: number
   setUiScale: (v: number) => void
+  /** Wiki 站点：eftarkov（默认）/ tarkovbox / custom（持久化于 uiPrefs） */
+  wikiSite: WikiSite
+  setWikiSite: (v: WikiSite) => void
+  /** 自定义 Wiki 模板（含 {taskid} 占位），仅 wikiSite = custom 时生效 */
+  wikiCustom: string
+  setWikiCustom: (v: string) => void
+  /** 按当前站点设置生成任务 Wiki 链接（无可用模板时为 null）。
+   *  注意与上面的 wikiUrl（抽屉当前打开的 URL）区分。 */
+  wikiUrlFor: (questId: string) => string | null
   /** 日志检测到会话模式时调用：自动切换 questMode 并持久化；返回是否发生了切换 */
   applyDetectedMode: (m: string) => boolean
   /** 用后端 settings.json 的 uiPrefs 批量恢复 UI 偏好（仅启动时调用，不回写） */
@@ -257,6 +267,8 @@ export function collectUiPrefs(): Record<string, unknown> {
       chips: s.mapChips,
     },
     uiScale: s.uiScale,
+    wikiSite: s.wikiSite,
+    wikiCustom: s.wikiCustom,
   }
 }
 
@@ -271,11 +283,15 @@ interface UiPrefsShape {
   }
   /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2 */
   uiScale?: number
+  /** Wiki 站点：eftarkov / tarkovbox / custom */
+  wikiSite?: WikiSite
+  /** 自定义 Wiki 模板（含 {taskid} 占位） */
+  wikiCustom?: string
 }
 
 const prefs0 = loadGraphPrefs()
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   page: 'monitor',
   setPage: (p) => set({ page: p }),
 
@@ -387,7 +403,8 @@ export const useStore = create<AppState>((set) => ({
             traderName: e.traderName,
             acceptedAt: e.timestamp,
             status: prev.completedAt ? 'completed' : 'in_progress',
-            wiki: e.wiki,
+            // 事件里的 wiki 是后端默认站点地址，这里按当前站点设置重算
+            wiki: buildWikiUrl(e.questId, state.wikiSite, state.wikiCustom) ?? '',
           }
         } else {
           playerQuests = [
@@ -400,7 +417,8 @@ export const useStore = create<AppState>((set) => ({
               acceptedAt: e.timestamp,
               completedAt: null,
               status: 'in_progress',
-              wiki: e.wiki,
+              // 同上：按当前站点设置生成
+              wiki: buildWikiUrl(e.questId, state.wikiSite, state.wikiCustom) ?? '',
               minLevel: null,
               maps: [],
             },
@@ -441,7 +459,7 @@ export const useStore = create<AppState>((set) => ({
             acceptedAt: null,
             completedAt: e.timestamp,
             status: 'completed',
-            wiki: `https://www.eftarkov.com/news/id/${e.questId}.html`,
+            wiki: buildWikiUrl(e.questId, state.wikiSite, state.wikiCustom) ?? '',
             minLevel: null,
             maps: [],
           },
@@ -542,6 +560,11 @@ export const useStore = create<AppState>((set) => ({
   },
   uiScale: 1,
   setUiScale: (v) => set({ uiScale: v }),
+  wikiSite: 'eftarkov',
+  setWikiSite: (v) => set({ wikiSite: v }),
+  wikiCustom: '',
+  setWikiCustom: (v) => set({ wikiCustom: v }),
+  wikiUrlFor: (questId) => buildWikiUrl(questId, get().wikiSite, get().wikiCustom),
   applyDetectedMode: (m) => {
     const mode = m === 'pve' ? 'pve' : 'pvp'
     const cur = useStore.getState().questMode
@@ -590,6 +613,10 @@ export const useStore = create<AppState>((set) => ({
     if (typeof u.uiScale === 'number') {
       patch.uiScale = [1, 1.25, 1.5, 2].includes(u.uiScale) ? u.uiScale : 1
     }
+    if (u.wikiSite === 'eftarkov' || u.wikiSite === 'tarkovbox' || u.wikiSite === 'custom') {
+      patch.wikiSite = u.wikiSite
+    }
+    if (typeof u.wikiCustom === 'string') patch.wikiCustom = u.wikiCustom
     if (Object.keys(patch).length > 0) set(patch)
   },
 }))

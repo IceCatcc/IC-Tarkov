@@ -357,6 +357,7 @@ export function QuestGraphPage() {
   const mapSel = useStore((s) => s.mapSelGraph)
   const setMapSel = useStore((s) => s.setMapSelGraph)
   const openWiki = useStore((s) => s.openWiki)
+  const wikiUrlFor = useStore((s) => s.wikiUrlFor)
   const hideLegacy = useStore((s) => s.hideLegacyGraph)
   const setHideLegacy = useStore((s) => s.setHideLegacyGraph)
   const repMet = useStore((s) => s.repMetGraph)
@@ -2273,7 +2274,10 @@ export function QuestGraphPage() {
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                if (detail) openWiki(detail.wiki)
+                if (detail) {
+                  const u = wikiUrlFor(detail.id)
+                  if (u) openWiki(u)
+                }
               }}
               className="absolute right-9 top-2.5 text-amber hover:underline text-[13px]"
               title="在浏览器打开 Wiki 资料"

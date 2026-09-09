@@ -9,7 +9,10 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
   // 商人统一展示为「中文名-英文名」
   const traderLabel = traderDisplayName(quest.traderId, quest.traderName)
   const openWiki = useStore((s) => s.openWiki)
+  const wikiUrlFor = useStore((s) => s.wikiUrlFor)
   const detail = useQuestDetail(quest.questId)
+  // 按设置里的 Wiki 站点生成链接（后端带的是默认站点地址，仅作兜底）
+  const url = wikiUrlFor(quest.questId)
 
   // 所需物品（跨目标去重聚合，与任务图谱详情一致）
   const items = dedupeItems(
@@ -19,10 +22,10 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
   return (
     <div
       className={`bg-ink-800 border border-line rounded-xl p-4 ${
-        quest.wiki ? 'cursor-pointer hover:border-amber/60' : ''
+        url ? 'cursor-pointer hover:border-amber/60' : ''
       }`}
-      onClick={() => quest.wiki && openWiki(quest.wiki)}
-      title={quest.wiki ? '点击查看资料' : undefined}
+      onClick={() => url && openWiki(url)}
+      title={url ? '点击查看资料' : undefined}
     >
       {/* 第一行：头像 + 任务名（优先显示，加粗加大）+ 状态药丸 */}
       <div className="flex items-center gap-2 min-w-0">

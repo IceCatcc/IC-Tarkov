@@ -4,6 +4,7 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { useStore } from '../store'
 import { isMobile, isAndroid } from '../platform'
+import { WIKI_TEMPLATES, type WikiSite } from '../wiki'
 import { HelpModal } from './HelpModal'
 import AboutModal from './AboutModal'
 import {
@@ -96,6 +97,11 @@ export default function SettingsModal() {
   const clearHistorical = useStore((s) => s.clearHistorical)
   const uiScale = useStore((s) => s.uiScale)
   const setUiScale = useStore((s) => s.setUiScale)
+  // Wiki 站点：切换即时生效（链接由前端按模板生成），并随 uiPrefs 持久化
+  const wikiSite = useStore((s) => s.wikiSite)
+  const setWikiSite = useStore((s) => s.setWikiSite)
+  const wikiCustom = useStore((s) => s.wikiCustom)
+  const setWikiCustom = useStore((s) => s.setWikiCustom)
 
   const [logDir, setLogDir] = useState(settings.logDir)
   const [shotDir, setShotDir] = useState(settings.screenshotDir)
@@ -121,6 +127,24 @@ export default function SettingsModal() {
   // 设置项分组视觉：标题(白亮加粗) / 选项(主色) / 说明(灰小字) 三级层级
   const TITLE_CLS = 'text-[14px] font-semibold text-[#e6edf3]'
   const DESC_CLS = 'text-[13px] text-muted leading-relaxed'
+
+  const WIKI_OPTIONS: { site: WikiSite; name: string; desc: string }[] = [
+    {
+      site: 'eftarkov',
+      name: 'eftarkov',
+      desc: WIKI_TEMPLATES.eftarkov,
+    },
+    {
+      site: 'tarkovbox',
+      name: 'TarkovBox',
+      desc: WIKI_TEMPLATES.tarkovbox,
+    },
+    {
+      site: 'custom',
+      name: '自定义',
+      desc: '填写自己的地址模板，用 {taskid} 表示任务 id 的位置',
+    },
+  ]
 
   const LOC_OPTIONS: { kind: DataLocation['kind']; name: string; desc: string }[] = [
     {
@@ -432,6 +456,52 @@ export default function SettingsModal() {
                   {v}x
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Wiki 站点：任务资料链接的地址模板 */}
+          <div className="border-t border-line pt-4">
+            <div className={`${TITLE_CLS} mb-2`}>Wiki 站点</div>
+            <div className="space-y-1.5">
+              {WIKI_OPTIONS.map((o) => {
+                const active = wikiSite === o.site
+                return (
+                  <button
+                    key={o.site}
+                    type="button"
+                    onClick={() => setWikiSite(o.site)}
+                    className={`w-full text-left flex items-start gap-2.5 px-3 py-2 rounded border transition-colors ${
+                      active ? 'border-amber bg-ink-700' : 'border-line hover:bg-ink-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      readOnly
+                      checked={active}
+                      className="w-4 h-4 mt-0.5 accent-amber pointer-events-none"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[14px] text-[#e6edf3]">{o.name}</span>
+                      <span className="block text-[13px] text-muted mt-0.5 break-all">
+                        {o.desc}
+                      </span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            {wikiSite === 'custom' && (
+              <input
+                value={wikiCustom}
+                onChange={(e) => setWikiCustom(e.target.value)}
+                placeholder="https://example.com/tasks/{taskid}"
+                spellCheck={false}
+                className="mt-2 w-full bg-ink-700 border border-line rounded px-3 py-2 text-[14px] text-[#e6edf3] font-mono placeholder:text-muted/70 outline-none focus:border-amber"
+              />
+            )}
+            <div className={`${DESC_CLS} mt-1.5`}>
+              任务卡 / 图谱 / 地图里的「Wiki」按钮都按这里生成的地址打开；模板中的{' '}
+              <span className="font-mono">{'{taskid}'}</span> 会替换为任务 id（大小写不敏感）。
             </div>
           </div>
 
