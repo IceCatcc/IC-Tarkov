@@ -15,6 +15,7 @@ import type {
 } from './types'
 import { getQuestDetail } from './tauri'
 import { buildWikiUrl, type WikiSite } from './wiki'
+import { ICON_DEFAULTS, migrateChips } from './mapIconGroups'
 
 interface AppState {
   page: 'monitor' | 'graph' | 'map' | 'profile' | 'collector'
@@ -51,9 +52,11 @@ interface AppState {
   focusZoom: number
   setFocusZoom: (v: number) => void
 
-  /** 地图图标显隐（含任务目标），随 mapPrefs 一起持久化 */
+  /** 地图图标显隐（含任务目标），随 mapPrefs 一起持久化。键见 mapIconGroups.ts */
   mapChips: Record<string, boolean>
   setMapChip: (key: string, on: boolean) => void
+  /** 批量设置（分类「全部显示 / 全部隐藏」一次写入多个子项） */
+  setMapChips: (patch: Record<string, boolean>) => void
   /** 地图：不跟踪的任务 id（不跟踪=不在地图绘制其目标图标）；缺省视为全部跟踪 */
   untrackedQuests: string[]
   toggleQuestTracked: (id: string) => void
@@ -231,20 +234,8 @@ function persistGraphPrefs() {
   }
 }
 
-// —— 地图图标显隐（chips）的默认值 ——
-// 与 MapPage 的 ChipKey 一致；抽到这里是为了让默认值与持久化的合并逻辑共用一个来源。
-export const MAP_CHIP_DEFAULTS: Record<string, boolean> = {
-  quests: true,
-  extract_pmc: true,
-  extract_scav: true,
-  player_spawns: false,
-  ai_spawns: false,
-  sniper_spawns: false,
-  bosses: true,
-  locks: false,
-  hazards: false,
-  containers: false,
-}
+// 地图图标显隐的默认值与迁移规则见 mapIconGroups.ts（ICON_DEFAULTS / migrateChips），
+// 这里不再单独维护一份，避免两处漂移。
 
 /** 供后端持久化：收集当前全部 UI 偏好（与 settings.json 的 uiPrefs 字段对应） */
 export function collectUiPrefs(): Record<string, unknown> {
@@ -334,8 +325,9 @@ export const useStore = create<AppState>((set, get) => ({
   setAutoCenter: (v) => set({ autoCenter: v }),
   focusZoom: 4,
   setFocusZoom: (v) => set({ focusZoom: v }),
-  mapChips: { ...MAP_CHIP_DEFAULTS },
+  mapChips: { ...ICON_DEFAULTS },
   setMapChip: (key, on) => set((s) => ({ mapChips: { ...s.mapChips, [key]: on } })),
+  setMapChips: (patch) => set((s) => ({ mapChips: { ...s.mapChips, ...patch } })),
   untrackedQuests: [],
   toggleQuestTracked: (id) =>
     set((s) => ({
@@ -602,10 +594,15 @@ export const useStore = create<AppState>((set, get) => ({
       if (Array.isArray(mp.untrackedQuests))
         patch.untrackedQuests = mp.untrackedQuests.filter((x) => typeof x === 'string')
       if (mp.chips && typeof mp.chips === 'object') {
-        // 只接受已知 key，且以默认值为底，避免旧配置缺项导致 undefined
-        const next: Record<string, boolean> = { ...MAP_CHIP_DEFAULTS }
-        for (const [k, v] of Object.entries(mp.chips)) {
-          if (k in MAP_CHIP_DEFAULTS && typeof v === 'boolean') next[k] = v
+        // 旧版扁平键先迁移到「分类 / 子分类」键；子分类键是数据驱动的（容器类型等），
+        // 无法穷举白名单，因此按前缀校验而不是比对已知键。
+        const next: Record<string, boolean> = { ...ICON_DEFAULTS }
+        for (const [k, v] of Object.entries(
+          migrateChips(mp.chips as Record<string, boolean>),
+        )) {
+          if (typeof v === 'boolean' && (k.startsWith('cat:') || k.startsWith('sub:'))) {
+            next[k] = v
+          }
         }
         patch.mapChips = next
       }

@@ -99,6 +99,7 @@ git push origin v<version>
 - 顶部栏（`src-react/components/TopBar.tsx`）右侧依次是：错误提示、（电脑端）「连接」状态按钮、「⚙ 设置」按钮、窗口控制按钮。**不再**有 `?` 帮助按钮。
 - 窗口为无边框自定义标题栏，中部空白区域带 `data-tauri-drag-region` 可拖动。
 - **移动端不自动弹连接窗口**：启动只做已保存连接的自动重连（`startLanAutoConnect`），未保存过配置时不弹 `LanConnectModal`（首次启动弹窗会打断使用），入口是顶部栏常驻的「连接 / 连接中 / 已连接」按钮（见 `TopBar.tsx`）。
+- **地图「图标」筛选**：分类 / 子分类由 `src-react/mapIconGroups.ts` 从当前地图数据派生（不写死清单），每个子分类一个独立 Leaflet 图层、可单独开关；开关键为 `cat:<分类>` / `sub:<分类>:<子分类>`，存于 `uiPrefs.mapPrefs.chips`，旧版扁平键（`extract_pmc` 等）在 `migrateChips` 里一次性迁移；「任务目标」的子项即进行中的任务，沿用 `untrackedQuests`。默认显隐见 `ICON_DEFAULTS`（未显式设置的子项继承所属分类）。
 
 ## 其他
 

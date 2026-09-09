@@ -26,6 +26,14 @@ import type {
 } from '../types'
 import { useStore } from '../store'
 import { QuestCard } from '../components/QuestCard'
+import { MapIconPanel } from '../components/MapIconPanel'
+import {
+  buildIconGroups,
+  resolveChipOn,
+  catKey,
+  subKey,
+  type IconGroup,
+} from '../mapIconGroups'
 import { bossImage } from '../bossImages'
 
 /* ================= 常量 ================= */
@@ -69,66 +77,7 @@ const floorHeight = (lyr: SkeletonLayer | null): number => {
     .filter((v): v is number => typeof v === 'number')
   return hs.length ? Math.max(...hs) : Number.NEGATIVE_INFINITY
 }
-// lootContainer normalizedName -> 已下载图标文件
-const CONTAINER_ICONS = new Set([
-  'buried-barrel-cache',
-  'cash-register',
-  'crate',
-  'dead-scav',
-  'drawer',
-  'duffle-bag',
-  'festive-airdrop-supply-crate',
-  'grenade-box',
-  'ground-cache',
-  'jacket',
-  'medbag-smu06',
-  'medcase',
-  'pc-block',
-  'plastic-suitcase',
-  'safe',
-  'toolbox',
-  'weapon-box',
-  'wooden-ammo-box',
-  'wooden-crate',
-])
-const DEFAULT_CONTAINER_ICON = 'container_crate'
-
-const SPAWN_ICON: Record<string, string> = {
-  player: 'spawn_pmc',
-  pmc: 'spawn_pmc',
-  botpmc: 'spawn_pmc',
-  scav: 'spawn_scav',
-  bot: 'spawn_scav',
-  sniper_scav: 'spawn_sniper_scav',
-  boss: 'spawn_boss',
-  rogue: 'spawn_rogue',
-  bloodhound: 'spawn_bloodhound',
-  'cultist-priest': 'spawn_cultist-priest',
-  'black-div': 'spawn_black-div',
-  af: 'spawn_af',
-}
-
-const EXTRACT_ICON: Record<string, string> = {
-  pmc: 'extract_pmc',
-  scav: 'extract_scav',
-  shared: 'extract_shared',
-  transit: 'extract_transit',
-}
-
-/**
- * 是否为狙击 AI 出生点。
- *
- * 数据里狙击点有两种形态，必须都覆盖，否则会被当成普通 AI（掉进 ai_spawns）：
- * 1. categories 含 sniper（仅 Streets 等少数地图）；
- * 2. 只有 categories: ["bot"]，靠 zoneName 区分——这是海关、中心区、灯塔、海岸线等
- *    绝大多数地图的形态，如 ZoneSnipeTower（海关）、ZoneSandSnipeCenter（中心区）、
- *    Zone_SniperPeak（灯塔）。
- */
-function isSniper(en: MarkerEntry): boolean {
-  if ((en.categories ?? []).includes('sniper')) return true
-  const z = en.zoneName ?? ''
-  return /snip/i.test(z)
-}
+// 图标文件名映射与「是否为狙击点」判定已移到 mapIconGroups.ts（图层与筛选面板共用）
 
 /** 撤离要求类型 -> 中文标签（value 为补充细节，如信号弹颜色 / 付费金额） */
 const REQ_LABEL: Record<string, (v: string | null) => string> = {
@@ -202,37 +151,7 @@ function extractReqIconHtml(r: Requirement): string | null {
   return null
 }
 
-type ChipKey =
-  | 'quests'
-  | 'extract_pmc'
-  | 'extract_scav'
-  | 'player_spawns'
-  | 'ai_spawns'
-  | 'sniper_spawns'
-  | 'bosses'
-  | 'locks'
-  | 'hazards'
-  | 'containers'
-  | 'switches'
-  | 'weapons'
-  | 'btr'
-  | 'labels'
-
-const CHIP_DEFS: { key: ChipKey; label: string }[] = [
-  { key: 'quests', label: '任务目标' },
-  { key: 'extract_pmc', label: 'PMC撤离' },
-  { key: 'extract_scav', label: 'Scav撤离' },
-  { key: 'player_spawns', label: '玩家出生点' },
-  { key: 'ai_spawns', label: 'AI出生点' },
-  { key: 'sniper_spawns', label: '狙击AI' },
-  { key: 'bosses', label: 'Boss' },
-  { key: 'locks', label: '钥匙锁' },
-  { key: 'hazards', label: '危险区' },
-  { key: 'containers', label: '容器' },
-  { key: 'switches', label: '开关' },
-  { key: 'weapons', label: '固定武器' },
-  { key: 'btr', label: 'BTR' },
-]
+// 图标的分类 / 子分类由 mapIconGroups.ts 从当前地图数据派生（不再写死清单）
 
 /* ================= CRS 工具（源自 the-hideout/tarkov-dev，MIT） ================= */
 
@@ -344,8 +263,7 @@ export function MapPage() {
   const untrackedQuests = useStore((s) => s.untrackedQuests)
   const toggleQuestTracked = useStore((s) => s.toggleQuestTracked)
   // 图标显隐存于 store（随 mapPrefs 持久化到 settings.json），跨启动保留
-  const chips = useStore((s) => s.mapChips) as Record<ChipKey, boolean>
-  const setMapChip = useStore((s) => s.setMapChip)
+  const chips = useStore((s) => s.mapChips)
   const [floorSel, setFloorSel] = useState(-1) // -1 = 默认主层
   const [floorOpen, setFloorOpen] = useState(false) // 层级切换浮层
   const [mapMenuOpen, setMapMenuOpen] = useState(false) // 左下角地图选单浮层
@@ -359,6 +277,7 @@ export function MapPage() {
   const mapMenuRef = useRef<HTMLDivElement | null>(null)
   const tasksRef = useRef<HTMLDivElement | null>(null)
   const infoRef = useRef<HTMLDivElement | null>(null)
+  const chipsPanelRef = useRef<HTMLDivElement | null>(null)
   const floorRef = useRef<HTMLDivElement | null>(null)
   const focusRef = useRef<HTMLDivElement | null>(null)
   // 截图解析出的玩家位置 + 全局当前地图（location id），由 tauri 全局监听写入，任何页面生效
@@ -404,6 +323,12 @@ export function MapPage() {
   ])
 
   const imap = useMemo(() => group?.maps.find((m) => m.projection === 'interactive'), [group])
+
+  // 图标面板的分类树：与 Leaflet 图层构建共用同一份派生逻辑（buildIconGroups）
+  const iconGroups: IconGroup[] = useMemo(
+    () => (imap && markers ? buildIconGroups(markers.maps[imap.key] ?? {}) : []),
+    [imap, markers],
+  )
 
   /* ---------- 玩家位置事件流（截图监听 + 日志地图检测） ---------- */
 
@@ -465,7 +390,7 @@ export function MapPage() {
   // 点击浮窗外部自动关闭（容器内 onMouseDown 已 stopPropagation，不会误触发）
   // 注意：「地图信息」面板不在此列——它只由按钮点击切换显隐，点外部不关闭
   useEffect(() => {
-    if (!mapMenuOpen && !tasksOpen && !floorOpen && !focusOpen) return
+    if (!mapMenuOpen && !tasksOpen && !floorOpen && !focusOpen && !chipsOpen) return
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node
       if (mapMenuOpen && mapMenuRef.current && !mapMenuRef.current.contains(t))
@@ -473,10 +398,12 @@ export function MapPage() {
       if (tasksOpen && tasksRef.current && !tasksRef.current.contains(t)) setTasksOpen(false)
       if (floorOpen && floorRef.current && !floorRef.current.contains(t)) setFloorOpen(false)
       if (focusOpen && focusRef.current && !focusRef.current.contains(t)) setFocusOpen(false)
+      if (chipsOpen && chipsPanelRef.current && !chipsPanelRef.current.contains(t))
+        setChipsOpen(false)
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
-  }, [mapMenuOpen, tasksOpen, floorOpen, focusOpen])
+  }, [mapMenuOpen, tasksOpen, floorOpen, focusOpen, chipsOpen])
 
   // 进行中任务（仅用于地图上标注目标位置）
   const playerQuests = useStore((s) => s.playerQuests)
@@ -703,6 +630,12 @@ export function MapPage() {
       fallback?: (en: MarkerEntry) => string,
       /** 图标高亮样式（red = 狙击 AI 的红色光晕） */
       highlight?: 'red',
+      /** 弹窗补充信息行（撤离点塞撤离要求） */
+      meta?: (en: MarkerEntry) => string[],
+      /** 永久标签：直接绘制在地图上（撤离点用） */
+      tooltip?: (en: MarkerEntry) => HTMLElement | null,
+      /** 图层层级（撤离点按阵营分层） */
+      zIndex?: (en: MarkerEntry) => number,
     ): L.LayerGroup => {
       const lg = L.layerGroup()
       for (const en of list) {
@@ -711,138 +644,48 @@ export function MapPage() {
         const mk = L.marker(pos(en.position), {
           icon: makeIcon(iconFile(en), { highlight }),
           // 狙击 AI 压在普通标记之上，避免被遮挡
-          zIndexOffset: highlight === 'red' ? 900 : undefined,
+          zIndexOffset: highlight === 'red' ? 900 : zIndex ? zIndex(en) : undefined,
         }).bindPopup(
           popupHtml(
             title,
-            [...(en.faction ? [`阵营 ${en.faction}`] : [])],
+            meta ? meta(en) : [...(en.faction ? [`阵营 ${en.faction}`] : [])],
             undefined,
             coordMeta(en),
           ),
         )
+        if (tooltip) {
+          const el = tooltip(en)
+          if (el)
+            mk.bindTooltip(el, {
+              permanent: true,
+              direction: 'top',
+              className: 'extract-label',
+              offset: [0, -10],
+            })
+        }
         lg.addLayer(mk)
       }
       return lg
     }
 
-    const spawnIcon = (en: MarkerEntry) => {
-      for (const c of en.categories ?? []) if (SPAWN_ICON[c]) return SPAWN_ICON[c]
-      return 'spawn_scav'
-    }
-    const extractIcon = (en: MarkerEntry) =>
-      EXTRACT_ICON[(en.faction ?? '').toLowerCase()] ?? 'extract_shared'
-    const containerIcon = (en: MarkerEntry) =>
-      en.icon && CONTAINER_ICONS.has(en.icon) ? `container_${en.icon}` : DEFAULT_CONTAINER_ICON
-    const hazardIcon = (en: MarkerEntry) => (en.kind === 'mortar' ? 'hazard_mortar' : 'hazard')
-
-    const chipGroups = new Map<Exclude<ChipKey, 'labels'>, L.LayerGroup>()
-    const defs: [
-      Exclude<ChipKey, 'labels'>,
-      MarkerEntry[],
-      (en: MarkerEntry) => string,
-      ((en: MarkerEntry) => string)?,
-    ][] = [
-      [
-        'player_spawns',
-        (mm.spawns ?? []).filter(
-          (s) => !(s.categories ?? []).includes('boss') && (s.categories ?? []).includes('player'),
-        ),
-        spawnIcon,
-        () => '玩家出生点',
-      ],
-      [
-        'ai_spawns',
-        (mm.spawns ?? []).filter(
-          (s) =>
-            !(s.categories ?? []).includes('boss') &&
-            !(s.categories ?? []).includes('player') &&
-            // 狙击 AI 有独立开关，不混在普通 AI 出生点里
-            !isSniper(s),
-        ),
-        spawnIcon,
-        () => 'AI 出生点',
-      ],
-      [
-        'sniper_spawns',
-        (mm.spawns ?? []).filter(isSniper),
-        () => 'spawn_sniper_scav',
-        // 数据在狙击点上没有 name，给一个明确的中文名
-        () => '狙击 AI 出生点',
-      ],
-      [
-        'bosses',
-        [
-          ...(mm.bosses ?? []),
-          ...(mm.spawns ?? []).filter((s) => (s.categories ?? []).includes('boss')),
-        ],
-        () => 'spawn_boss',
-        () => 'Boss',
-      ],
-      ['locks', mm.locks ?? [], () => 'lock', undefined],
-      ['hazards', mm.hazards ?? [], hazardIcon, undefined],
-      ['containers', mm.lootContainers ?? [], containerIcon, undefined],
-      ['switches', mm.switches ?? [], () => 'switch', undefined],
-      ['weapons', mm.stationaryWeapons ?? [], () => 'stationarygun', undefined],
-      ['btr', mm.btrStops ?? [], () => 'btr_stop', undefined],
-    ]
-    for (const [key, list, iconFn, fb] of defs) {
-      if (!list.length) continue
-      chipGroups.set(key, groupOf(list, iconFn, fb, key === 'sniper_spawns' ? 'red' : undefined))
-    }
-
-    const keyOf = (
-      m: Map<Exclude<ChipKey, 'labels'>, L.LayerGroup>,
-      target: L.LayerGroup,
-    ): Exclude<ChipKey, 'labels'> | null => {
-      for (const [k, v] of m) if (v === target) return k
-      return null
-    }
-
-    const syncAll = () => {
-      const cur = chipsRef.current
-      for (const [, lg] of chipGroups) {
-        const key = keyOf(chipGroups, lg)
-        if (!key) continue
-        if (cur[key] && !container.hasLayer(lg)) lg.addTo(container)
-        else if (!cur[key] && container.hasLayer(lg)) container.removeLayer(lg)
-      }
-    }
-    // 撤离点：单独构建，直接永久绘制名称（不点击），按阵营配色
+    // 撤离点：名称永久绘制（不点击），按阵营配色；层级 PMC 在上、Scav 在下
     const EXTRACT_COLOR: Record<string, string> = {
       pmc: '#f5c518', // PMC（USEC/BEAR）
       scav: '#58a6ff', // Scav
       shared: '#3fb950', // 共享
       transit: '#8b949e',
     }
-    // 图层层级：PMC 在最上，shared/transit 居中，scav 在最下
     const EXTRACT_ZINDEX: Record<string, number> = {
       pmc: 1000,
       shared: 500,
       transit: 500,
       scav: 100,
     }
-    const extractLayer = L.layerGroup()
-    const extractMarkers: { m: L.Marker; fac: string }[] = []
-    for (const en of mm.extracts ?? []) {
-      if (!en.position) continue
+    /** 撤离点永久标签：名称（按阵营配色）+ 名称后的小图标（开关/物品），其余要求以小标签显示在下方 */
+    const extractLabel = (en: MarkerEntry): HTMLElement => {
       const fac = (en.faction ?? 'shared').toLowerCase()
       const color = EXTRACT_COLOR[fac] ?? EXTRACT_COLOR.shared
       const reqs = en.requirements ?? []
-      const m = L.marker(pos(en.position), { icon: makeIcon(extractIcon(en)) })
-      m.setZIndexOffset(EXTRACT_ZINDEX[fac] ?? 500)
-      // 撤离点不参与「按楼层灰显」：无论当前看哪一层都保持原样，避免被误调透明度
-      m.bindPopup(
-        popupHtml(
-          en.nameZh ?? en.name ?? '未命名',
-          [
-            ...(en.faction ? [`阵营 ${en.faction}`] : []),
-            ...reqs.map((r) => `撤离要求：${reqHtml(r)}`),
-          ],
-          undefined,
-          coordMeta(en),
-        ),
-      )
-      // 永久标签：名称（按阵营配色）+ 名称后的小图标（开关/物品），其余要求以小标签显示在下方
       const wrap = document.createElement('div')
       wrap.className = 'extract-label'
       const nameEl = document.createElement('div')
@@ -868,33 +711,48 @@ export function MapPage() {
         chip.textContent = reqText(r)
         wrap.appendChild(chip)
       }
-      m.bindTooltip(wrap, {
-        permanent: true,
-        direction: 'top',
-        className: 'extract-label',
-        offset: [0, -10],
-      })
-      extractLayer.addLayer(m)
-      extractMarkers.push({ m, fac })
+      return wrap
     }
-    // 撤离点按阵营显隐：PMC/Scav 各自独立开关；shared/transit（共享/合作）任一勾选即显示
-    const syncExtracts = () => {
-      const cur = chipsRef.current
-      const pmcOn = cur['extract_pmc']
-      const scavOn = cur['extract_scav']
-      for (const { m, fac } of extractMarkers) {
-        const show = fac === 'pmc' ? pmcOn : fac === 'scav' ? scavOn : pmcOn || scavOn
-        const on = extractLayer.hasLayer(m)
-        if (show && !on) extractLayer.addLayer(m)
-        else if (!show && on) extractLayer.removeLayer(m)
+
+    // 分类 / 子分类由数据派生（与「图标」筛选面板共用，见 mapIconGroups.ts）
+    const groups = buildIconGroups(mm)
+    for (const g of groups) {
+      if (g.key !== 'extracts') continue
+      for (const s of g.subs) {
+        s.meta = (en) => [
+          ...(en.faction ? [`阵营 ${en.faction}`] : []),
+          ...(en.requirements ?? []).map((r) => `撤离要求：${reqHtml(r)}`),
+        ]
+        s.tooltip = extractLabel
+        s.zIndex = (en) => EXTRACT_ZINDEX[(en.faction ?? 'shared').toLowerCase()] ?? 500
       }
     }
-    if (container.hasLayer(extractLayer)) container.removeLayer(extractLayer)
-    extractLayer.addTo(container)
-    syncExtracts()
+    // 每个子分类一个独立图层：面板里可单独开关（分类只作批量开关，不参与渲染判断）。
+    // hidden 子项（共用 / 过境撤离点）不在面板列出，改为跟随指定子项：任一开启即显示。
+    const subLayers = new Map<string, { lg: L.LayerGroup; follow: string[] }>()
+    for (const g of groups) {
+      for (const s of g.subs) {
+        if (!s.list.length) continue
+        subLayers.set(subKey(s.key), {
+          lg: groupOf(s.list, s.icon, s.name, s.highlight, s.meta, s.tooltip, s.zIndex),
+          follow: (s.follow ?? []).map((f) => subKey(`${g.key}:${f}`)),
+        })
+      }
+    }
+
+    const syncAll = () => {
+      const cur = chipsRef.current
+      for (const [key, { lg, follow }] of subLayers) {
+        const on = follow.length
+          ? follow.some((k) => resolveChipOn(cur, k))
+          : resolveChipOn(cur, key)
+        if (on && !container.hasLayer(lg)) lg.addTo(container)
+        else if (!on && container.hasLayer(lg)) container.removeLayer(lg)
+      }
+    }
 
     syncAll()
-    syncFnsRef.current = [syncAll, syncExtracts]
+    syncFnsRef.current = [syncAll]
 
     return () => {
       cancelled = true
@@ -1000,7 +858,7 @@ export function MapPage() {
     }
     // 「任务目标」开关：此前它只出现在依赖数组里、effect 内并未判断，
     // 所以切换开关会重跑却照旧绘制，表现为开关无效。
-    if (!chips.quests) return
+    if (!resolveChipOn(chips, catKey('quests'))) return
     const lg = L.layerGroup()
     const untracked = untrackedRef.current
     // 按设置里的 Wiki 站点生成链接（取快照即可：切换站点后下次重绘生效）
@@ -1058,7 +916,7 @@ export function MapPage() {
     }
     lg.addTo(map)
     questLayerRef.current = lg
-  }, [qzDoc, inProgressIds, imap, chips.quests, untrackedQuests])
+  }, [qzDoc, inProgressIds, imap, chips, untrackedQuests])
 
   /* ---------- 渲染 ---------- */
 
@@ -1180,38 +1038,25 @@ export function MapPage() {
       {/* 地图区 */}
       <div className="relative flex-1 min-h-0">
         <div id={mapDivId} className="absolute inset-0" />
-        {/* 标记开关浮动选单：左下角（桌面与移动端共用） */}
-        <div className="absolute left-3 bottom-3 z-[600] flex flex-col items-start gap-2">
-            {chipsOpen && (
-              <div className="flex flex-col gap-1 p-2 rounded-md border border-line bg-ink-800/90 shadow-lg backdrop-blur-sm">
-                {CHIP_DEFS.map((c) => (
-                  <button
-                    key={c.key}
-                    onClick={() => setMapChip(c.key, !chips[c.key])}
-                    className={`px-2.5 py-1 rounded text-[13px] border text-left ${
-                      chips[c.key]
-                        ? 'border-amber text-[#d4a174] bg-amber/10'
-                        : 'border-line text-muted hover:text-[#e6edf3]'
-                    }`}
-                  >
-                    {c.label}
-                  </button>
-                ))}
-              </div>
-            )}
+        {/* 图标开关浮动选单：左下角（桌面与移动端共用） */}
+        <div
+          ref={chipsPanelRef}
+          className="absolute left-3 bottom-3 z-[600] flex flex-col items-start gap-2"
+        >
+            {chipsOpen && <MapIconPanel groups={iconGroups} />}
             <button
               onClick={() => {
                 setFocusOpen(false)
                 setChipsOpen((o) => !o)
               }}
-              title="地图标记显隐"
+              title="地图图标显隐（分类 / 子分类）"
               className={`px-2.5 py-1.5 rounded border bg-ink-800/80 shadow-lg text-[13px] transition-colors ${
                 chipsOpen
                   ? 'border-amber text-[#d4a174] bg-amber/10'
                   : 'border-line text-[#e6edf3] hover:border-amber/70'
               }`}
             >
-              标记 {chipsOpen ? '▾' : '▴'}
+              图标 {chipsOpen ? '▾' : '▴'}
             </button>
         </div>
         {/* 右上角浮动按钮组：聚焦 + 层级切换 */}
