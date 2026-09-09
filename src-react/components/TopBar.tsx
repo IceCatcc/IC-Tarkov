@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVersion } from '@tauri-apps/api/app'
 import ReactMarkdown from 'react-markdown'
@@ -7,7 +8,7 @@ import { useStore } from '../store'
 import { isMobile } from '../platform'
 import { getLanConnStatus, onLanStatus } from '../lan'
 import { checkLatestRelease, isNewer, RELEASES_PAGE, type ReleaseInfo } from '../updater'
-import { openUrl } from '../tauri'
+import { openUrl, getLanStatus } from '../tauri'
 import { LanSyncModal } from './LanSyncModal'
 import { LanConnectModal } from './LanConnectModal'
 
@@ -88,6 +89,8 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
   }, [])
 
   const mobile = isMobile()
+  // 电脑端：是否有手机端已连上本机的同步服务（顶部「连接」按钮据此显示「已连接」）
+  const [pcConnected, setPcConnected] = useState(false)
   // 横屏检测：移动端横屏 + 地图页时隐藏顶部工具栏（logo/设置那条），全屏看图
   const [landscape, setLandscape] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(orientation: landscape)').matches,
@@ -100,6 +103,33 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
     return () => mq.removeEventListener('change', onChange)
   }, [])
   const hideBar = mobile && landscape && page === 'map'
+
+  // 电脑端连接状态：首次查询一次服务状态（服务可能在打开本窗口前就已启动），
+  // 之后由后端 lan-client-connected / lan-client-disconnected 事件实时更新，不做轮询。
+  useEffect(() => {
+    if (mobile) return
+    let disposed = false
+    const offs: (() => void)[] = []
+    getLanStatus()
+      .then((s) => {
+        if (!disposed) setPcConnected(s.connections > 0)
+      })
+      .catch(() => {})
+    Promise.all([
+      listen('lan-client-connected', () => setPcConnected(true)),
+      // payload = 是否仍有客户端在线（单设备限制下被新连接顶掉时仍为 true）
+      listen<boolean>('lan-client-disconnected', (e) => setPcConnected(e.payload === true)),
+    ])
+      .then((us) => {
+        if (disposed) us.forEach((u) => u())
+        else offs.push(...us)
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+      offs.forEach((u) => u())
+    }
+  }, [mobile])
 
   return (
     <>
@@ -162,14 +192,23 @@ export function TopBar({ onShowHelp }: { onShowHelp: () => void }) {
             {watcher.error}
           </span>
         )}
-        {/* 连接（做服务端）：仅桌面；手机端无意义 */}
+        {/* 连接（做服务端）：仅桌面；手机端无意义。已连上手机时显示绿点「已连接」 */}
         {!mobile && (
           <button
             onClick={() => setLanOpen(true)}
-            title="连接：手机扫码连接本机，实时同步任务与地图"
-            className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
+            title={
+              pcConnected
+                ? '手机端已连接，点击管理连接（二维码 / 停止服务）'
+                : '连接：手机扫码连接本机，实时同步任务与地图'
+            }
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[12px] transition-colors ${
+              pcConnected
+                ? 'border-ok/50 bg-ok/10 text-ok'
+                : 'border-line hover:bg-ink-700 text-[#e6edf3]'
+            }`}
           >
-            连接
+            {pcConnected && <span className="w-1.5 h-1.5 rounded-full bg-ok" />}
+            {pcConnected ? '已连接' : '连接'}
           </button>
         )}
         {/* 连接（做客户端）：仅移动端；桌面无摄像头扫码场景。文本三态：连接/连接中/已连接 */}

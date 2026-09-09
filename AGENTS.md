@@ -97,6 +97,7 @@ git push origin v<version>
 - **浮层互斥**：首次启动时若帮助窗口正在展示，缺日志目录的「打开设置」要挂起到帮助关闭后再执行，避免设置盖住帮助（见 `src-react/App.tsx` 的 `pendingOpenSettings`）。
 - 顶部栏（`src-react/components/TopBar.tsx`）右侧依次是：错误提示、「⚙ 设置」按钮、纯文字 `?` 帮助按钮、窗口控制按钮。
 - 窗口为无边框自定义标题栏，中部空白区域带 `data-tauri-drag-region` 可拖动。
+- **移动端不自动弹连接窗口**：启动只做已保存连接的自动重连（`startLanAutoConnect`），未保存过配置时不弹 `LanConnectModal`（首次启动弹窗会打断使用），入口是顶部栏常驻的「连接 / 连接中 / 已连接」按钮（见 `TopBar.tsx`）。
 
 ## 其他
 

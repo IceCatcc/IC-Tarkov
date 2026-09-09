@@ -9,7 +9,7 @@ import {
   getSettings,
 } from './tauri'
 import { useStore } from './store'
-import { startLanAutoConnect, reloadLocalData, loadLanConnect } from './lan'
+import { startLanAutoConnect, reloadLocalData } from './lan'
 import { isMobile, isAndroid } from './platform'
 import { TopBar } from './components/TopBar'
 import { MonitorPage } from './pages/MonitorPage'
@@ -21,7 +21,6 @@ import SettingsModal from './components/SettingsModal'
 import AboutModal from './components/AboutModal'
 import { WikiDrawer } from './components/WikiDrawer'
 import { Toasts } from './components/Toasts'
-import { LanConnectModal } from './components/LanConnectModal'
 import { LanConflictModal } from './components/LanConflictModal'
 
 /** 屏幕常亮开启时的启动提示文案（帮助窗口挂起后复用，保证文案一致） */
@@ -40,8 +39,6 @@ export default function App() {
   // 屏幕常亮提示：首次启动时帮助窗口会盖住通知，挂起到帮助关闭后再弹
   const pendingKeepOnToast = useRef(false)
   const [showAbout, setShowAbout] = useState(false)
-  // 同步：手机端未连接时自动弹出的连接视图
-  const [showConnect, setShowConnect] = useState(false)
   const closeHelp = () => {
     try {
       localStorage.setItem('ic-tarkov.helpSeen.v1', '1')
@@ -144,12 +141,12 @@ export default function App() {
     }
   }, [setWatcher, setSettings, seedPlayerQuests, setUnlockedQuests])
 
-  // 同步（手机端）：启动自动重连已保存的电脑端；监听快照应用后刷新本地数据；
-  // 移动端若尚无保存的连接配置，自动弹出连接视图引导扫码/输入。
+  // 同步（手机端）：启动自动重连已保存的电脑端；监听快照应用后刷新本地数据。
+  // 未保存过连接配置时不自动弹连接窗口（首次启动直接弹会打断使用），
+  // 由用户点顶部栏「连接」按钮进入（TopBar 内的 LanConnectModal）。
   useEffect(() => {
     let off: (() => void) | undefined
     startLanAutoConnect()
-    if (isMobile() && !loadLanConnect()) setShowConnect(true)
     listen('lan-sync-updated', () => {
       void reloadLocalData()
     })
@@ -309,7 +306,6 @@ export default function App() {
       )}
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {!mobile && <LanConflictModal />}
-      <LanConnectModal open={showConnect} onClose={() => setShowConnect(false)} />
       <WikiDrawer />
       <Toasts />
     </div>

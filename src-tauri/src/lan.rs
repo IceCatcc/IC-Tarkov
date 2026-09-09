@@ -462,6 +462,10 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
         }
     }
     eprintln!("[lan] 客户端断开，当前连接数 {}", ctx.tx.receiver_count());
+    // 通知前端客户端已断开：桌面端顶部「连接」按钮据此回到未连接态。
+    // payload = 是否仍有客户端在线（被新连接顶掉时这里为 true，不应回到未连接态）
+    let still_connected = ctx.active.lock().unwrap().current.is_some();
+    let _ = ctx.app.emit("lan-client-disconnected", still_connected);
 }
 
 // ---------------- 路由构建 ----------------
@@ -522,6 +526,8 @@ pub fn stop_lan_sync(app: AppHandle) -> Result<(), String> {
     if let Some(h) = lan.server.lock().unwrap().take() {
         h.abort();
     }
+    // 停止服务即断开全部客户端：通知前端回到未连接态
+    let _ = app.emit("lan-client-disconnected", false);
     Ok(())
 }
 
