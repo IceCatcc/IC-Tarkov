@@ -1,10 +1,12 @@
 mod apidata;
 mod data;
 pub mod dataset;
+mod keepawake;
 mod parser;
 mod persist;
 mod screenshots;
 mod store;
+mod sync;
 mod watcher;
 // 局域网同步服务端（axum 等）仅电脑端编译；手机端是纯 WS 客户端，不编译该模块
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -60,6 +62,8 @@ pub struct AppSettings {
     pub profile: PlayerProfile,
     /// 读取坐标后是否删除截图（默认 true，保留原有行为）
     pub delete_screenshots: bool,
+    /// 移动端屏幕常亮（Android FLAG_KEEP_SCREEN_ON，默认 true）；桌面端不生效，仅持久化
+    pub keep_screen_on: bool,
     /// UI 偏好（图谱筛选/模式切换/侧边栏等），宽松 schema：前端自行定义键值
     #[serde(default)]
     pub ui_prefs: std::collections::HashMap<String, serde_json::Value>,
@@ -79,6 +83,8 @@ impl Default for AppSettings {
             screenshot_dir: screenshots,
             profile: PlayerProfile::default(),
             delete_screenshots: true,
+            // 手机端常作第二屏：默认常亮；旧版 settings.json 无该字段时按 true 处理
+            keep_screen_on: true,
             ui_prefs: std::collections::HashMap::new(),
         }
     }
@@ -1230,6 +1236,10 @@ pub fn run() {
             // 缓存为空（没有任何 JSON）时不自动联网下载，避免离线/首次启动空转与误报，
             // 首次数据由用户在设置页点击「更新数据」获取。
             let handle = app.handle().clone();
+            // 移动端：按 settings.json 的 keepScreenOn 应用屏幕常亮
+            // （启动即生效；用户在设置里切换时由 set_keep_screen_on 即时同步）
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            crate::keepawake::apply(&handle, read_settings(&handle).keep_screen_on);
             data::init(&handle);
             let st = apidata::status(&handle);
             let has_cache = st.files.iter().any(|f| f.bytes > 0);
@@ -1284,8 +1294,11 @@ pub fn run() {
                     lan::stop_lan_sync,
                     lan::get_lan_status,
                     lan::get_connect_info,
-                    lan::get_snapshot,
-                    lan::apply_snapshot
+                    sync::get_snapshot,
+                    sync::apply_snapshot,
+                    sync::get_sync_summary,
+                    lan::resolve_lan_conflict,
+                    keepawake::set_keep_screen_on
                 ]
             }
             // 手机端：纯 WS 客户端，不注册局域网同步服务端命令
@@ -1324,7 +1337,12 @@ pub fn run() {
                     get_map_markers,
                     get_quest_zones,
                     get_map_bosses,
-                    get_maps_skeleton
+                    get_maps_skeleton,
+                    // 手机端也要能生成 / 应用快照与数据摘要（WS 客户端同步用）
+                    sync::get_snapshot,
+                    sync::apply_snapshot,
+                    sync::get_sync_summary,
+                    keepawake::set_keep_screen_on
                 ]
             }
         })

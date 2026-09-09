@@ -22,13 +22,12 @@ use axum::routing::get;
 use axum::Router;
 use futures_util::{SinkExt, StreamExt};
 use futures_util::future::{select, Either};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Listener, Manager};
 use tokio::sync::broadcast;
 
-use crate::persist::Persisted;
-use crate::AppSettings;
+use crate::sync::{apply_snapshot_internal, build_snapshot, build_summary, SyncSummary};
 
 const DEFAULT_PORT: u16 = 9527;
 const BROADCAST_CAP: usize = 1024;
@@ -38,6 +37,9 @@ pub struct LanState {
     pub port: Mutex<u16>,
     pub broadcast_tx: Mutex<Option<broadcast::Sender<String>>>,
     pub server: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    /// 当前已连接手机的「单播出站」通道：(连接 id, 发送端)。
+    /// 冲突决策命令（resolve_lan_conflict）通过它向手机下发指令。
+    pub client_tx: Mutex<Option<(u64, tokio::sync::mpsc::Sender<String>)>>,
 }
 
 impl LanState {
@@ -46,6 +48,7 @@ impl LanState {
             port: Mutex::new(DEFAULT_PORT),
             broadcast_tx: Mutex::new(None),
             server: Mutex::new(None),
+            client_tx: Mutex::new(None),
         }
     }
 }
@@ -80,14 +83,6 @@ pub struct LanStatus {
     pub running: bool,
     pub port: u16,
     pub connections: usize,
-}
-
-/// 快照结构（settings + Persisted）。导出时 Persisted.offsets 已被清空。
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Snapshot {
-    pub settings: AppSettings,
-    pub persisted: Persisted,
 }
 
 // ---------------- 工具 ----------------
@@ -126,13 +121,83 @@ fn build_connect_info(state: &LanState) -> ConnectInfo {
     }
 }
 
-/// 读取当前全量快照（Persisted.offsets 清空），供 /api/snapshot 与手机 pull 指令
-fn build_snapshot(app: &AppHandle) -> Result<String, String> {
-    let settings = crate::read_settings(app);
-    let mut persisted = crate::persist::load(app);
-    persisted.offsets.clear();
-    let snap = Snapshot { settings, persisted };
-    serde_json::to_string(&snap).map_err(|e| e.to_string())
+// ---------------- 同步方向决策 ----------------
+
+/// 手机端连上后先发 `hello` 携带自己的数据摘要，电脑端据此决定同步方向：
+/// - 两端一致 / 手机端为空：直接把电脑端数据下发给手机（新装 App 首次连接即自动初始化）
+/// - 电脑端为空、手机端有数据：索取手机端数据覆盖本机
+/// - 两端都有数据且不一致：抛给电脑端前端，由用户选择以哪一端为准
+async fn handle_hello(
+    app: &AppHandle,
+    remote: SyncSummary,
+    tx_out: &tokio::sync::mpsc::Sender<String>,
+) {
+    let local = build_summary(app);
+    let side = if local.hash == remote.hash {
+        "local"
+    } else if local.empty && !remote.empty {
+        "remote"
+    } else if remote.empty && !local.empty {
+        "local"
+    } else {
+        "ask"
+    };
+    if side == "ask" {
+        let _ = app.emit("lan-sync-conflict", json!({ "local": local, "remote": remote }));
+        let _ = tx_out
+            .send(json!({ "type": "sync-pending" }).to_string())
+            .await;
+        return;
+    }
+    if let Err(e) = resolve_direction(app, side, tx_out).await {
+        eprintln!("[lan] 同步失败：{e}");
+        let _ = app.emit("lan-sync-status", json!({ "state": "error", "message": e }));
+    }
+}
+
+/// 按选定方向执行同步：
+/// - `local`：把电脑端快照发给手机（手机端覆盖为电脑端数据）
+/// - `remote`：向手机索取快照并覆盖本机（手机端回 `push` 后落地）
+/// - `skip`：两端都保持原样，本次不同步
+pub(crate) async fn resolve_direction(
+    app: &AppHandle,
+    side: &str,
+    tx_out: &tokio::sync::mpsc::Sender<String>,
+) -> Result<(), String> {
+    match side {
+        "remote" => {
+            let _ = tx_out
+                .send(json!({ "type": "request-snapshot" }).to_string())
+                .await;
+            Ok(())
+        }
+        "skip" => {
+            let _ = tx_out
+                .send(json!({ "type": "sync-skipped" }).to_string())
+                .await;
+            let _ = app.emit("lan-sync-status", json!({ "state": "skipped" }));
+            Ok(())
+        }
+        _ => {
+            let snap = build_snapshot(app)?;
+            let _ = tx_out
+                .send(json!({ "type": "snapshot", "payload": snap }).to_string())
+                .await;
+            // 附带电脑端当前监控状态，手机端连上即正确显示
+            let st = crate::get_state(app.clone());
+            if let Ok(p) = serde_json::to_string(&st) {
+                let out = json!({
+                    "type": "event",
+                    "event": "watcher-state",
+                    "payload": p,
+                })
+                .to_string();
+                let _ = tx_out.send(out).await;
+            }
+            let _ = app.emit("lan-sync-status", json!({ "state": "pushed" }));
+            Ok(())
+        }
+    }
 }
 
 // ---------------- setup（由 lib.rs 的 run() 调用） ----------------
@@ -208,6 +273,11 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
     let (mut sender, mut receiver) = socket.split();
     // 手机端 pull 指令的单播回包通道（与广播事件复用同一条 socket 出站）
     let (tx_out, mut rx_out) = tokio::sync::mpsc::channel::<String>(16);
+    // 登记出站通道：界面上的冲突决策据此向该手机下发指令
+    {
+        let lan = ctx.app.state::<LanState>();
+        *lan.client_tx.lock().unwrap() = Some((my_id, tx_out.clone()));
+    }
 
     // 出站：广播事件 或 单播回包 -> WebSocket。
     // 广播 Lagged（客户端消费太慢）只跳过缺失事件，不断开连接。
@@ -257,6 +327,35 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
                 Message::Text(text) => {
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                         match v.get("type").and_then(|t| t.as_str()) {
+                            // 手机端上报自身数据摘要，由本端决定同步方向
+                            Some("hello") => {
+                                let remote: SyncSummary = serde_json::from_value(
+                                    v.get("summary").cloned().unwrap_or(serde_json::Value::Null),
+                                )
+                                .unwrap_or_default();
+                                handle_hello(&app, remote, &tx_out).await;
+                            }
+                            // 手机端回传自己的全量数据（电脑端选择了「用手机端数据」）
+                            Some("push") => {
+                                let snap = v
+                                    .get("payload")
+                                    .and_then(|x| x.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                match apply_snapshot_internal(&app, &snap) {
+                                    Ok(()) => {
+                                        let _ = app
+                                            .emit("lan-sync-status", json!({ "state": "pulled" }));
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[lan] 应用手机端快照失败：{e}");
+                                        let _ = app.emit(
+                                            "lan-sync-status",
+                                            json!({ "state": "error", "message": e }),
+                                        );
+                                    }
+                                }
+                            }
                             Some("pull") => {
                                 if let Ok(snap) = build_snapshot(&app) {
                                     let out =
@@ -354,6 +453,14 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
             a.current = None;
         }
     }
+    // 清除出站通道登记（仅当登记的仍是本连接，避免误清新连接）
+    {
+        let lan = ctx.app.state::<LanState>();
+        let mut g = lan.client_tx.lock().unwrap();
+        if g.as_ref().map(|(id, _)| *id) == Some(my_id) {
+            *g = None;
+        }
+    }
     eprintln!("[lan] 客户端断开，当前连接数 {}", ctx.tx.receiver_count());
 }
 
@@ -445,40 +552,17 @@ pub fn get_connect_info(app: AppHandle) -> ConnectInfo {
     build_connect_info(&lan)
 }
 
-/// 返回当前全量快照（settings + Persisted 去 offsets）JSON 字符串
+/// 两端数据不一致时，由电脑端用户选定以哪一端为准。
+/// side：`local`=用电脑端数据覆盖手机；`remote`=用手机端数据覆盖电脑；`skip`=暂不同步。
 #[tauri::command]
-pub fn get_snapshot(app: AppHandle) -> Result<String, String> {
-    build_snapshot(&app)
-}
-
-/// 应用手机端推来的快照（反向同步）：写盘 + 载入内存 + 重启 watcher + 通知前端刷新。
-/// 跨设备导入一律丢弃 offsets，由新设备重扫本地日志重建；导入前不自动备份（由前端/调用方决定）。
-#[tauri::command]
-pub async fn apply_snapshot(app: AppHandle, json: String) -> Result<(), String> {
-    #[allow(unused_mut)] // 移动端会清空目录字段，桌面 target 不需要 mut
-    let mut parsed: Snapshot =
-        serde_json::from_str(&json).map_err(|e| format!("快照格式错误：{e}"))?;
-    // 移动端：目录字段是电脑端本机路径，照搬会让手机端后续保存设置时
-    // 因「日志目录不存在」报错，应用快照时直接清空
-    #[cfg(mobile)]
-    {
-        parsed.settings.log_dir.clear();
-        parsed.settings.screenshot_dir.clear();
-    }
-    // 写 settings.json
-    crate::write_settings(&app, &parsed.settings)?;
-    // 写 quest_state.json（丢弃 offsets，由新设备重扫日志重建）
-    let mut persisted = parsed.persisted;
-    persisted.offsets.clear();
-    let p = crate::persist::state_path(&app).ok_or_else(|| "无法确定数据目录".to_string())?;
-    if let Some(parent) = p.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let content = serde_json::to_string(&persisted).map_err(|e| e.to_string())?;
-    std::fs::write(&p, &content).map_err(|e| e.to_string())?;
-    crate::persist::save_collected(&app, &persisted.collected);
-    // 载入内存 + 重启 watcher
-    crate::apply_persisted(&app, &persisted);
-    let _ = app.emit("lan-sync-updated", ());
-    Ok(())
+pub async fn resolve_lan_conflict(app: AppHandle, side: String) -> Result<(), String> {
+    let tx = {
+        let lan = app.state::<LanState>();
+        let guard = lan.client_tx.lock().unwrap();
+        guard.as_ref().map(|(_, t)| t.clone())
+    };
+    let Some(tx) = tx else {
+        return Err("当前没有已连接的设备".to_string());
+    };
+    resolve_direction(&app, side.as_str(), &tx).await
 }

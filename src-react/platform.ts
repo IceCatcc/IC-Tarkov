@@ -11,3 +11,13 @@ export function isMobile(): boolean {
   const ua = navigator.userAgent || ''
   return /android|iphone|ipad|ipod/i.test(ua)
 }
+
+/**
+ * 是否 Android（UA 粗判）。
+ * 屏幕常亮等能力目前只有 Android 原生实现（iOS 无原生工程），
+ * 用这个判断决定是否展示相关 UI，避免 iOS 上出现点了没反应的开关。
+ */
+export function isAndroid(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /android/i.test(navigator.userAgent || '')
+}

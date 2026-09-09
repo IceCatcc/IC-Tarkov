@@ -266,6 +266,14 @@ export async function saveSettings(
   })
 }
 
+/**
+ * 移动端屏幕常亮开关：写入 settings.json 并立即生效（Android 切换 Window flag）。
+ * 桌面端无对应能力，仅持久化设置。
+ */
+export async function setKeepScreenOn(enable: boolean): Promise<AppSettings> {
+  return await invoke<AppSettings>('set_keep_screen_on', { enable })
+}
+
 export async function openUrl(url: string): Promise<void> {
   await invoke('open_url', { url })
 }
@@ -415,6 +423,37 @@ export async function getSnapshot(): Promise<string> {
 /** 应用手机端推来的快照（反向同步） */
 export async function applySnapshot(json: string): Promise<void> {
   await invoke('apply_snapshot', { json })
+}
+
+/** 数据摘要：判断两端用户数据是否一致（不含日志目录等仅属于单机的字段） */
+export interface SyncSummary {
+  /** 有进度的任务数（进行中 + 已完成） */
+  questCount: number
+  /** 已完成的任务数 */
+  completedCount: number
+  /** 收藏家已收集物品数 */
+  collectedCount: number
+  /** 手动解锁的任务数 */
+  unlockedCount: number
+  /** 档案等级 */
+  level: number
+  /** 内容指纹：两端一致即代表数据相同 */
+  hash: string
+  /** 是否为空数据（全新安装 / 从未记录进度） */
+  empty: boolean
+}
+
+/** 本端数据摘要：手机端连接时上报，电脑端据此判断两端是否一致 */
+export async function getSyncSummary(): Promise<SyncSummary> {
+  return await invoke<SyncSummary>('get_sync_summary')
+}
+
+/**
+ * 两端数据不一致时，由电脑端选择以哪一端数据为准。
+ * side：local=用电脑端数据覆盖手机 / remote=用手机端数据覆盖电脑 / skip=暂不同步
+ */
+export async function resolveLanConflict(side: 'local' | 'remote' | 'skip'): Promise<void> {
+  await invoke('resolve_lan_conflict', { side })
 }
 
 /**

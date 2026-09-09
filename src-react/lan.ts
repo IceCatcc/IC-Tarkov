@@ -19,6 +19,8 @@ import {
   getUnlocked,
   getCollectedItems,
   getSettings,
+  getSnapshot,
+  getSyncSummary,
 } from './tauri'
 
 export interface ParsedConnect {
@@ -227,12 +229,23 @@ export async function connectLan(c: ParsedConnect, opts?: { auto?: boolean }): P
       if (autoConnect) scheduleRetry(c)
     }
   }
-  // 连上即拉全量快照（首帧数据）
-  try {
-    sock.send(JSON.stringify({ type: 'pull' }))
-  } catch {
-    /* ignore */
-  }
+  // 连上先上报本端数据摘要，由电脑端决定同步方向：
+  // 两端一致 / 手机端为空 → 电脑端直接下发快照（新装 App 首次连接即完成初始化）；
+  // 两端都有数据且不一致 → 电脑端弹窗让用户选择以哪一端为准。
+  void (async () => {
+    try {
+      const summary = await getSyncSummary()
+      if (ws !== sock) return
+      sock.send(JSON.stringify({ type: 'hello', summary }))
+    } catch {
+      // 取不到摘要（旧版电脑端）时退回原有协议：直接拉全量
+      try {
+        if (ws === sock) sock.send(JSON.stringify({ type: 'pull' }))
+      } catch {
+        /* ignore */
+      }
+    }
+  })()
 }
 
 function scheduleRetry(c: ParsedConnect): void {
@@ -284,6 +297,20 @@ async function handleMessage(data: string): Promise<void> {
       useStore.getState().pushToast('已同步电脑端数据', 'done')
     } catch (e) {
       useStore.getState().pushToast('快照应用失败：' + String(e), 'info')
+    }
+  } else if (msg.type === 'sync-pending') {
+    // 两端数据不一致：等电脑端用户在界面上选择以哪一端为准
+    useStore.getState().pushToast('等待电脑端选择要同步的数据…', 'info')
+  } else if (msg.type === 'sync-skipped') {
+    useStore.getState().pushToast('电脑端选择了暂不同步', 'info')
+  } else if (msg.type === 'request-snapshot') {
+    // 电脑端选择以手机端数据为准：回传本端全量快照
+    try {
+      const snap = await getSnapshot()
+      sendLanMsg({ type: 'push', payload: snap })
+      useStore.getState().pushToast('已上传手机端数据到电脑端', 'done')
+    } catch (e) {
+      useStore.getState().pushToast('上传手机端数据失败：' + String(e), 'info')
     }
   }
 }

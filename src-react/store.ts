@@ -284,7 +284,13 @@ export const useStore = create<AppState>((set) => ({
   currentMap: null,
   setCurrentMap: (m) => set({ currentMap: m }),
 
-  settings: { logDir: '', screenshotDir: '', profile: { level: 1, loyalty: {}, lockedMaps: [] }, deleteScreenshots: true },
+  settings: {
+    logDir: '',
+    screenshotDir: '',
+    profile: { level: 1, loyalty: {}, lockedMaps: [] },
+    deleteScreenshots: true,
+    keepScreenOn: true,
+  },
   setSettings: (s) => set({ settings: s }),
   showSettings: false,
   openSettings: () => set({ showSettings: true }),

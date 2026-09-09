@@ -1478,6 +1478,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "if-addrs",
+ "jni",
  "notify",
  "once_cell",
  "regex",

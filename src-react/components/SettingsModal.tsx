@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { useStore } from '../store'
-import { isMobile } from '../platform'
+import { isMobile, isAndroid } from '../platform'
 import {
   saveSettings,
   startWatching,
@@ -18,6 +18,7 @@ import {
   getDataLocation,
   setDataLocation,
   getSettings,
+  setKeepScreenOn,
   type DataLocation,
 } from '../tauri'
 import type { DataStatus, DataSyncProgress, DataSyncReport } from '../types'
@@ -108,6 +109,9 @@ export default function SettingsModal() {
   const [rescanMenu, setRescanMenu] = useState(false)
   // 移动端关闭监控相关 UI（游戏在 PC，无日志/截图源）
   const mobile = isMobile()
+  // 屏幕常亮：仅 Android 有原生实现（iOS 无原生工程），只在 Android 上展示开关
+  const android = isAndroid()
+  const [keepOn, setKeepOn] = useState(settings.keepScreenOn ?? true)
 
   // 设置项分组视觉：标题(白亮加粗) / 选项(主色) / 说明(灰小字) 三级层级
   const TITLE_CLS = 'text-[14px] font-semibold text-[#e6edf3]'
@@ -188,6 +192,20 @@ export default function SettingsModal() {
       await refreshGameData(true)
     } catch (e) {
       setSyncing(false)
+      setError(String(e))
+    }
+  }
+
+  // 屏幕常亮开关：即时生效（后端切换 Window flag 并落盘），不走「保存」按钮
+  const onToggleKeepScreenOn = async (v: boolean) => {
+    setError(null)
+    setFeedback(null)
+    setKeepOn(v)
+    try {
+      const st = await setKeepScreenOn(v)
+      setSettings(st)
+    } catch (e) {
+      setKeepOn(!v)
       setError(String(e))
     }
   }
@@ -351,6 +369,25 @@ export default function SettingsModal() {
         </div>
 
         <div className="space-y-4 overflow-y-auto pr-1 flex-1 min-h-0">
+          {/* 屏幕常亮（仅 Android 有原生实现） */}
+          {android && (
+            <div>
+              <div className={`${TITLE_CLS} mb-2`}>屏幕常亮</div>
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={keepOn}
+                  onChange={(e) => onToggleKeepScreenOn(e.target.checked)}
+                  className="w-4 h-4 accent-amber"
+                />
+                <span className="text-[15px] text-[#e6edf3]">保持屏幕常亮</span>
+              </label>
+              <div className={`${DESC_CLS} mt-1`}>
+                开启后本应用在前台时不会自动熄屏，方便长时间查看任务与地图；会增加耗电。
+              </div>
+            </div>
+          )}
+
           {/* 监控目录（移动端关闭监控相关 UI，整块隐藏） */}
           {!mobile && (
           <div>

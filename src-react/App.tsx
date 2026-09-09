@@ -10,7 +10,7 @@ import {
 } from './tauri'
 import { useStore } from './store'
 import { startLanAutoConnect, reloadLocalData, loadLanConnect } from './lan'
-import { isMobile } from './platform'
+import { isMobile, isAndroid } from './platform'
 import { TopBar } from './components/TopBar'
 import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
@@ -22,6 +22,10 @@ import AboutModal from './components/AboutModal'
 import { WikiDrawer } from './components/WikiDrawer'
 import { Toasts } from './components/Toasts'
 import { LanConnectModal } from './components/LanConnectModal'
+import { LanConflictModal } from './components/LanConflictModal'
+
+/** 屏幕常亮开启时的启动提示文案（帮助窗口挂起后复用，保证文案一致） */
+const KEEP_ON_TOAST = '屏幕常亮已开启（可在设置中关闭）'
 
 export default function App() {
   const page = useStore((s) => s.page)
@@ -33,6 +37,8 @@ export default function App() {
   // 帮助窗口展示期间暂缓打开设置（缺日志目录时），待其关闭后再补上，
   // 避免两个浮层同时出现、设置窗口盖住帮助窗口。
   const pendingOpenSettings = useRef(false)
+  // 屏幕常亮提示：首次启动时帮助窗口会盖住通知，挂起到帮助关闭后再弹
+  const pendingKeepOnToast = useRef(false)
   const [showAbout, setShowAbout] = useState(false)
   // 同步：手机端未连接时自动弹出的连接视图
   const [showConnect, setShowConnect] = useState(false)
@@ -43,6 +49,10 @@ export default function App() {
       /* ignore */
     }
     setShowHelp(false)
+    if (pendingKeepOnToast.current) {
+      pendingKeepOnToast.current = false
+      useStore.getState().pushToast(KEEP_ON_TOAST, 'info')
+    }
     if (pendingOpenSettings.current) {
       pendingOpenSettings.current = false
       openSettings()
@@ -94,7 +104,17 @@ export default function App() {
         // 若首次启动的帮助窗口正在展示，则先挂起，等帮助关闭后再打开设置，
         // 避免两个浮层叠放（设置窗口层级更高会盖住帮助窗口）。
         // 移动端不启动日志监控（游戏在 PC，无日志/截图源），也不引导配置日志目录
-        if (mobile) return undefined
+        if (mobile) {
+          // 启动提示：屏幕常亮已开启（仅 Android 生效，设置里可关闭）
+          if (isAndroid() && st.keepScreenOn) {
+            const helpSeen =
+              typeof localStorage !== 'undefined' &&
+              localStorage.getItem('ic-tarkov.helpSeen.v1') === '1'
+            if (helpSeen) useStore.getState().pushToast(KEEP_ON_TOAST, 'info')
+            else pendingKeepOnToast.current = true
+          }
+          return undefined
+        }
         if (!st.logDir) {
           const helpSeen =
             typeof localStorage !== 'undefined' &&
@@ -138,6 +158,36 @@ export default function App() {
       })
       .catch(() => {})
     return () => {
+      off?.()
+    }
+  }, [])
+
+  // 同步（电脑端）：手机端连上后自动完成的同步，提示结果；
+  // 需要人工选择的情况由 LanConflictModal 弹窗处理。
+  useEffect(() => {
+    if (isMobile()) return
+    let disposed = false
+    let off: (() => void) | undefined
+    listen<{ state: string; message?: string }>('lan-sync-status', (e) => {
+      const done: Record<string, string> = {
+        pushed: '已把电脑端数据同步到手机',
+        pulled: '已用手机端数据覆盖本机',
+        skipped: '已跳过本次同步',
+      }
+      const s = e.payload
+      if (s.state === 'error') {
+        useStore.getState().pushToast('同步失败：' + (s.message ?? ''), 'info')
+      } else if (done[s.state]) {
+        useStore.getState().pushToast(done[s.state], 'done')
+      }
+    })
+      .then((u) => {
+        if (disposed) u()
+        else off = u
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
       off?.()
     }
   }, [])
@@ -258,6 +308,7 @@ export default function App() {
         </div>
       )}
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      {!mobile && <LanConflictModal />}
       <LanConnectModal open={showConnect} onClose={() => setShowConnect(false)} />
       <WikiDrawer />
       <Toasts />

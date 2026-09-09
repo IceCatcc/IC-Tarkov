@@ -43,6 +43,7 @@ npm run tauri:build:nobundle # 完整构建但跳过 NSIS 打包
 ### 关键约束
 
 - **前端产物目录**：`vite.config.ts` 里 `build.outDir = 'src-react/dist'`，必须与 `tauri.conf.json` 的 `frontendDist: "../src-react/dist"` 保持一致。二者不符会导致 `Unable to find your web assets` 错误。
+- **构建前必须清空 `src-react/dist`**：`vite.config.ts` 里 `emptyOutDir: false`，dist 会永久累积历次构建带 hash 的 js/css（曾堆到 36MB+），本地 NSIS/APK 因此明显大于 CI（CI 每次全新 checkout，dist 为空）。`react:build` / `react:build:fast` / `tauri:android` 已前置 `scripts/clean-dist.mjs`，不要去掉这步；Android 侧它同时清 `gen/android/app/build`（gradle 增量合并 assets 也会残留旧资源）。该脚本用「rename 到 trash + 系统命令删除」实现，避免 Node 的批量 fs 删除被 IDE safe-delete 拦截。
 - **不要自定义 Rust target 目录**：曾尝试用 `.cargo/config.toml` 的 `target-dir` 把产物重定向到项目根 `target/`，未生效且造成两处产物，已回退。保持 Tauri 默认 `src-tauri/target`。
 - **构建环境**：Windows 上需 MSVC 链接器。`.bat` 脚本负责配置，CI 的 `windows-latest` 自带。
 - **release 构建特性**：`Cargo.toml` 中 `[profile.release]` 开了 `strip + LTO`，编译较慢但可缩小体积、降低杀软误报。分发必须用 release，不要用 debug 产物。
@@ -99,5 +100,7 @@ git push origin v<version>
 
 ## 其他
 
+- **移动端原生定制点**：`src-tauri/gen/android` 已入库并含手工改动（见 `app/src/main/java/com/icecat/ictarkov/MainActivity.kt`：edge-to-edge insets、横屏隐藏状态栏、屏幕常亮 `setKeepScreenOn`），另有 `app/proguard-rules.pro` 里为该方法加的 keep 规则（release 开 R8，不加会因反射失败报 `NoSuchMethodError`）。重跑 `tauri android init` 会覆盖工程文件，改前先备份这几处。
+- **屏幕常亮**：开关持久化在 settings.json 的 `keepScreenOn`（默认 true），Android 生效路径为 `src-tauri/src/keepawake.rs` 经 `WebviewWindow::with_webview` + `jni_handle().exec` 反射调用 MainActivity 方法；iOS 无原生工程、桌面端无对应能力，均只持久化不生效，UI 用 `isAndroid()` 控制开关显隐。
 - `quest_analysis/` 目录已被 `.gitignore` 忽略，README 与提交中均不涉及。
 - 本项目为 Vibe Coding 项目（深度使用 AI 编程），README 与软件内「帮助窗口 → 关于」均已声明。

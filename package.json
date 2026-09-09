@@ -8,7 +8,7 @@
     "tauri:build": "tauri build",
     "tauri:build:nobundle": "tauri build --no-bundle",
     "tauri:android": "node scripts/clean-dist.mjs --android && node scripts/sync-android-version.mjs && tauri android build --apk --target aarch64 && node scripts/sign-apk.mjs",
-    "tauri:android:dev": "tauri android dev --127.0.0.1:7555  --force-ip-prompt",
+    "tauri:android:dev": "tauri android dev",
     "react:dev": "vite",
     "react:build": "node scripts/clean-dist.mjs && tsc && vite build",
     "react:build:fast": "node scripts/clean-dist.mjs && vite build",
