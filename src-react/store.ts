@@ -103,6 +103,9 @@ interface AppState {
   questDetails: Record<string, QuestDetail>
   setQuestDetail: (id: string, d: QuestDetail) => void
 
+  /** Wiki 内嵌抽屉宽度（右侧占比 %，桌面可拖动调整，范围 30~92） */
+  wikiWidth: number
+  setWikiWidth: (v: number) => void
   /** Wiki 内嵌抽屉 */
   wikiUrl: string | null
   openWiki: (url: string) => void
@@ -258,6 +261,7 @@ export function collectUiPrefs(): Record<string, unknown> {
       chips: s.mapChips,
     },
     uiScale: s.uiScale,
+    wikiWidth: s.wikiWidth,
     wikiSite: s.wikiSite,
     wikiCustom: s.wikiCustom,
   }
@@ -274,6 +278,8 @@ interface UiPrefsShape {
   }
   /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2 */
   uiScale?: number
+  /** Wiki 抽屉宽度（右侧占比 %） */
+  wikiWidth?: number
   /** Wiki 站点：eftarkov / tarkovbox / custom */
   wikiSite?: WikiSite
   /** 自定义 Wiki 模板（含 {taskid} 占位） */
@@ -495,6 +501,8 @@ export const useStore = create<AppState>((set, get) => ({
   questDetails: {},
   setQuestDetail: (id, d) => set((s) => ({ questDetails: { ...s.questDetails, [id]: d } })),
 
+  wikiWidth: 62,
+  setWikiWidth: (v) => set({ wikiWidth: Math.round(Math.min(92, Math.max(30, v))) }),
   wikiUrl: null,
   openWiki: (url) => set({ wikiUrl: url }),
   closeWiki: () => set({ wikiUrl: null }),
@@ -609,6 +617,9 @@ export const useStore = create<AppState>((set, get) => ({
     }
     if (typeof u.uiScale === 'number') {
       patch.uiScale = [1, 1.25, 1.5, 2].includes(u.uiScale) ? u.uiScale : 1
+    }
+    if (typeof u.wikiWidth === 'number') {
+      patch.wikiWidth = Math.round(Math.min(92, Math.max(30, u.wikiWidth)))
     }
     if (u.wikiSite === 'eftarkov' || u.wikiSite === 'tarkovbox' || u.wikiSite === 'custom') {
       patch.wikiSite = u.wikiSite

@@ -123,6 +123,7 @@ export async function initTauri(): Promise<UnlistenFn> {
     'untrackedQuests',
     'mapChips',
     'uiScale',
+    'wikiWidth',
     'wikiSite',
     'wikiCustom',
   ] as const

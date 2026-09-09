@@ -6,9 +6,31 @@ import { openUrl } from '../tauri'
 export function WikiDrawer() {
   const wikiUrl = useStore((s) => s.wikiUrl)
   const closeWiki = useStore((s) => s.closeWiki)
+  // 桌面端宽度可拖动调整（存 uiPrefs，跨启动保留）；移动端竖屏全屏，不参与
+  const wikiWidth = useStore((s) => s.wikiWidth)
+  const setWikiWidth = useStore((s) => s.setWikiWidth)
+  const [resizing, setResizing] = useState(false)
   // 挂载后下一帧再滑入，触发 CSS 过渡
   const [shown, setShown] = useState(false)
   const mobile = isMobile()
+
+  // 拖动左边缘调整宽度：按指针到屏幕右侧的距离换算占比
+  useEffect(() => {
+    if (!resizing) return
+    const onMove = (e: PointerEvent) => {
+      const pct = ((window.innerWidth - e.clientX) / window.innerWidth) * 100
+      setWikiWidth(pct)
+    }
+    const stop = () => setResizing(false)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+  }, [resizing, setWikiWidth])
 
   useEffect(() => {
     if (wikiUrl) {
@@ -47,16 +69,35 @@ export function WikiDrawer() {
         style={{ opacity: shown ? 1 : 0 }}
         onClick={closeWiki}
       />
-      {/* 抽屉：桌面/横屏为右侧 62%；移动端竖屏全屏 */}
+      {/* 抽屉：桌面为右侧可拖动宽度（默认 62%）；移动端竖屏全屏 */}
       <div
         className={`absolute bg-ink-900 shadow-2xl flex flex-col transition-transform duration-250 ${
           mobile
             ? `inset-0 w-full border-t border-line ${shown ? 'translate-y-0' : 'translate-y-full'}`
-            : `right-0 top-0 h-full w-[62%] min-w-[560px] border-l border-line ${
+            : `right-0 top-0 h-full min-w-[320px] border-l border-line ${
                 shown ? 'translate-x-0' : 'translate-x-full'
               }`
         }`}
+        style={mobile ? undefined : { width: `${wikiWidth}%` }}
       >
+        {/* 拖动改宽度的手柄（仅桌面）：iframe 会吞掉指针事件，故拖动期间另加遮挡层 */}
+        {!mobile && (
+          <div
+            onPointerDown={(e) => {
+              e.preventDefault()
+              setResizing(true)
+            }}
+            title="拖动调整宽度"
+            className="absolute left-0 top-0 h-full w-2 -translate-x-1/2 z-40 cursor-col-resize group"
+          >
+            <div
+              className={`h-full w-full transition-colors ${
+                resizing ? 'bg-amber/70' : 'bg-transparent group-hover:bg-amber/50'
+              }`}
+            />
+          </div>
+        )}
+        {resizing && <div className="absolute inset-0 z-50 cursor-col-resize" />}
         <div className="shrink-0 flex items-center gap-3 px-4 py-2.5 bg-ink-800 border-b border-line">
           <span className="text-[15px] font-medium">任务 Wiki</span>
           <button
