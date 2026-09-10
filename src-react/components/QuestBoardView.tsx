@@ -51,6 +51,8 @@ export function QuestBoardView() {
   const showCompleted = useStore((s) => s.showCompletedGraph)
   // null = 全部商人
   const [trader, setTrader] = useState<string | null>(null)
+  // 地图筛选：'' = 全部；由顶部工具栏（与搜索同一栏）控制，无地图信息的任务保留显示
+  const mapFilter = useStore((s) => s.boardMapFilter)
   // 分页：每张卡会按需拉取任务详情，一次铺开全部（500+）会瞬间发出大量请求
   const [limit, setLimit] = useState(60)
 
@@ -77,6 +79,11 @@ export function QuestBoardView() {
       if (!showPrestige && n.prestigeLevel != null) continue
       if (!showCompleted && statusOf.get(n.id) === 'completed') continue
       if (q && !n.name.toLowerCase().includes(q)) continue
+      // 地图筛选：任务涉及该地图即命中；无地图信息的任务保持显示
+      if (mapFilter) {
+        const ms = n.maps ?? []
+        if (ms.length > 0 && !ms.includes(mapFilter)) continue
+      }
       const st = statusOf.get(n.id)
       let state: ItemState = 'locked'
       if (st === 'completed') state = 'completed'
@@ -90,7 +97,17 @@ export function QuestBoardView() {
       out.push({ n, state, preReqs })
     }
     return out
-  }, [graph, playerQuests, unlockedQuests, questMode, search, hideLegacy, showPrestige, showCompleted])
+  }, [
+    graph,
+    playerQuests,
+    unlockedQuests,
+    questMode,
+    search,
+    hideLegacy,
+    showPrestige,
+    showCompleted,
+    mapFilter,
+  ])
 
   // 商人列表：按 TRADERS 顺序（未收录的排最后，按名称）
   const traders = useMemo(() => {
@@ -214,7 +231,7 @@ export function QuestBoardView() {
         })}
       </nav>
 
-      {/* 右侧：LL 分组 + 卡片 */}
+      {/* 右侧：LL 分组 + 卡片（地图筛选在顶部工具栏，与搜索同一栏） */}
       <div className="flex-1 min-w-0 h-full overflow-y-auto px-4 py-3">
         {groups.length === 0 ? (
           <div className="text-[14px] text-muted py-10 text-center">没有符合条件的任务</div>
@@ -278,7 +295,6 @@ function QuestBoardCard({
   const url = wikiUrlFor(n.id)
   const avatar = traderImage(n.traderId)
   const traderLabel = traderDisplayName(n.traderId, n.traderName)
-  const ll = questLoyaltyLevel(n)
   // 所需物品：详情中跨目标去重；详情未就绪时回退到节点自带的上交物品
   const items = detail
     ? dedupeItems((detail.objectives ?? []).flatMap((o) => o.items ?? []))
@@ -304,14 +320,6 @@ function QuestBoardCard({
           />
         )}
         <span className="text-[18px] font-semibold truncate min-w-0 flex-1">{n.name}</span>
-        {ll > 0 && (
-          <span
-            className="shrink-0 px-1.5 py-0.5 rounded border text-[12px] border-amber/40 bg-amber/15 text-amber"
-            title="该任务要求的商人忠诚等级"
-          >
-            LL{ll}
-          </span>
-        )}
         {n.minLevel != null && n.minLevel > 0 && (
           <span className="shrink-0 px-1.5 py-0.5 rounded border border-line text-[12px] text-muted">
             Lv{n.minLevel}+
@@ -342,12 +350,6 @@ function QuestBoardCard({
         >
           {STATE_TEXT[state]}
         </span>
-      </div>
-
-      {/* 第二行：商人 / 地图（等级与前置已提到首行） */}
-      <div className="mt-1 flex items-center gap-2 text-[12px] text-muted flex-wrap">
-        <span>{traderLabel}</span>
-        {n.mapName && <span>{n.mapName}</span>}
       </div>
 
       {/* 条件徽章：非发布者商人的忠诚等级 / 好感 / 转生 / 赛季 / 模式 */}

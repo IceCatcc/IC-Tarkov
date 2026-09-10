@@ -6,7 +6,7 @@ import { traderDisplayName } from '../traderMeta'
 export function QuestCard({ quest }: { quest: PlayerQuest }) {
   const completed = quest.status === 'completed'
   const avatar = traderImage(quest.traderId)
-  // 商人统一展示为「中文名-英文名」
+  // 商人统一展示中文名
   const traderLabel = traderDisplayName(quest.traderId, quest.traderName)
   const openWiki = useStore((s) => s.openWiki)
   const wikiUrlFor = useStore((s) => s.wikiUrlFor)
@@ -48,9 +48,8 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
         </span>
       </div>
 
-      {/* 第二行：商人名（弱化）+ 时间（最不重要） */}
+      {/* 第二行：时间 / 最低等级（商人由首行头像体现） */}
       <div className="mt-1 flex items-center gap-2 text-[12px] text-muted flex-wrap">
-        {quest.traderName && <span>{traderLabel}</span>}
         {quest.acceptedAt && <span className="text-muted/60">接取 {quest.acceptedAt}</span>}
         {quest.completedAt && <span className="text-muted/60">完成 {quest.completedAt}</span>}
         {quest.minLevel != null && <span className="text-muted/60">最低 Lv{quest.minLevel}</span>}

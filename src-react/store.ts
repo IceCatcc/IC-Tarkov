@@ -131,6 +131,10 @@ interface AppState {
   searchGraph: string
   setSearchGraph: (s: string) => void
 
+  /** 任务板（列表视图）的地图筛选：'' = 全部地图；与图谱视图的地图筛选相互独立 */
+  boardMapFilter: string
+  setBoardMapFilter: (m: string) => void
+
   /** 监控页任务列表的关键字过滤（在所选分类内过滤任务名 / 商人名） */
   searchMonitor: string
   setSearchMonitor: (s: string) => void
@@ -221,8 +225,10 @@ async function switchBackendMode(m: QuestMode): Promise<void> {
 }
 
 // —— 任务图谱筛选偏好持久化（localStorage）——
-// 好感达标 / 等级达标 / 地图解锁 / 专注模式 / 商人隐藏 的勾选状态跨启动保留。
-const GRAPH_PREFS_KEY = 'ic-tarkov.graphPrefs.v1'
+// 好感达标 / 等级达标 / 地图解锁 / 显示已完成 / 商人隐藏 的勾选状态跨启动保留。
+// v2：新增「显示已完成」开关（旧版无入口、恒为显示，故升级时按新默认「关闭」重置一次）
+const GRAPH_PREFS_KEY = 'ic-tarkov.graphPrefs.v2'
+const GRAPH_PREFS_KEY_V1 = 'ic-tarkov.graphPrefs.v1'
 // 默认不勾选（即隐藏）的特殊商人：竞技场裁判、BTR 司机、灯塔守护者
 const DEFAULT_DISABLED_TRADERS = [
   '6617beeaa9cfa777ca915b7c', // 竞技场裁判
@@ -246,15 +252,17 @@ function loadGraphPrefs(): GraphPrefs {
     repMet: true,
     lvlMet: false,
     mapUnlocked: false,
-    // 筛选入口已移除：固定为「不过滤等级 / LL / 地图，且显示已完成 + 赛季 + 转生」
-    showCompleted: true,
+    // 「显示已完成」默认关闭：默认过滤掉已完成任务
+    showCompleted: false,
     hideLegacy: false,
     showPrestige: true, // 默认显示转生任务（「转生任务」不勾选才隐藏）
     disabledTraders: Object.fromEntries(DEFAULT_DISABLED_TRADERS.map((id) => [id, true])),
     questMode: 'pvp',
   }
   try {
-    const raw = localStorage.getItem(GRAPH_PREFS_KEY)
+    // 优先读 v2；没有时回退 v1（迁移：其余偏好沿用，只有「显示已完成」按新默认处理）
+    const rawV2 = localStorage.getItem(GRAPH_PREFS_KEY)
+    const raw = rawV2 ?? localStorage.getItem(GRAPH_PREFS_KEY_V1)
     if (!raw) return fallback
     const p = JSON.parse(raw) as Partial<GraphPrefs>
     return {
@@ -262,7 +270,8 @@ function loadGraphPrefs(): GraphPrefs {
       repMet: false,
       lvlMet: false,
       mapUnlocked: false,
-      showCompleted: true,
+      // 新开关：v2 里正常记忆用户选择；从 v1 迁移时忽略历史值（旧版恒为 true、无用户意图）
+      showCompleted: rawV2 && typeof p.showCompleted === 'boolean' ? p.showCompleted : false,
       hideLegacy: false,
       showPrestige: true,
       disabledTraders: { ...fallback.disabledTraders, ...(p.disabledTraders ?? {}) },
@@ -585,6 +594,9 @@ export const useStore = create<AppState>((set, get) => ({
   setMapSelGraph: (m) => set({ mapSelGraph: m }),
   searchGraph: '',
   setSearchGraph: (s) => set({ searchGraph: s }),
+
+  boardMapFilter: '',
+  setBoardMapFilter: (m) => set({ boardMapFilter: m }),
 
   searchMonitor: '',
   setSearchMonitor: (s) => set({ searchMonitor: s }),

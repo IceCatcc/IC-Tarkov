@@ -36,13 +36,10 @@ export const TRADER_ZH: Record<string, string> = Object.fromEntries(
   TRADERS.map((t) => [t.id, t.zh]),
 )
 
-/** 界面展示名：统一为「中文名-英文名」（如「机械师-Mechanic」），未知商人回退原名 */
+/** 界面展示名：统一用中文名（如「机械师」），未知商人回退原名 */
 export function traderDisplayName(traderId: string, fallbackName?: string): string {
   const meta = TRADERS.find((t) => t.id === traderId)
-  if (meta) {
-    // 中英文名相同时不重复拼接
-    return meta.zh === meta.name ? meta.zh : `${meta.zh}-${meta.name}`
-  }
+  if (meta) return meta.zh
   return fallbackName ?? traderId
 }
 

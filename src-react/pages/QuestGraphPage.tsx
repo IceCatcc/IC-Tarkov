@@ -356,6 +356,9 @@ export function QuestGraphPage() {
   const setSelected = useStore((s) => s.setSelected)
   const search = useStore((s) => s.searchGraph)
   const setSearch = useStore((s) => s.setSearchGraph)
+  const mapNames = useStore((s) => s.mapNames)
+  const boardMapFilter = useStore((s) => s.boardMapFilter)
+  const setBoardMapFilter = useStore((s) => s.setBoardMapFilter)
   const page = useStore((s) => s.page)
   const openWiki = useStore((s) => s.openWiki)
   const wikiUrlFor = useStore((s) => s.wikiUrlFor)
@@ -382,6 +385,18 @@ export function QuestGraphPage() {
   // 侧边栏折叠时，顶部工具栏为左上角浮动按钮预留空位
   // 注意：hook 必须位于所有 early return 之前，否则触发 "Rendered more hooks" 崩溃
   const topPad = useTopPad()
+
+  // 任务板（列表视图）地图筛选选项：取自当前模式的任务，按官方中文名排序
+  const boardMapOptions = useMemo(() => {
+    const s = new Set<string>()
+    for (const n of graph?.nodes ?? []) {
+      if (n.modes && n.modes.length > 0 && !n.modes.includes(questMode)) continue
+      for (const m of n.maps ?? []) if (m) s.add(m)
+    }
+    return Array.from(s).sort((a, b) =>
+      (mapNames[a] ?? a).localeCompare(mapNames[b] ?? b, 'zh'),
+    )
+  }, [graph, questMode, mapNames])
 
   const [view, setView] = useState({ x: 30, y: 30, scale: DEFAULT_SCALE })
   const dragRef = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(
@@ -2295,13 +2310,40 @@ export function QuestGraphPage() {
           重置视图
         </button>
 
-        {/* 搜索：放在最右侧，并加宽 */}
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索任务名…"
-          className="ml-auto shrink-0 bg-ink-700 border border-line text-[15px] rounded px-3 py-1.5 text-[#e6edf3] w-72 placeholder:text-muted"
-        />
+        {/* 搜索 + 任务板筛选（显示已完成 / 地图）：同一栏，整体靠右 */}
+        <div className="ml-auto shrink-0 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowCompleted(!showCompleted)}
+            title="显示已完成任务（默认关闭：图谱与列表都只显示未完成的任务）"
+            className={`${chip} shrink-0 ${
+              showCompleted ? 'bg-amber/15 text-[#d4a174] border-amber/60' : chipOff
+            }`}
+          >
+            已完成
+          </button>
+          {graphTab === 'list' && (
+            <select
+              value={boardMapFilter}
+              onChange={(e) => setBoardMapFilter(e.target.value)}
+              title="按地图筛选任务（无地图信息的任务始终保留）"
+              className="shrink-0 bg-ink-700 border border-line text-[15px] rounded px-2 py-1.5 text-[#e6edf3] max-w-[190px]"
+            >
+              <option value="">全部地图</option>
+              {boardMapOptions.map((m) => (
+                <option key={m} value={m}>
+                  {mapNames[m] ?? m}
+                </option>
+              ))}
+            </select>
+          )}
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索任务名…"
+            className="shrink-0 bg-ink-700 border border-line text-[15px] rounded px-3 py-1.5 text-[#e6edf3] w-72 placeholder:text-muted"
+          />
+        </div>
       </div>
 
       {graphTab === 'list' && (

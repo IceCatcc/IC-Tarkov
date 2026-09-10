@@ -2,6 +2,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useStore, collectUiPrefs } from './store'
 import { sendLanMsg } from './lan'
+import { traderDisplayName } from './traderMeta'
 import type {
   QuestEventPayload,
   WatcherStatePayload,
@@ -41,7 +42,8 @@ export async function initTauri(): Promise<UnlistenFn> {
     await listen<QuestEventPayload>('quest-event', (e) => {
       const p = e.payload
       applyEvent(p)
-      if (p.type === 'accept') pushToast(`接取任务：${p.name} · ${p.traderName}`, 'accept')
+      if (p.type === 'accept')
+        pushToast(`接取任务：${p.name} · ${traderDisplayName(p.traderId, p.traderName)}`, 'accept')
       else if (p.type === 'complete') pushToast(`完成任务：${p.name}`, 'done')
     }),
   )
