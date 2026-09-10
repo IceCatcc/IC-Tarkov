@@ -145,6 +145,16 @@ export function llLabel(ll: number): string {
   return ll >= 1 ? `LL${ll}+` : '无 LL 要求'
 }
 
+/** 任务模式：PVP（常驻）/ PVPS（PvP 赛季）/ PVE —— 三种模式进度、收藏、档案各自独立 */
+export type QuestMode = 'pvp' | 'pvps' | 'pve'
+
+/** 模式展示名 */
+export const QUEST_MODE_LABEL: Record<QuestMode, string> = {
+  pvp: 'PVP',
+  pvps: 'PVPS',
+  pve: 'PVE',
+}
+
 /** 条件的比较符号文案 */
 export function compareLabel(compare: string): string {
   switch (compare) {
@@ -229,6 +239,7 @@ export interface QuestDetail {
 }
 
 // 后端通过 'quest-event' 推送的增量事件
+// mode = 事件归属的任务模式（日志检测到的会话模式）；与界面查看的模式不一致时应忽略
 export type QuestEventPayload =
   | {
       type: 'accept'
@@ -241,6 +252,7 @@ export type QuestEventPayload =
       minLevel: number | null
       timestamp: string
       source: string
+      mode?: string
     }
   | {
       type: 'complete'
@@ -249,12 +261,14 @@ export type QuestEventPayload =
       timestamp: string
       via: string
       source: string
+      mode?: string
     }
   | {
       type: 'progress'
       timestamp: string
       endpoint: string
       source: string
+      mode?: string
     }
 
 // ===== 玩家位置（截图文件名解析） =====

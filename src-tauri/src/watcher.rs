@@ -49,13 +49,13 @@ pub fn start(app: &AppHandle, dir: &str) -> Result<WatcherHandle, String> {
 
     {
         let binding = app.state::<AppState>();
-        let mut st = binding.store.lock().unwrap();
-        st.log_dir = dir.to_string();
-        st.last_scan = Some(now());
-        st.error = None;
+        let mut w = binding.watch.lock().unwrap();
+        w.log_dir = dir.to_string();
+        w.last_scan = Some(now());
+        w.error = None;
     }
     scan_dir(app, dir, &states, &seen, false);
-    crate::persist::save(app); // 落盘初始扫描结果 + 偏移
+    crate::persist::save_all_from(app); // 落盘初始扫描结果 + 偏移
 
     // 周期性 rescan 兜底：notify 的 RecursiveMode 在新 session 目录（游戏启动/重启时新建）
     // 的 watch 注册存在时序竞态，可能漏掉新目录内文件的初始内容，导致整轮游戏不被识别。
@@ -67,7 +67,7 @@ pub fn start(app: &AppHandle, dir: &str) -> Result<WatcherHandle, String> {
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(3));
         scan_dir(&r_app, &r_dir, &r_states, &r_seen, true);
-        crate::persist::save(&r_app); // 每次扫描后落盘（含新增任务与偏移）
+        crate::persist::save_all_from(&r_app); // 每次扫描后落盘（含新增任务与偏移）
     });
 
     Ok(WatcherHandle {
@@ -111,8 +111,7 @@ fn scan_dir(
         }
     }
     let binding = app.state::<AppState>();
-    let mut st = binding.store.lock().unwrap();
-    st.sessions = session_dirs.len();
+    binding.watch.lock().unwrap().sessions = session_dirs.len();
 }
 
 fn process_file(
@@ -134,8 +133,7 @@ fn process_file(
     let mut truncated = false;
     let offset = {
         let binding = app.state::<AppState>();
-        let g = binding.offsets.lock().unwrap();
-        let o = g.get(&key).copied().unwrap_or(0);
+        let o = binding.with_active(|md| md.offsets.get(&key).copied().unwrap_or(0));
         if o > size {
             // 文件被截断/轮转（如游戏重建会话），offset 失效，从头读并重置解析状态
             truncated = true;
@@ -162,8 +160,9 @@ fn process_file(
     }
     {
         let binding = app.state::<AppState>();
-        let mut g = binding.offsets.lock().unwrap();
-        g.insert(key.clone(), size);
+        binding.with_active(|md| {
+            md.offsets.insert(key.clone(), size);
+        });
     }
     let text = String::from_utf8_lossy(&buf);
     if text.is_empty() {
@@ -196,8 +195,7 @@ fn process_file(
                 let info = data::resolve_accept(&quest_id);
                 {
                     let binding = app.state::<AppState>();
-                    let mut st = binding.store.lock().unwrap();
-                    st.apply_accept(&quest_id, &info.name, &timestamp);
+                    binding.with_active(|md| md.apply_accept(&quest_id, &info.name, &timestamp));
                 }
                 if emit {
                     crate::emit_accept(
@@ -227,8 +225,7 @@ fn process_file(
                 let name = data::resolve_name(&quest_id);
                 {
                     let binding = app.state::<AppState>();
-                    let mut st = binding.store.lock().unwrap();
-                    st.apply_complete(&quest_id, &name, &timestamp);
+                    binding.with_active(|md| md.apply_complete(&quest_id, &name, &timestamp));
                 }
                 if emit {
                     crate::emit_complete(app, &quest_id, &name, &timestamp, "通知", &source);
@@ -248,8 +245,7 @@ fn process_file(
                 }
                 {
                     let binding = app.state::<AppState>();
-                    let mut st = binding.store.lock().unwrap();
-                    st.apply_progress(&endpoint, &timestamp);
+                    binding.with_active(|md| md.apply_progress(&endpoint, &timestamp));
                 }
                 crate::emit_progress(app, &endpoint, &timestamp, &source);
             }
@@ -260,8 +256,7 @@ fn process_file(
                 // 无论初始扫描还是实时事件都要更新当前地图（并去重：地图未变不重复 emit）
                 let changed = {
                     let binding = app.state::<AppState>();
-                    let mut st = binding.store.lock().unwrap();
-                    st.apply_location(&location_id)
+                    binding.with_active(|md| md.apply_location(&location_id))
                 };
                 if changed && emit {
                     let _ = app.emit(
@@ -271,16 +266,22 @@ fn process_file(
                 }
             }
             parser::RawEvent::SessionMode { mode, timestamp } => {
-                // 会话模式（pve/pvp）：初始扫描静默更新 store，实时检测到变化才 emit
+                // 会话模式决定新事件写入哪一套数据：初始扫描静默切换，实时变化才 emit
+                let target = crate::store::norm_mode(&mode);
                 let changed = {
                     let binding = app.state::<AppState>();
-                    let mut st = binding.store.lock().unwrap();
-                    st.apply_session_mode(&mode)
+                    let mut am = binding.active_mode.lock().unwrap();
+                    if *am != target {
+                        *am = target.clone();
+                        true
+                    } else {
+                        false
+                    }
                 };
                 if changed && emit {
                     let _ = app.emit(
                         "session-mode",
-                        serde_json::json!({ "mode": mode, "timestamp": timestamp }),
+                        serde_json::json!({ "mode": target, "timestamp": timestamp }),
                     );
                 }
             }

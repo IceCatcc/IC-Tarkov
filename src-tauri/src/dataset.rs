@@ -412,13 +412,13 @@ fn build_quests(raw: &Raw, maps: &HashMap<String, MapEntry>) -> HashMap<String, 
 
     let mut index: HashMap<String, QuestNode> = HashMap::new();
 
-    // 3) regular(=PVP) 集合
+    // 3) regular 集合：PVP 与 PVPS 的任务集完全相同（两者只有进度数据独立），
+    //    同时出现在 PVE 集合里的任务也属于 PVE
     for (qid, t) in &raw.tasks_regular {
-        let modes = if raw.tasks_pve.contains_key(qid) {
-            vec!["pvp".to_string(), "pve".to_string()]
-        } else {
-            vec!["pvp".to_string()]
-        };
+        let mut modes = vec!["pvp".to_string(), "pvps".to_string()];
+        if raw.tasks_pve.contains_key(qid) {
+            modes.push("pve".to_string());
+        }
         index.insert(
             qid.clone(),
             build_one(raw, qid, t, &raw.zh_tasks, &modes, &var_to_trader, &map_names, &prestige_of),
@@ -432,6 +432,20 @@ fn build_quests(raw: &Raw, maps: &HashMap<String, MapEntry>) -> HashMap<String, 
         index.insert(
             qid.clone(),
             build_one(raw, qid, t, &raw.zh_tasks_pve, &["pve".to_string()], &var_to_trader, &map_names, &prestige_of),
+        );
+    }
+    // 4b) 赛季独有任务（不在 PVP 常驻集合里）
+    for (qid, t) in &raw.tasks_season {
+        if raw.tasks_regular.contains_key(qid) {
+            continue;
+        }
+        let mut modes = vec!["pvps".to_string()];
+        if raw.tasks_pve.contains_key(qid) {
+            modes.push("pve".to_string());
+        }
+        index.insert(
+            qid.clone(),
+            build_one(raw, qid, t, &raw.zh_tasks, &modes, &var_to_trader, &map_names, &prestige_of),
         );
     }
     // 5) 共有任务在 PVE 下前置不同时单独存一份

@@ -57,11 +57,13 @@ export async function initTauri(): Promise<UnlistenFn> {
     }),
   )
   track(
-    await listen<PlayerProfile>('profile-changed', (e) => {
-      if (e.payload) {
-        const s = useStore.getState()
-        s.setSettings({ ...s.settings, profile: e.payload })
-      }
+    await listen<{ profile: PlayerProfile; mode?: string }>('profile-changed', (e) => {
+      const p = e.payload
+      if (!p?.profile) return
+      const s = useStore.getState()
+      // 档案按模式独立：事件带的是对端「当前查看模式」的档案，模式不一致时忽略
+      if (p.mode && p.mode !== s.questMode) return
+      s.setSettings({ ...s.settings, profile: p.profile })
     }),
   )
 
@@ -347,6 +349,11 @@ export async function fetchTarkovTime(): Promise<number | null> {
 
 export async function getSessionMode(): Promise<string | null> {
   return await invoke<string | null>('get_session_mode')
+}
+
+/** 切换界面查看的任务模式（pvp / pvps / pve）：后端据此读取与写入对应的那套数据 */
+export async function setViewMode(mode: 'pvp' | 'pvps' | 'pve'): Promise<void> {
+  await invoke('set_view_mode', { mode })
 }
 
 export async function getMaps(): Promise<MapInfo[]> {

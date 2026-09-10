@@ -379,7 +379,6 @@ export function QuestGraphPage() {
   const setGraphTab = useStore((s) => s.setGraphTab)
   // 任务模式过滤（pvp/pve，localStorage 持久化；日志检测到会话模式时自动跟随）
   const questMode = useStore((s) => s.questMode)
-  const setQuestMode = useStore((s) => s.setQuestMode)
   // 侧边栏折叠时，顶部工具栏为左上角浮动按钮预留空位
   // 注意：hook 必须位于所有 early return 之前，否则触发 "Rendered more hooks" 崩溃
   const topPad = useTopPad()
@@ -2260,26 +2259,6 @@ export function QuestGraphPage() {
         className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 bg-ink-800 border-b border-line relative z-30 overflow-visible"
         style={{ paddingLeft: 16 + topPad }}
       >
-        {/* 模式切换：PVP / PVE（日志检测到游戏会话模式时自动跟随切换） */}
-        <div
-          className="shrink-0 flex items-center rounded-full border border-line bg-ink-700 p-0.5"
-          title="任务模式：PVP（正规服务器）/ PVE（PvE 服务器）。游戏启动时从日志检测会话模式并自动切换，也可手动点选（会记住选择）。"
-        >
-          {(['pvp', 'pve'] as const).map((m) => (
-            <button
-              key={m}
-              onClick={() => setQuestMode(m)}
-              className={`px-2.5 h-[22px] rounded-full text-[13px] leading-none transition-colors ${
-                questMode === m
-                  ? 'bg-amber text-black font-medium'
-                  : 'text-muted hover:text-[#e6edf3]'
-              }`}
-            >
-              {m === 'pvp' ? 'PVP' : 'PVE'}
-            </button>
-          ))}
-        </div>
-
         {/* 一级视图 tab：任务列表 / 任务链 */}
         <div className="shrink-0 flex items-center rounded-full border border-line bg-ink-700 p-0.5">
           {(['list', 'chain'] as const).map((v) => (

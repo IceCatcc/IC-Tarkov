@@ -128,12 +128,12 @@ export function CollectorPage() {
     }
   }, [])
 
-  // 已收集进度（后端 collected.json 持久化）
+  // 已收集进度（后端按模式持久化）；切换模式后重新拉取，store 里也会同步刷新
   useEffect(() => {
     getCollectedItems()
       .then(setCollectedItems)
       .catch(() => {})
-  }, [setCollectedItems])
+  }, [setCollectedItems, questMode])
 
   // 任务详情（复用全局详情缓存；objectives 里即 44 件收集品）
   const detail = useQuestDetail(questId)

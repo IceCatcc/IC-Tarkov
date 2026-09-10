@@ -12,8 +12,16 @@ import type {
   ItemRef,
   Toast,
   ToastKind,
+  QuestMode,
 } from './types'
-import { getQuestDetail } from './tauri'
+import {
+  getQuestDetail,
+  getPlayerQuests,
+  getUnlocked,
+  getCollectedItems,
+  getSettings,
+  setViewMode,
+} from './tauri'
 import { buildWikiUrl, type WikiSite } from './wiki'
 import { ICON_DEFAULTS, migrateChips } from './mapIconGroups'
 
@@ -147,9 +155,9 @@ interface AppState {
   /** 任务页当前视图：'list' 任务列表 / 'chain' 任务链图谱 */
   graphTab: 'list' | 'chain'
   setGraphTab: (v: 'list' | 'chain') => void
-  /** 任务图谱模式过滤：'pvp' | 'pve'（localStorage 持久化；日志检测到会话模式时自动跟随） */
-  questMode: 'pvp' | 'pve'
-  setQuestMode: (v: 'pvp' | 'pve') => void
+  /** 任务模式：pvp / pvps / pve（三套数据独立；持久化，日志检测到会话模式时自动跟随） */
+  questMode: QuestMode
+  setQuestMode: (v: QuestMode) => void
   /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2，作用于根节点 CSS zoom */
   uiScale: number
   setUiScale: (v: number) => void
@@ -177,6 +185,41 @@ function uid(): string {
   return Math.random().toString(36).slice(2, 10)
 }
 
+/** 规范化任务模式名（旧数据只有 pvp/pve） */
+export function normQuestMode(m: unknown): QuestMode {
+  return m === 'pvps' ? 'pvps' : m === 'pve' ? 'pve' : 'pvp'
+}
+
+/**
+ * 切换到某个任务模式：通知后端把「查看模式」切过去，再把该模式的任务进度、
+ * 解锁集合、收藏家进度、档案重新拉一遍（三套数据在后端各自独立）。
+ */
+async function switchBackendMode(m: QuestMode): Promise<void> {
+  try {
+    await setViewMode(m)
+    const [quests, unlocked, collected, settings] = await Promise.all([
+      getPlayerQuests(),
+      getUnlocked(),
+      getCollectedItems(),
+      getSettings(),
+    ])
+    useStore.setState({
+      playerQuests: quests,
+      unlockedQuests: unlocked,
+      collectedItems: collected,
+      settings,
+      // 详情缓存、实时活动流、已加载的历史活动都属于原模式，切换后清掉避免串数据
+      selectedId: null,
+      detail: null,
+      activities: [],
+      historicalActivities: [],
+      historicalLoaded: false,
+    })
+  } catch {
+    /* 后端不可用时保持现有数据，不阻塞切换 */
+  }
+}
+
 // —— 任务图谱筛选偏好持久化（localStorage）——
 // 好感达标 / 等级达标 / 地图解锁 / 专注模式 / 商人隐藏 的勾选状态跨启动保留。
 const GRAPH_PREFS_KEY = 'ic-tarkov.graphPrefs.v1'
@@ -195,7 +238,7 @@ interface GraphPrefs {
   hideLegacy: boolean
   showPrestige: boolean
   disabledTraders: Record<string, boolean>
-  questMode: 'pvp' | 'pve'
+  questMode: QuestMode
 }
 
 function loadGraphPrefs(): GraphPrefs {
@@ -223,7 +266,7 @@ function loadGraphPrefs(): GraphPrefs {
       hideLegacy: false,
       showPrestige: true,
       disabledTraders: { ...fallback.disabledTraders, ...(p.disabledTraders ?? {}) },
-      questMode: p.questMode === 'pve' ? 'pve' : 'pvp',
+      questMode: normQuestMode(p.questMode),
     }
   } catch {
     return fallback
@@ -388,6 +431,8 @@ export const useStore = create<AppState>((set, get) => ({
 
   applyEvent: (e) =>
     set((state) => {
+      // 事件带上「日志检测到的会话模式」；与当前查看模式不一致时忽略，避免串模式
+      if (e.mode && e.mode !== state.questMode) return {}
       // 内容级去重：开发热重载反复读取日志时，相同事件（类型+文本+时间戳）只保留一条
       const isDup = (kind: ActivityItem['kind'], text: string, ts: string) =>
         state.activities.some((a) => a.kind === kind && a.text === text && a.ts === ts)
@@ -575,8 +620,10 @@ export const useStore = create<AppState>((set, get) => ({
   setGraphTab: (v) => set({ graphTab: v }),
   questMode: prefs0.questMode,
   setQuestMode: (v) => {
+    if (useStore.getState().questMode === v) return
     set({ questMode: v })
     persistGraphPrefs()
+    void switchBackendMode(v)
   },
   uiScale: 1,
   setUiScale: (v) => set({ uiScale: v }),
@@ -586,11 +633,12 @@ export const useStore = create<AppState>((set, get) => ({
   setWikiCustom: (v) => set({ wikiCustom: v }),
   wikiUrlFor: (questId) => buildWikiUrl(questId, get().wikiSite, get().wikiCustom),
   applyDetectedMode: (m) => {
-    const mode = m === 'pve' ? 'pve' : 'pvp'
+    const mode = normQuestMode(m)
     const cur = useStore.getState().questMode
     if (cur === mode) return false
     set({ questMode: mode })
     persistGraphPrefs()
+    void switchBackendMode(mode)
     return true
   },
   applyUiPrefs: (p) => {
@@ -604,7 +652,9 @@ export const useStore = create<AppState>((set, get) => ({
       if (typeof g.showCompleted === 'boolean') patch.showCompletedGraph = g.showCompleted
       if (typeof g.hideLegacy === 'boolean') patch.hideLegacyGraph = g.hideLegacy
       if (typeof g.showPrestige === 'boolean') patch.showPrestigeGraph = g.showPrestige
-      if (g.questMode === 'pve' || g.questMode === 'pvp') patch.questMode = g.questMode
+      if (g.questMode === 'pve' || g.questMode === 'pvp' || g.questMode === 'pvps') {
+        patch.questMode = normQuestMode(g.questMode)
+      }
       if (g.disabledTraders && typeof g.disabledTraders === 'object') {
         patch.disabledTradersGraph = {
           ...DEFAULT_DISABLED_TRADERS.reduce(
@@ -647,6 +697,8 @@ export const useStore = create<AppState>((set, get) => ({
     }
     if (typeof u.wikiCustom === 'string') patch.wikiCustom = u.wikiCustom
     if (Object.keys(patch).length > 0) set(patch)
+    // 启动时恢复的模式偏好需要同步给后端（后端默认 pvp），否则会读到另一套数据
+    if (patch.questMode) void switchBackendMode(patch.questMode)
   },
 }))
 

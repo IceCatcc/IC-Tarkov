@@ -18,15 +18,46 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
 pub struct AppState {
-    pub store: Mutex<store::QuestStore>,
+    /// 三种任务模式（pvp / pvps / pve）各自的进度，互不干扰
+    pub modes: Mutex<HashMap<String, store::ModeData>>,
+    /// 日志检测到的会话模式：新识别到的进度写入这一套
+    pub active_mode: Mutex<String>,
+    /// 界面查看的模式：读取与手动编辑这一套
+    pub view_mode: Mutex<String>,
+    /// 监控状态（全局：日志目录 / 会话数 / 最后扫描 / 错误）
+    pub watch: Mutex<store::WatchStatus>,
     pub watcher: Mutex<Option<watcher::WatcherHandle>>,
     pub screenshot: Mutex<Option<screenshots::ScreenshotHandle>>,
-    /// 每文件扫描字节偏移（持久化），key = 文件完整路径字符串；重启后据此只扫新增内容
-    pub offsets: Mutex<HashMap<String, u64>>,
-    /// 手动解锁的任务集合（前置未达成但已解锁为可接取），持久化
-    pub unlocked: Mutex<std::collections::HashSet<String>>,
-    /// 收藏家已收集的物品 id 集合（持久化于 <data_root>/collected.json）
-    pub collected: Mutex<std::collections::HashSet<String>>,
+}
+
+impl AppState {
+    /// 以指定模式的数据执行闭包（模式不存在时按空数据创建）
+    pub fn with_mode<R>(&self, mode: &str, f: impl FnOnce(&mut store::ModeData) -> R) -> R {
+        let key = store::norm_mode(mode);
+        let mut g = self.modes.lock().unwrap();
+        let md = g.entry(key).or_insert_with(store::ModeData::new);
+        f(md)
+    }
+
+    /// 写入目标：日志检测到的会话模式
+    pub fn with_active<R>(&self, f: impl FnOnce(&mut store::ModeData) -> R) -> R {
+        let m = self.active_mode.lock().unwrap().clone();
+        self.with_mode(&m, f)
+    }
+
+    /// 读取 / 手动编辑目标：界面选中的模式
+    pub fn with_view<R>(&self, f: impl FnOnce(&mut store::ModeData) -> R) -> R {
+        let m = self.view_mode.lock().unwrap().clone();
+        self.with_mode(&m, f)
+    }
+
+    pub fn active(&self) -> String {
+        self.active_mode.lock().unwrap().clone()
+    }
+
+    pub fn view(&self) -> String {
+        self.view_mode.lock().unwrap().clone()
+    }
 }
 
 // ---------------- 应用设置（持久化） ----------------
@@ -65,9 +96,27 @@ pub struct AppSettings {
     pub delete_screenshots: bool,
     /// 移动端屏幕常亮（Android FLAG_KEEP_SCREEN_ON，默认 true）；桌面端不生效，仅持久化
     pub keep_screen_on: bool,
+    /// 各任务模式（pvp / pvps / pve）的档案真值源
+    #[serde(default)]
+    pub profiles: HashMap<String, PlayerProfile>,
     /// UI 偏好（图谱筛选/模式切换/侧边栏等），宽松 schema：前端自行定义键值
     #[serde(default)]
     pub ui_prefs: std::collections::HashMap<String, serde_json::Value>,
+}
+
+impl AppSettings {
+    /// 读取某个模式的档案（不存在则返回默认）
+    pub fn profile_of(&self, mode: &str) -> PlayerProfile {
+        self.profiles
+            .get(&store::norm_mode(mode))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// 写回某个模式的档案
+    pub fn set_profile_of(&mut self, mode: &str, p: PlayerProfile) {
+        self.profiles.insert(store::norm_mode(mode), p);
+    }
 }
 
 impl Default for AppSettings {
@@ -83,6 +132,7 @@ impl Default for AppSettings {
             log_dir: String::new(),
             screenshot_dir: screenshots,
             profile: PlayerProfile::default(),
+            profiles: HashMap::new(),
             delete_screenshots: true,
             // 手机端常作第二屏：默认常亮；旧版 settings.json 无该字段时按 true 处理
             keep_screen_on: true,
@@ -108,8 +158,19 @@ fn root_has_data(p: &Path) -> bool {
     if !p.is_dir() {
         return false;
     }
-    if p.join("settings.json").is_file() || p.join("quest_state.json").is_file() {
+    if p.join("settings.json").is_file() {
         return true;
+    }
+    // 任务进度 / 收藏进度：新格式带模式后缀（quest_state.pvp.json），旧格式无后缀
+    if let Ok(rd) = std::fs::read_dir(p) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.ends_with(".json")
+                && (name.starts_with("quest_state") || name.starts_with("collected"))
+            {
+                return true;
+            }
+        }
     }
     let api = p.join("tarkov-api");
     if api.is_dir() {
@@ -284,14 +345,32 @@ fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(data_root(app)?.join("settings.json"))
 }
 
+/// 当前界面查看的任务模式（AppState 尚未初始化时回退 pvp）
+pub(crate) fn view_mode_of(app: &tauri::AppHandle) -> String {
+    app.try_state::<AppState>()
+        .map(|s| s.view())
+        .unwrap_or_else(|| "pvp".to_string())
+}
+
 fn read_settings(app: &tauri::AppHandle) -> AppSettings {
-    match settings_path(app) {
+    let mut s = match settings_path(app) {
         Ok(p) => std::fs::read_to_string(p)
             .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
+            .and_then(|t| serde_json::from_str::<AppSettings>(&t).ok())
             .unwrap_or_default(),
         Err(_) => AppSettings::default(),
+    };
+    // 旧版单档案迁移：只有 profile 没有 profiles 时，把旧档案归入 PVP
+    if s.profiles.is_empty()
+        && (s.profile.level > 1
+            || !s.profile.loyalty.is_empty()
+            || !s.profile.locked_maps.is_empty())
+    {
+        s.profiles.insert("pvp".to_string(), s.profile.clone());
     }
+    // 镜像：profile 始终等于「当前查看模式」的档案，旧前端与旧逻辑无需感知 profiles
+    s.profile = s.profile_of(&view_mode_of(app));
+    s
 }
 
 #[tauri::command]
@@ -334,9 +413,12 @@ fn save_settings(
         s.ui_prefs.extend(u);
     }
     write_settings(&app, &s)?;
-    // 档案变化广播给同步的手机端
+    // 档案变化广播给同步的手机端（带模式标识：档案按模式独立，对端只在查看同一模式时采用）
     if profile_changed {
-        let _ = app.emit("profile-changed", &s.profile);
+        let _ = app.emit(
+            "profile-changed",
+            serde_json::json!({ "profile": s.profile, "mode": view_mode_of(&app) }),
+        );
     }
     Ok(s)
 }
@@ -374,6 +456,8 @@ pub enum QuestEvent {
         min_level: Option<u32>,
         timestamp: String,
         source: String,
+        /// 事件归属的任务模式（= 日志检测到的会话模式）；前端只在查看同一模式时采用
+        mode: String,
     },
     #[serde(rename_all = "camelCase")]
     Complete {
@@ -382,12 +466,14 @@ pub enum QuestEvent {
         timestamp: String,
         via: String,
         source: String,
+        mode: String,
     },
     #[serde(rename_all = "camelCase")]
     Progress {
         timestamp: String,
         endpoint: String,
         source: String,
+        mode: String,
     },
 }
 
@@ -425,20 +511,8 @@ fn start_watching(app: tauri::AppHandle, dir: Option<String>) -> Result<(), Stri
             h.stop();
         }
     }
-    // 加载上次持久化的任务状态与扫描偏移（替代 clear + 全量重扫）：
-    // 重启后仅扫描偏移之后的新增日志，历史任务进度从数据库恢复。
-    {
-        let persisted = persist::load(&app);
-        let binding = app.state::<AppState>();
-        let mut store = binding.store.lock().unwrap();
-        store.quests = persisted.quests;
-        store.activity = persisted.activity;
-        store.current_map_nameid = persisted.current_map;
-        let mut offsets = binding.offsets.lock().unwrap();
-        *offsets = persisted.offsets;
-        let mut unlocked = binding.unlocked.lock().unwrap();
-        *unlocked = persisted.unlocked.iter().cloned().collect();
-    }
+    // 三套模式进度已在 AppState 初始化时按模式载入（persist::load_all），
+    // 各自带着上次的扫描偏移，因此这里无需再做任何恢复动作。
     let handle = watcher::start(&app, &path).map_err(|e| e.to_string())?;
     {
         let binding = app.state::<AppState>();
@@ -520,21 +594,20 @@ fn get_player_position(app: tauri::AppHandle) -> Option<screenshots::ShotPositio
 fn get_state(app: tauri::AppHandle) -> WatcherStatePayload {
     let st = app.state::<AppState>();
     let w = st.watcher.lock().unwrap();
-    let store = st.store.lock().unwrap();
+    let wt = st.watch.lock().unwrap();
     WatcherStatePayload {
         watching: w.is_some(),
-        log_dir: store.log_dir.clone(),
-        sessions: store.sessions,
-        last_scan: store.last_scan.clone(),
-        error: store.error.clone(),
+        log_dir: wt.log_dir.clone(),
+        sessions: wt.sessions,
+        last_scan: wt.last_scan.clone(),
+        error: wt.error.clone(),
     }
 }
 
 #[tauri::command]
 fn get_stats(app: tauri::AppHandle) -> StatsPayload {
     let binding = app.state::<AppState>();
-    let st = binding.store.lock().unwrap();
-    let (in_progress, completed) = st.stats();
+    let (in_progress, completed) = binding.with_view(|md| md.stats());
     StatsPayload {
         in_progress,
         completed,
@@ -544,28 +617,29 @@ fn get_stats(app: tauri::AppHandle) -> StatsPayload {
 #[tauri::command]
 fn get_player_quests(app: tauri::AppHandle) -> Vec<store::PlayerQuest> {
     let binding = app.state::<AppState>();
-    let st = binding.store.lock().unwrap();
     let mut out: Vec<store::PlayerQuest> = Vec::new();
-    for (qid, entry) in &st.quests {
-        let info = data::resolve_accept(qid);
-        let status = if entry.completed_at.is_some() {
-            "completed"
-        } else {
-            "in_progress"
-        };
-        out.push(store::PlayerQuest {
-            quest_id: qid.clone(),
-            name: info.name,
-            trader_id: info.trader_id,
-            trader_name: info.trader_name,
-            accepted_at: entry.accepted_at.clone(),
-            completed_at: entry.completed_at.clone(),
-            status: status.to_string(),
-            wiki: info.wiki,
-            min_level: info.min_level,
-            maps: data::quest_maps(qid),
-        });
-    }
+    binding.with_view(|md| {
+        for (qid, entry) in &md.quests {
+            let info = data::resolve_accept(qid);
+            let status = if entry.completed_at.is_some() {
+                "completed"
+            } else {
+                "in_progress"
+            };
+            out.push(store::PlayerQuest {
+                quest_id: qid.clone(),
+                name: info.name,
+                trader_id: info.trader_id,
+                trader_name: info.trader_name,
+                accepted_at: entry.accepted_at.clone(),
+                completed_at: entry.completed_at.clone(),
+                status: status.to_string(),
+                wiki: info.wiki,
+                min_level: info.min_level,
+                maps: data::quest_maps(qid),
+            });
+        }
+    });
     out.sort_by(|a, b| {
         let pa = a.accepted_at.clone().unwrap_or_default();
         let pb = b.accepted_at.clone().unwrap_or_default();
@@ -577,16 +651,14 @@ fn get_player_quests(app: tauri::AppHandle) -> Vec<store::PlayerQuest> {
 #[tauri::command]
 fn get_activity(app: tauri::AppHandle) -> Vec<store::ActivityRow> {
     let binding = app.state::<AppState>();
-    let st = binding.store.lock().unwrap();
-    st.activity.clone()
+    binding.with_view(|md| md.activity.clone())
 }
 
-/// 返回手动解锁的任务集合（持久化于 quest_state.json）
+/// 返回手动解锁的任务集合（随模式持久化）
 #[tauri::command]
 fn get_unlocked(app: tauri::AppHandle) -> Vec<String> {
     let binding = app.state::<AppState>();
-    let u = binding.unlocked.lock().unwrap();
-    u.iter().cloned().collect()
+    binding.with_view(|md| md.unlocked.iter().cloned().collect())
 }
 
 /// 收藏家任务 id（数据集里找不到时返回 null）
@@ -595,32 +667,26 @@ fn get_collector_quest_id() -> Option<String> {
     data::collector_quest_id()
 }
 
-/// 已收集的物品 id 列表（持久化于 <data_root>/collected.json）
+/// 已收集的物品 id 列表（随模式持久化于 <data_root>/collected.{mode}.json）
 #[tauri::command]
 fn get_collected_items(app: tauri::AppHandle) -> Vec<String> {
     let binding = app.state::<AppState>();
-    let c = binding.collected.lock().unwrap();
-    c.iter().cloned().collect()
+    binding.with_view(|md| md.collected.iter().cloned().collect())
 }
 
 /// 标记 / 取消标记某个收集品为已收集，立即落盘，返回更新后的全集
 #[tauri::command]
-fn set_item_collected(
-    app: tauri::AppHandle,
-    item_id: String,
-    collected: bool,
-) -> Vec<String> {
-    let all = {
-        let binding = app.state::<AppState>();
-        let mut c = binding.collected.lock().unwrap();
+fn set_item_collected(app: tauri::AppHandle, item_id: String, collected: bool) -> Vec<String> {
+    let binding = app.state::<AppState>();
+    let all = binding.with_view(|md| {
         if collected {
-            c.insert(item_id);
+            md.collected.insert(item_id);
         } else {
-            c.remove(&item_id);
+            md.collected.remove(&item_id);
         }
-        c.iter().cloned().collect::<Vec<String>>()
-    };
-    persist::save_collected(&app, &all);
+        md.collected.iter().cloned().collect::<Vec<String>>()
+    });
+    persist::save_all_from(&app);
     // 广播给同步的手机端（桌面前端自身已就地更新，重复设置同值无害）
     let _ = app.emit("collected-changed", &all);
     all
@@ -646,15 +712,13 @@ fn set_quest_status(
 ) -> Result<StatusResult, String> {
     let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let binding = app.state::<AppState>();
-    {
-        let mut store = binding.store.lock().unwrap();
-        let mut unlocked = binding.unlocked.lock().unwrap();
+    let res: Result<(), String> = binding.with_view(|md| {
         match action.as_str() {
             "unlock" => {
                 // 目标本身 + 所有前置（传递闭包）；前置中未完成的才需要解锁
                 let mut to_unlock: Vec<String> = vec![quest_id.clone()];
                 for pid in data::prereqs_closure(&quest_id) {
-                    let completed = store
+                    let completed = md
                         .quests
                         .get(&pid)
                         .map(|e| e.completed_at.is_some())
@@ -664,8 +728,8 @@ fn set_quest_status(
                     }
                 }
                 for id in to_unlock {
-                    unlocked.insert(id.clone());
-                    store.push_activity(store::ActivityRow {
+                    md.unlocked.insert(id.clone());
+                    md.push_activity(store::ActivityRow {
                         id: format!("unl|{id}|{ts}"),
                         ts: ts.clone(),
                         kind: "progress".to_string(),
@@ -679,11 +743,11 @@ fn set_quest_status(
             "accept" => {
                 // 接取：先完成全部前置任务
                 for pid in data::prereqs_closure(&quest_id) {
-                    let e = store.quests.entry(pid.clone()).or_default();
+                    let e = md.quests.entry(pid.clone()).or_default();
                     if e.completed_at.is_none() {
                         e.accepted_at = Some(ts.clone());
                         e.completed_at = Some(ts.clone());
-                        store.push_activity(store::ActivityRow {
+                        md.push_activity(store::ActivityRow {
                             id: format!("cmp|{pid}|manual|{ts}"),
                             ts: ts.clone(),
                             kind: "complete".to_string(),
@@ -695,11 +759,11 @@ fn set_quest_status(
                     }
                 }
                 // 接取目标本身（若已 completed 则保持）
-                let e = store.quests.entry(quest_id.clone()).or_default();
+                let e = md.quests.entry(quest_id.clone()).or_default();
                 if e.accepted_at.is_none() {
                     e.accepted_at = Some(ts.clone());
                 }
-                store.push_activity(store::ActivityRow {
+                md.push_activity(store::ActivityRow {
                     id: format!("acc|{quest_id}|manual|{ts}"),
                     ts: ts.clone(),
                     kind: "accept".to_string(),
@@ -710,12 +774,12 @@ fn set_quest_status(
                 });
             }
             "complete" => {
-                let e = store.quests.entry(quest_id.clone()).or_default();
+                let e = md.quests.entry(quest_id.clone()).or_default();
                 if e.accepted_at.is_none() {
                     e.accepted_at = Some(ts.clone());
                 }
                 e.completed_at = Some(ts.clone());
-                store.push_activity(store::ActivityRow {
+                md.push_activity(store::ActivityRow {
                     id: format!("cmp|{quest_id}|manual|{ts}"),
                     ts: ts.clone(),
                     kind: "complete".to_string(),
@@ -727,40 +791,42 @@ fn set_quest_status(
             }
             other => return Err(format!("未知操作：{other}")),
         }
-    }
-    persist::save(&app);
+        Ok(())
+    });
+    res?;
+    persist::save_all_from(&app);
 
     // 重建返回数据
     let binding2 = app.state::<AppState>();
-    let store = binding2.store.lock().unwrap();
     let mut out: Vec<store::PlayerQuest> = Vec::new();
-    for (qid, entry) in &store.quests {
-        let info = data::resolve_accept(qid);
-        let status = if entry.completed_at.is_some() {
-            "completed"
-        } else {
-            "in_progress"
-        };
-        out.push(store::PlayerQuest {
-            quest_id: qid.clone(),
-            name: info.name,
-            trader_id: info.trader_id,
-            trader_name: info.trader_name,
-            accepted_at: entry.accepted_at.clone(),
-            completed_at: entry.completed_at.clone(),
-            status: status.to_string(),
-            wiki: info.wiki,
-            min_level: info.min_level,
-            maps: data::quest_maps(qid),
-        });
-    }
+    let unlocked_vec = binding2.with_view(|md| {
+        for (qid, entry) in &md.quests {
+            let info = data::resolve_accept(qid);
+            let status = if entry.completed_at.is_some() {
+                "completed"
+            } else {
+                "in_progress"
+            };
+            out.push(store::PlayerQuest {
+                quest_id: qid.clone(),
+                name: info.name,
+                trader_id: info.trader_id,
+                trader_name: info.trader_name,
+                accepted_at: entry.accepted_at.clone(),
+                completed_at: entry.completed_at.clone(),
+                status: status.to_string(),
+                wiki: info.wiki,
+                min_level: info.min_level,
+                maps: data::quest_maps(qid),
+            });
+        }
+        md.unlocked.iter().cloned().collect::<Vec<String>>()
+    });
     out.sort_by(|a, b| {
         let pa = a.accepted_at.clone().unwrap_or_default();
         let pb = b.accepted_at.clone().unwrap_or_default();
         pb.cmp(&pa)
     });
-    let unlocked = binding2.unlocked.lock().unwrap();
-    let unlocked_vec: Vec<String> = unlocked.iter().cloned().collect();
     Ok(StatusResult {
         quests: out,
         unlocked: unlocked_vec,
@@ -774,30 +840,24 @@ fn set_quest_status(
 #[tauri::command]
 fn reset_and_rescan(app: tauri::AppHandle, mode: Option<String>) -> Result<(), String> {
     let merge = mode.as_deref() == Some("merge");
+    let binding = app.state::<AppState>();
     if merge {
-        // 保留进度：清空扫描偏移并落盘（磁盘 offsets 为空、store 完整），
-        // 随后 start_watching 从 0 重读本地日志，把缺失进度补充进 store。
-        {
-            let binding = app.state::<AppState>();
-            let mut offsets = binding.offsets.lock().unwrap();
-            offsets.clear();
-        }
-        persist::save(&app);
+        // 保留进度：清空扫描偏移并落盘（磁盘 offsets 为空、进度完整），
+        // 随后 start_watching 从 0 重读本地日志，把缺失进度补充回来（apply_* 幂等）。
+        binding.with_active(|md| md.offsets.clear());
+        persist::save_all_from(&app);
     } else {
-        // cover（默认）：清空持久化文件与内存状态，全量重扫重置到日志真值
-        if let Some(p) = persist::state_path(&app) {
-            let _ = std::fs::remove_file(p);
-        }
+        // cover（默认）：清空全部模式的持久化文件与内存进度，全量重扫重置到日志真值
+        persist::remove_all(&app);
         {
-            let binding = app.state::<AppState>();
-            let mut store = binding.store.lock().unwrap();
-            store.quests.clear();
-            store.activity.clear();
-            store.current_map_nameid = None;
-            let mut offsets = binding.offsets.lock().unwrap();
-            offsets.clear();
-            let mut unlocked = binding.unlocked.lock().unwrap();
-            unlocked.clear();
+            let mut g = binding.modes.lock().unwrap();
+            for md in g.values_mut() {
+                md.quests.clear();
+                md.activity.clear();
+                md.current_map = None;
+                md.offsets.clear();
+                md.unlocked.clear();
+            }
         }
     }
     let dir = read_settings(&app).log_dir;
@@ -808,21 +868,24 @@ fn reset_and_rescan(app: tauri::AppHandle, mode: Option<String>) -> Result<(), S
 /// path 为空时（移动端无保存对话框）自动导出到数据目录下的 ic-tarkov-data.zip，返回实际路径。
 #[tauri::command]
 fn export_data(app: tauri::AppHandle, path: Option<String>) -> Result<String, String> {
-    persist::save(&app);
+    persist::save_all_from(&app);
     let target = match path.as_deref() {
         Some(p) if !p.trim().is_empty() => PathBuf::from(p),
         _ => data_root(&app)?.join("ic-tarkov-data.zip"),
     };
     let path = target;
     let mut entries: Vec<(String, PathBuf)> = Vec::new();
-    if let Some(p) = persist::state_path(&app) {
-        if p.exists() {
-            entries.push(("quest_state.json".into(), p));
+    // 三种模式各自一份进度 + 收藏
+    for m in store::MODES {
+        if let Some(p) = persist::state_path_for(&app, m) {
+            if p.exists() {
+                entries.push((format!("quest_state.{m}.json"), p));
+            }
         }
-    }
-    if let Some(p) = persist::collected_path(&app) {
-        if p.exists() {
-            entries.push(("collected.json".into(), p));
+        if let Some(p) = persist::collected_path_for(&app, m) {
+            if p.exists() {
+                entries.push((format!("collected.{m}.json"), p));
+            }
         }
     }
     let sp = settings_path(&app)?;
@@ -848,21 +911,24 @@ fn export_data(app: tauri::AppHandle, path: Option<String>) -> Result<String, St
 /// 导入数据：读取 zip 包（quest_state / collected / settings.json），覆盖对应持久化文件并载入内存；
 /// 兼容旧版单文件 quest_state.json 直接导入。随后重启监控（按导入的偏移增量续读）。
 #[tauri::command]
-// 旧版兼容：单 JSON 文件（仅任务状态）
+// 旧版兼容：单 JSON 文件（仅任务状态，字段与模式数据一致）→ 归入 PVP 模式
 fn import_json(app: &tauri::AppHandle, content: &str) -> Result<(), String> {
-    let parsed: persist::Persisted =
+    let md: store::ModeData =
         serde_json::from_str(content).map_err(|e| format!("文件格式错误：{e}"))?;
-    if let Some(p) = persist::state_path(app) {
+    if let Some(p) = persist::state_path_for(app, "pvp") {
         if let Some(parent) = p.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         std::fs::write(&p, content).map_err(|e| e.to_string())?;
     }
-    apply_persisted(app, &parsed);
+    apply_mode_data(app, "pvp", md);
+    restart_watcher_after_import(app);
     Ok(())
 }
 
-// 从 zip 读取器导入数据包（内存字节或文件皆可）
+// 从 zip 读取器导入数据包（内存字节或文件皆可）。
+// 支持 quest_state.{mode}.json / collected.{mode}.json / settings.json，
+// 并兼容旧版无模式后缀的文件名（归入 PVP）。
 fn import_zip(app: &tauri::AppHandle, reader: impl std::io::Read + std::io::Seek) -> Result<(), String> {
     let mut zip =
         zip::ZipArchive::new(reader).map_err(|e| format!("无法读取压缩包：{e}"))?;
@@ -871,11 +937,24 @@ fn import_zip(app: &tauri::AppHandle, reader: impl std::io::Read + std::io::Seek
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.name().to_string();
         // 只接受平铺的已知文件名（防路径穿越 / 意外条目）
-        let dest = match name.as_str() {
-            "quest_state.json" => persist::state_path(app),
-            "collected.json" => persist::collected_path(app),
-            "settings.json" => settings_path(app).ok(),
-            _ => continue,
+        let dest = if name == "settings.json" {
+            settings_path(app).ok()
+        } else if name == "quest_state.json" {
+            persist::state_path_for(app, "pvp")
+        } else if name == "collected.json" {
+            persist::collected_path_for(app, "pvp")
+        } else if let Some(m) = name
+            .strip_prefix("quest_state.")
+            .and_then(|s| s.strip_suffix(".json"))
+        {
+            persist::state_path_for(app, m)
+        } else if let Some(m) = name
+            .strip_prefix("collected.")
+            .and_then(|s| s.strip_suffix(".json"))
+        {
+            persist::collected_path_for(app, m)
+        } else {
+            continue;
         };
         let Some(dest) = dest else { continue };
         let mut content = String::new();
@@ -888,9 +967,14 @@ fn import_zip(app: &tauri::AppHandle, reader: impl std::io::Read + std::io::Seek
         }
         std::fs::write(&dest, content).map_err(|e| e.to_string())?;
     }
-    // 覆盖完成后统一载入内存（settings.json 变化由前端导入后自行刷新）
-    let parsed = persist::load(app);
-    apply_persisted(app, &parsed);
+    // 覆盖完成后把三套数据整体重新载入内存（settings.json 的变化由前端导入后自行刷新）
+    {
+        let all = persist::load_all(app);
+        let binding = app.state::<AppState>();
+        let mut g = binding.modes.lock().unwrap();
+        *g = all;
+    }
+    restart_watcher_after_import(app);
     // 归一化数据位置记录：导入的 settings 可能来自另一台机器/位置
     let portable = portable_data_root()?;
     let kind = if root == portable { "portable" } else { "appdata" };
@@ -925,39 +1009,40 @@ fn import_data_bytes(app: tauri::AppHandle, bytes: Vec<u8>) -> Result<(), String
     }
 }
 
-/// 把一份 Persisted 落地/载入内存并重启 watcher（桌面备份导入保留 offsets；
-/// 跨设备快照导入应在调用前把 offsets 清空，由新设备重扫本地日志重建）。
-pub(crate) fn apply_persisted(app: &tauri::AppHandle, parsed: &persist::Persisted) {
-    {
-        let binding = app.state::<AppState>();
-        let mut store = binding.store.lock().unwrap();
-        store.quests = parsed.quests.clone();
-        store.activity = parsed.activity.clone();
-        store.current_map_nameid = parsed.current_map.clone();
-        let mut offsets = binding.offsets.lock().unwrap();
-        *offsets = parsed.offsets.clone();
-        let mut unlocked = binding.unlocked.lock().unwrap();
-        *unlocked = parsed.unlocked.iter().cloned().collect();
-        let mut collected = binding.collected.lock().unwrap();
-        *collected = parsed.collected.iter().cloned().collect();
-        persist::save_collected(app, &parsed.collected);
-    }
-    // 移动端无日志可监控：不启动 watcher（否则本地 watcher-state{watching:false}
-    // 会覆盖手机端从电脑端同步来的监控状态）
+/// 用一份模式数据替换内存中对应模式的进度（旧版单文件导入 / 同步快照用）
+pub(crate) fn apply_mode_data(app: &tauri::AppHandle, mode: &str, data: store::ModeData) {
+    let binding = app.state::<AppState>();
+    let mut g = binding.modes.lock().unwrap();
+    g.insert(store::norm_mode(mode), data);
+}
+
+/// 导入完成后按当前日志目录重建监控。
+/// 移动端无日志可监控：不启动 watcher（否则本地 watcher-state{watching:false}
+/// 会覆盖手机端从电脑端同步来的监控状态）。
+fn restart_watcher_after_import(app: &tauri::AppHandle) {
     #[cfg(not(mobile))]
     {
         let dir = read_settings(app).log_dir;
         let _ = start_watching(app.clone(), Some(dir));
     }
+    #[cfg(mobile)]
+    {
+        let _ = app;
+    }
 }
 
 /// 写设置到 settings.json（save_settings 与局域网快照应用共用）
 pub(crate) fn write_settings(app: &tauri::AppHandle, s: &AppSettings) -> Result<(), String> {
+    let mut s = s.clone();
+    // 前端提交的 profile 视为「当前查看模式」的档案，写回真值源后再落盘
+    let mode = view_mode_of(app);
+    s.set_profile_of(&mode, s.profile.clone());
+    s.profile = s.profile_of(&mode);
     let p = settings_path(app)?;
     if let Some(parent) = p.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let json = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(&s).map_err(|e| e.to_string())?;
     std::fs::write(&p, json).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -976,15 +1061,36 @@ fn get_quest_detail(quest_id: String) -> Option<data::QuestDetail> {
 #[tauri::command]
 fn get_current_map(app: tauri::AppHandle) -> Option<String> {
     let st = app.state::<AppState>();
-    let s = st.store.lock().unwrap();
-    s.current_map_nameid.clone()
+    st.with_active(|md| md.current_map.clone())
 }
 
+/// 当前会话模式（由日志检测得到）：pvp / pvps / pve
 #[tauri::command]
 fn get_session_mode(app: tauri::AppHandle) -> Option<String> {
     let st = app.state::<AppState>();
-    let s = st.store.lock().unwrap();
-    s.current_mode.clone()
+    Some(st.active())
+}
+
+/// 切换界面查看的任务模式（读取与手动编辑都落到该模式；日志写入仍由 active_mode 决定）
+#[tauri::command]
+fn set_view_mode(app: tauri::AppHandle, mode: String) -> Result<(), String> {
+    let m = store::norm_mode(&mode);
+    let changed = {
+        let st = app.state::<AppState>();
+        let mut vm = st.view_mode.lock().unwrap();
+        if *vm == m {
+            false
+        } else {
+            *vm = m;
+            true
+        }
+    };
+    // 切换后立即落盘一次，避免刚编辑的档案 / 进度丢失
+    if changed {
+        persist::save_all_from(&app);
+        emit_state(&app);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1145,13 +1251,13 @@ fn open_data_dir(app: tauri::AppHandle) -> Result<(), String> {
 pub(crate) fn emit_state(app: &tauri::AppHandle) {
     let st = app.state::<AppState>();
     let w = st.watcher.lock().unwrap();
-    let store = st.store.lock().unwrap();
+    let wt = st.watch.lock().unwrap();
     let payload = WatcherStatePayload {
         watching: w.is_some(),
-        log_dir: store.log_dir.clone(),
-        sessions: store.sessions,
-        last_scan: store.last_scan.clone(),
-        error: store.error.clone(),
+        log_dir: wt.log_dir.clone(),
+        sessions: wt.sessions,
+        last_scan: wt.last_scan.clone(),
+        error: wt.error.clone(),
     };
     let _ = app.emit("watcher-state", payload);
 }
@@ -1179,6 +1285,7 @@ pub(crate) fn emit_accept(
         min_level,
         timestamp: timestamp.to_string(),
         source: source.to_string(),
+        mode: app.state::<AppState>().active(),
     };
     let _ = app.emit("quest-event", ev);
 }
@@ -1197,6 +1304,7 @@ pub(crate) fn emit_complete(
         timestamp: timestamp.to_string(),
         via: via.to_string(),
         source: source.to_string(),
+        mode: app.state::<AppState>().active(),
     };
     let _ = app.emit("quest-event", ev);
 }
@@ -1206,6 +1314,7 @@ pub(crate) fn emit_progress(app: &tauri::AppHandle, endpoint: &str, timestamp: &
         timestamp: timestamp.to_string(),
         endpoint: endpoint.to_string(),
         source: source.to_string(),
+        mode: app.state::<AppState>().active(),
     };
     let _ = app.emit("quest-event", ev);
 }
@@ -1223,20 +1332,16 @@ pub fn run() {
         .setup(|app| {
             // 数据根目录在每次需要时按「程序目录 data → AppData → 新建程序目录 data」自动探测，
             // 不依赖任何标记文件，此处无需提前设置，直接进入状态初始化。
+            // 三套模式进度（含收藏）在初始化时一次性按模式载入
+            let handle = app.handle().clone();
             app.manage(AppState {
-                store: Mutex::new(store::QuestStore::new()),
+                modes: Mutex::new(persist::load_all(&handle)),
+                active_mode: Mutex::new("pvp".to_string()),
+                view_mode: Mutex::new("pvp".to_string()),
+                watch: Mutex::new(store::WatchStatus::default()),
                 watcher: Mutex::new(None),
                 screenshot: Mutex::new(None),
-                offsets: Mutex::new(HashMap::new()),
-                unlocked: Mutex::new(std::collections::HashSet::new()),
-                collected: Mutex::new(std::collections::HashSet::new()),
             });
-            // 收藏进度独立于任务状态：无论是否配置日志目录都能读写
-            {
-                let binding = app.state::<AppState>();
-                let mut collected = binding.collected.lock().unwrap();
-                *collected = persist::load_collected(&app.handle().clone()).into_iter().collect();
-            }
             // 装载 tarkov.dev 原始数据的派生索引。
             // 仅当缓存里已有部分数据且已过期时才后台静默拉取；
             // 缓存为空（没有任何 JSON）时不自动联网下载，避免离线/首次启动空转与误报，
@@ -1276,6 +1381,7 @@ pub fn run() {
                     get_player_position,
                     get_current_map,
                     get_session_mode,
+                    set_view_mode,
                     get_maps,
                     open_url,
                     open_data_dir,
@@ -1324,6 +1430,7 @@ pub fn run() {
                     get_player_position,
                     get_current_map,
                     get_session_mode,
+                    set_view_mode,
                     get_maps,
                     open_url,
                     open_data_dir,
