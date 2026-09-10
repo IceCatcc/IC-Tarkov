@@ -20,6 +20,7 @@ import {
   getCollectedItems,
   getSettings,
   getSnapshot,
+  getSessionMode,
   getSyncSummary,
 } from './tauri'
 
@@ -317,8 +318,14 @@ async function handleMessage(data: string): Promise<void> {
 
 /** 从后端重载用户数据到 store（快照应用后调用；lan-sync-updated 也会触发） */
 export async function reloadLocalData(): Promise<void> {
-  const { seedPlayerQuests, setUnlockedQuests, setCollectedItems, setSettings, applyUiPrefs } =
-    useStore.getState()
+  const {
+    seedPlayerQuests,
+    setUnlockedQuests,
+    setCollectedItems,
+    setSettings,
+    applyUiPrefs,
+    applyDetectedMode,
+  } = useStore.getState()
   try {
     const [quests, unlocked, collected, settings] = await Promise.all([
       getPlayerQuests(),
@@ -331,6 +338,10 @@ export async function reloadLocalData(): Promise<void> {
     setCollectedItems(collected)
     setSettings(settings)
     if (settings.uiPrefs && Object.keys(settings.uiPrefs).length > 0) applyUiPrefs(settings.uiPrefs)
+    // 跟随电脑端的会话模式：手机端没有本地日志，快照应用 / 同步刷新后读一次并切换档位。
+    // 放在最后，覆盖 applyUiPrefs 从电脑端偏好带过来的模式。
+    const sessionMode = await getSessionMode().catch(() => null)
+    if (sessionMode) applyDetectedMode(sessionMode)
   } catch {
     /* ignore */
   }

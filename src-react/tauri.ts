@@ -1,8 +1,20 @@
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
-import { useStore, collectUiPrefs } from './store'
+import { useStore, collectUiPrefs, normQuestMode } from './store'
 import { sendLanMsg } from './lan'
 import { traderDisplayName } from './traderMeta'
+
+/**
+ * 事件自带的任务模式与当前档位不同时自动跟随切换。
+ * 手机端没有本地日志，全靠电脑端推来的事件（quest-event / profile-changed 等都带 mode）
+ * 或同步快照来对齐档位；桌面端则由日志的 session-mode 事件对齐。
+ */
+function followEventMode(mode?: string): void {
+  if (!mode) return
+  const s = useStore.getState()
+  const m = normQuestMode(mode)
+  if (m !== s.questMode) s.applyDetectedMode(m)
+}
 import type {
   QuestEventPayload,
   WatcherStatePayload,
@@ -41,6 +53,8 @@ export async function initTauri(): Promise<UnlistenFn> {
   track(
     await listen<QuestEventPayload>('quest-event', (e) => {
       const p = e.payload
+      // 事件来自某个会话模式：档位不同则先跟随切换（切换会重新拉取该模式的全量进度）
+      followEventMode(p.mode)
       applyEvent(p)
       if (p.type === 'accept')
         pushToast(`接取任务：${p.name} · ${traderDisplayName(p.traderId, p.traderName)}`, 'accept')
@@ -62,9 +76,11 @@ export async function initTauri(): Promise<UnlistenFn> {
     await listen<{ profile: PlayerProfile; mode?: string }>('profile-changed', (e) => {
       const p = e.payload
       if (!p?.profile) return
+      // 事件带的是对端「当前模式」的档案：档位不同则先跟随切换，再（切换后）写入档案
+      followEventMode(p.mode)
       const s = useStore.getState()
-      // 档案按模式独立：事件带的是对端「当前查看模式」的档案，模式不一致时忽略
-      if (p.mode && p.mode !== s.questMode) return
+      const m = normQuestMode(p.mode)
+      if (p.mode && m !== s.questMode) return
       s.setSettings({ ...s.settings, profile: p.profile })
     }),
   )
@@ -93,13 +109,14 @@ export async function initTauri(): Promise<UnlistenFn> {
     })
     .catch(() => {})
 
-  // 全局监听会话模式（pve/pvp）：游戏以某模式启动时，任务图谱自动跟随切换并触发通知
+  // 全局监听会话模式（pvp/pvps/pve）：游戏以某模式启动时（或电脑端经 LAN 推来）自动跟随切换
   const { applyDetectedMode } = useStore.getState()
   track(
     await listen<{ mode: string; timestamp?: string }>('session-mode', (e) => {
-      const mode = e.payload.mode === 'pve' ? 'pve' : 'pvp'
+      const mode = normQuestMode(e.payload.mode)
       if (applyDetectedMode(mode)) {
-        pushToast(`检测到进入模式：${mode === 'pve' ? 'PvE 赛季' : 'PvP 赛季'}`, 'info')
+        const label: Record<string, string> = { pvp: 'PvP', pvps: 'PvP 赛季', pve: 'PvE' }
+        pushToast(`检测到进入模式：${label[mode] ?? mode.toUpperCase()}`, 'info')
       }
     }),
   )

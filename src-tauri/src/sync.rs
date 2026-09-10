@@ -21,6 +21,9 @@ pub struct Snapshot {
     /// key = 模式名（pvp / pvps / pve）
     #[serde(default)]
     pub modes: HashMap<String, ModeData>,
+    /// 电脑端「日志检测到的会话模式」：手机端应用快照后跟随切换（手机端没有本地日志）
+    #[serde(default)]
+    pub session_mode: Option<String>,
 }
 
 /// 数据摘要：用于判断两端用户数据是否一致（三套合并统计）。
@@ -74,7 +77,12 @@ fn collect_modes(app: &AppHandle) -> HashMap<String, ModeData> {
 pub fn build_snapshot(app: &AppHandle) -> Result<String, String> {
     let settings = crate::read_settings(app);
     let modes = collect_modes(app);
-    let snap = Snapshot { settings, modes };
+    let session_mode = Some(app.state::<crate::AppState>().active());
+    let snap = Snapshot {
+        settings,
+        modes,
+        session_mode,
+    };
     serde_json::to_string(&snap).map_err(|e| e.to_string())
 }
 
@@ -194,6 +202,15 @@ pub fn apply_snapshot_internal(app: &AppHandle, json: &str) -> Result<(), String
             md.offsets.clear();
             g.insert(m.to_string(), md);
         }
+    }
+    // 跟随电脑端的会话模式：仅移动端（没有本地日志可检测）把「写入模式 / 查看模式」对齐过去，
+    // 前端随后 getSessionMode() 即可自动切到对应档位。桌面端有自己的日志，不采用对端模式。
+    #[cfg(mobile)]
+    if let Some(m) = parsed.session_mode.as_deref() {
+        let m = norm_mode(m);
+        let st = app.state::<crate::AppState>();
+        *st.active_mode.lock().unwrap() = m.clone();
+        *st.view_mode.lock().unwrap() = m;
     }
     crate::persist::save_all_from(app);
     let _ = app.emit("lan-sync-updated", ());
