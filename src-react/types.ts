@@ -71,7 +71,7 @@ export interface AppSettings {
   logDir: string
   screenshotDir: string
   profile: PlayerProfile
-  /** 读取坐标后是否删除截图 */
+  /** 读取坐标后是否删除截图（开启时启动后产生的不含坐标截图也会被清理） */
   deleteScreenshots: boolean
   /** 移动端屏幕常亮（Android FLAG_KEEP_SCREEN_ON）；桌面端不生效，仅持久化 */
   keepScreenOn: boolean

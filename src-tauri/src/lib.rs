@@ -60,7 +60,8 @@ pub struct AppSettings {
     pub log_dir: String,
     pub screenshot_dir: String,
     pub profile: PlayerProfile,
-    /// 读取坐标后是否删除截图（默认 true，保留原有行为）
+    /// 读取坐标后是否删除截图（默认 true，保留原有行为）；
+    /// 开启时启动之后产生的不含坐标截图也会被一并清理
     pub delete_screenshots: bool,
     /// 移动端屏幕常亮（Android FLAG_KEEP_SCREEN_ON，默认 true）；桌面端不生效，仅持久化
     pub keep_screen_on: bool,
@@ -495,7 +496,7 @@ fn get_player_position(app: tauri::AppHandle) -> Option<screenshots::ShotPositio
     }
     // 启动之前就存在的截图不用于定位；是否读取后删除由设置决定
     let delete_after = read_settings(&app).delete_screenshots;
-    match screenshots::scan_latest(Path::new(&dir)) {
+    let shot = match screenshots::scan_latest(Path::new(&dir)) {
         Some((p, mtime)) if mtime > screenshots::started_at() => {
             let shot = p
                 .file_name()
@@ -507,7 +508,12 @@ fn get_player_position(app: tauri::AppHandle) -> Option<screenshots::ShotPositio
             shot
         }
         _ => None,
+    };
+    // 读取坐标后删除模式下，一并清理启动之后产生的不含坐标截图
+    if delete_after {
+        screenshots::purge_unparsable(Path::new(&dir));
     }
+    shot
 }
 
 #[tauri::command]

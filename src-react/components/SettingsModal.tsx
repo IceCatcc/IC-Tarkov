@@ -434,7 +434,7 @@ export default function SettingsModal() {
                 onChange={(e) => setDeleteShots(e.target.checked)}
                 className="w-4 h-4 accent-amber"
               />
-              <span className="text-[15px] text-[#e6edf3]">读取坐标后删除截图</span>
+              <span className="text-[15px] text-[#e6edf3]">自动删除截图</span>
             </label>
           </div>
           )}
@@ -621,7 +621,7 @@ export default function SettingsModal() {
                     )
                   })}
                 </div>
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-2 flex items-center justify-end">
                   <button
                     onClick={onMigrateLoc}
                     disabled={
@@ -631,9 +631,6 @@ export default function SettingsModal() {
                   >
                     {migrating ? '迁移中…' : '迁移'}
                   </button>
-                </div>
-                <div className={`${DESC_CLS} mt-1.5`}>
-                  启动时自动定位：程序目录 data 优先，无数据再找 AppData；两边都没有数据时自动在程序目录创建。目标位置已有另一份数据时会拒绝迁移。
                 </div>
               </div>
             )}
