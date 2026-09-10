@@ -141,6 +141,12 @@ interface AppState {
   /** 已完成任务的显示开关：勾选显示、不勾选排除（持久化，替代原专注模式） */
   showCompletedGraph: boolean
   setShowCompletedGraph: (v: boolean) => void
+  /** 转生任务（Prestige）的显示开关：勾选显示、不勾选排除 */
+  showPrestigeGraph: boolean
+  setShowPrestigeGraph: (v: boolean) => void
+  /** 任务页当前视图：'list' 任务列表 / 'chain' 任务链图谱 */
+  graphTab: 'list' | 'chain'
+  setGraphTab: (v: 'list' | 'chain') => void
   /** 任务图谱模式过滤：'pvp' | 'pve'（localStorage 持久化；日志检测到会话模式时自动跟随） */
   questMode: 'pvp' | 'pve'
   setQuestMode: (v: 'pvp' | 'pve') => void
@@ -187,6 +193,7 @@ interface GraphPrefs {
   mapUnlocked: boolean
   showCompleted: boolean
   hideLegacy: boolean
+  showPrestige: boolean
   disabledTraders: Record<string, boolean>
   questMode: 'pvp' | 'pve'
 }
@@ -196,8 +203,10 @@ function loadGraphPrefs(): GraphPrefs {
     repMet: true,
     lvlMet: false,
     mapUnlocked: false,
-    showCompleted: false, // 默认排除已完成任务（「已完成」勾选才显示）
-    hideLegacy: true, // 默认隐藏赛季任务（「赛季任务」勾选才显示）
+    // 筛选入口已移除：固定为「不过滤等级 / LL / 地图，且显示已完成 + 赛季 + 转生」
+    showCompleted: true,
+    hideLegacy: false,
+    showPrestige: true, // 默认显示转生任务（「转生任务」不勾选才隐藏）
     disabledTraders: Object.fromEntries(DEFAULT_DISABLED_TRADERS.map((id) => [id, true])),
     questMode: 'pvp',
   }
@@ -206,11 +215,13 @@ function loadGraphPrefs(): GraphPrefs {
     if (!raw) return fallback
     const p = JSON.parse(raw) as Partial<GraphPrefs>
     return {
-      repMet: p.repMet ?? fallback.repMet,
-      lvlMet: p.lvlMet ?? fallback.lvlMet,
-      mapUnlocked: p.mapUnlocked ?? fallback.mapUnlocked,
-      showCompleted: p.showCompleted ?? fallback.showCompleted,
-      hideLegacy: p.hideLegacy ?? fallback.hideLegacy,
+      // 这几项不再提供设置入口，固定为下列值（忽略历史偏好）
+      repMet: false,
+      lvlMet: false,
+      mapUnlocked: false,
+      showCompleted: true,
+      hideLegacy: false,
+      showPrestige: true,
       disabledTraders: { ...fallback.disabledTraders, ...(p.disabledTraders ?? {}) },
       questMode: p.questMode === 'pve' ? 'pve' : 'pvp',
     }
@@ -227,6 +238,7 @@ function persistGraphPrefs() {
     mapUnlocked: s.mapUnlockedGraph,
     showCompleted: s.showCompletedGraph,
     hideLegacy: s.hideLegacyGraph,
+    showPrestige: s.showPrestigeGraph,
     disabledTraders: s.disabledTradersGraph,
     questMode: s.questMode,
   }
@@ -250,6 +262,7 @@ export function collectUiPrefs(): Record<string, unknown> {
       mapUnlocked: s.mapUnlockedGraph,
       showCompleted: s.showCompletedGraph,
       hideLegacy: s.hideLegacyGraph,
+      showPrestige: s.showPrestigeGraph,
       disabledTraders: s.disabledTradersGraph,
       questMode: s.questMode,
     } satisfies GraphPrefs,
@@ -553,6 +566,13 @@ export const useStore = create<AppState>((set, get) => ({
     set({ showCompletedGraph: v })
     persistGraphPrefs()
   },
+  showPrestigeGraph: prefs0.showPrestige,
+  setShowPrestigeGraph: (v) => {
+    set({ showPrestigeGraph: v })
+    persistGraphPrefs()
+  },
+  graphTab: 'chain',
+  setGraphTab: (v) => set({ graphTab: v }),
   questMode: prefs0.questMode,
   setQuestMode: (v) => {
     set({ questMode: v })
@@ -583,6 +603,7 @@ export const useStore = create<AppState>((set, get) => ({
       if (typeof g.mapUnlocked === 'boolean') patch.mapUnlockedGraph = g.mapUnlocked
       if (typeof g.showCompleted === 'boolean') patch.showCompletedGraph = g.showCompleted
       if (typeof g.hideLegacy === 'boolean') patch.hideLegacyGraph = g.hideLegacy
+      if (typeof g.showPrestige === 'boolean') patch.showPrestigeGraph = g.showPrestige
       if (g.questMode === 'pve' || g.questMode === 'pvp') patch.questMode = g.questMode
       if (g.disabledTraders && typeof g.disabledTraders === 'object') {
         patch.disabledTradersGraph = {
