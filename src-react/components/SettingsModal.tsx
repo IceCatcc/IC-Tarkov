@@ -106,7 +106,6 @@ export default function SettingsModal() {
   const [logDir, setLogDir] = useState(settings.logDir)
   const [shotDir, setShotDir] = useState(settings.screenshotDir)
   const [deleteShots, setDeleteShots] = useState(settings.deleteScreenshots)
-  const [saving, setSaving] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -239,31 +238,23 @@ export default function SettingsModal() {
     }
   }
 
-  const onSave = async () => {
-    if (!mobile && !logDir.trim()) {
-      setError('请先选择日志监控目录')
-      return
-    }
-    setSaving(true)
+  // 监控相关设置即时生效：选择目录 / 切换开关后自动保存并重启监控，不再走「保存」按钮
+  const applyMonitor = async (next: { log?: string; shot?: string; del?: boolean }) => {
+    const log = (next.log ?? logDir).trim()
+    const shot = (next.shot ?? shotDir).trim()
+    const del = next.del ?? deleteShots
     setError(null)
     try {
       // 不传 profile：后端按现有设置合并，避免覆盖「角色管理」页的数据
-      const st = await saveSettings(
-        logDir.trim(),
-        shotDir.trim(),
-        deleteShots,
-      )
+      const st = await saveSettings(log, shot, del)
       setSettings(st)
       // 用新目录重启监控并重新加载任务（历史活动默认不读取）；移动端不启动监控
-      if (!mobile) {
+      if (!mobile && st.logDir) {
         await startWatching(st.logDir)
         seedPlayerQuests(await getPlayerQuests())
       }
-      closeSettings()
     } catch (e) {
       setError(String(e))
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -421,17 +412,31 @@ export default function SettingsModal() {
           {!mobile && (
           <div>
             <div className={`${TITLE_CLS} mb-2`}>监控目录</div>
-            <DirField label="日志监控目录" value={logDir} onChange={setLogDir} />
+            <DirField
+              label="日志监控目录"
+              value={logDir}
+              onChange={(v) => {
+                setLogDir(v)
+                void applyMonitor({ log: v })
+              }}
+            />
             <DirField
               label="截图监控目录（地图页玩家定位）"
               value={shotDir}
-              onChange={setShotDir}
+              onChange={(v) => {
+                setShotDir(v)
+                void applyMonitor({ shot: v })
+              }}
             />
             <label className="flex items-center gap-3 cursor-pointer select-none pt-1">
               <input
                 type="checkbox"
                 checked={deleteShots}
-                onChange={(e) => setDeleteShots(e.target.checked)}
+                onChange={(e) => {
+                  const v = e.target.checked
+                  setDeleteShots(v)
+                  void applyMonitor({ del: v })
+                }}
                 className="w-4 h-4 accent-amber"
               />
               <span className="text-[15px] text-[#e6edf3]">自动删除截图</span>
@@ -658,14 +663,7 @@ export default function SettingsModal() {
               onClick={closeSettings}
               className="px-4 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
             >
-              取消
-            </button>
-            <button
-              onClick={onSave}
-              disabled={saving}
-              className="px-4 py-1.5 rounded bg-amber text-black text-[14px] font-medium hover:opacity-90 disabled:opacity-50"
-            >
-              {saving ? '保存中…' : '保存'}
+              关闭
             </button>
           </div>
         </div>
