@@ -126,6 +126,25 @@ export function compareMet(cur: number, value: number, compare: string): boolean
   }
 }
 
+/**
+ * 任务的忠诚等级（LL）需求：traderReqs 中 level 与 variable 的最大值；0 = 无要求。
+ * variable 是源数据用「商人全局变量」表达的等级条件（详情面板同样按「忠诚等级 LLn」展示），
+ * 漏掉它们会让大量任务落进「无要求」档；上限按游戏设定截到 4（variable 取 5 时并入 LL4）。
+ */
+export function questLoyaltyLevel(n: GraphNode): number {
+  let v = 0
+  for (const r of n.traderReqs ?? []) {
+    if (r.reqType !== 'level' && r.reqType !== 'variable') continue
+    if (Number.isFinite(r.value)) v = Math.max(v, r.value)
+  }
+  return Math.min(4, Math.max(0, v))
+}
+
+/** LL 档位文案（图谱顶部标签与任务列表分组共用） */
+export function llLabel(ll: number): string {
+  return ll >= 1 ? `LL${ll}+` : '无 LL 要求'
+}
+
 /** 条件的比较符号文案 */
 export function compareLabel(compare: string): string {
   switch (compare) {
@@ -164,6 +183,8 @@ export interface GraphNode {
   /** 是否为赛季任务（往期赛季任务，当前赛季已移除，多为旧 PvP 专属任务） */
   legacy: boolean
   special: boolean
+  /** 转生（Prestige）等级：该任务是第 N 次转生的门槛任务时为 N，否则为空 */
+  prestigeLevel?: number | null
   /** 任务可用模式：pvp / pve（两者都有则为 ['pvp','pve']） */
   modes?: string[]
   turnIns: ItemRef[]
@@ -203,6 +224,8 @@ export interface QuestDetail {
   traderReqs: TraderReq[]
   legacy: boolean
   special: boolean
+  /** 转生（Prestige）等级：该任务是第 N 次转生的门槛任务时为 N */
+  prestigeLevel?: number | null
 }
 
 // 后端通过 'quest-event' 推送的增量事件

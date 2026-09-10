@@ -76,6 +76,8 @@ pub struct QuestNode {
     pub special: bool,
     /// 可用模式：pvp / pve
     pub modes: Vec<String>,
+    /// 转生（Prestige）等级：该任务是第 N 次转生的门槛任务时为 Some(N)
+    pub prestige_level: Option<u32>,
 }
 
 /// 全部派生数据；整体不可变，更新时整体替换
@@ -174,6 +176,8 @@ pub struct Raw {
     pub tasks_regular: HashMap<String, Value>,
     pub tasks_pve: HashMap<String, Value>,
     pub tasks_season: HashMap<String, Value>,
+    /// 转生档位（data.prestige 数组：每档 conditions 里带 taskStatus 门槛任务）
+    pub prestige: Vec<Value>,
     pub zh_tasks: HashMap<String, String>,
     pub zh_tasks_pve: HashMap<String, String>,
     pub maps: HashMap<String, Value>,
@@ -233,6 +237,11 @@ impl Raw {
             tasks_regular: as_val_map(obj_map(&tasks_doc, "data").and_then(|d| d.get("tasks"))),
             tasks_pve: as_val_map(obj_map(&pve_doc, "data").and_then(|d| d.get("tasks"))),
             tasks_season: as_val_map(obj_map(&season_doc, "data").and_then(|d| d.get("tasks"))),
+            prestige: tasks_doc
+                .pointer("/data/prestige")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default(),
             zh_tasks: as_str_map(zh_tasks_doc.get("data").unwrap_or(&Value::Null)),
             zh_tasks_pve: as_str_map(zh_tasks_pve_doc.get("data").unwrap_or(&Value::Null)),
             maps: as_val_map(maps_data.get("maps")),
@@ -360,6 +369,28 @@ fn build_quests(raw: &Raw, maps: &HashMap<String, MapEntry>) -> HashMap<String, 
         }
     }
 
+    // 1b) 转生（Prestige）等级 -> 门槛任务：data.prestige[] 每档 conditions 里
+    //     type=taskStatus 的任务即该档的门槛任务。同一任务出现在多档时取最低档
+    //     （玩家最早可达成的转生等级）。
+    let mut prestige_of: HashMap<String, u32> = HashMap::new();
+    {
+        let mut entries: Vec<&Value> = raw.prestige.iter().collect();
+        entries.sort_by_key(|p| p.get("prestigeLevel").and_then(|v| v.as_u64()).unwrap_or(0));
+        for p in entries {
+            let Some(lv) = p.get("prestigeLevel").and_then(|v| v.as_u64()) else {
+                continue;
+            };
+            for c in arr(p, "conditions") {
+                if s(c, "type") != Some("taskStatus") {
+                    continue;
+                }
+                if let Some(tid) = s(c, "task") {
+                    prestige_of.entry(tid.to_string()).or_insert(lv as u32);
+                }
+            }
+        }
+    }
+
     // 2) 任务文本中提取地图用的名称表（长名优先，避免子串误吞）
     let mut map_names: Vec<(String, String)> = Vec::new();
     for (id, e) in maps {
@@ -388,7 +419,10 @@ fn build_quests(raw: &Raw, maps: &HashMap<String, MapEntry>) -> HashMap<String, 
         } else {
             vec!["pvp".to_string()]
         };
-        index.insert(qid.clone(), build_one(raw, qid, t, &raw.zh_tasks, &modes, &var_to_trader, &map_names));
+        index.insert(
+            qid.clone(),
+            build_one(raw, qid, t, &raw.zh_tasks, &modes, &var_to_trader, &map_names, &prestige_of),
+        );
     }
     // 4) PVE 独有任务
     for (qid, t) in &raw.tasks_pve {
@@ -397,7 +431,7 @@ fn build_quests(raw: &Raw, maps: &HashMap<String, MapEntry>) -> HashMap<String, 
         }
         index.insert(
             qid.clone(),
-            build_one(raw, qid, t, &raw.zh_tasks_pve, &["pve".to_string()], &var_to_trader, &map_names),
+            build_one(raw, qid, t, &raw.zh_tasks_pve, &["pve".to_string()], &var_to_trader, &map_names, &prestige_of),
         );
     }
     // 5) 共有任务在 PVE 下前置不同时单独存一份
@@ -427,6 +461,7 @@ fn build_one(
     modes: &[String],
     var_to_trader: &HashMap<String, String>,
     map_names: &[(String, String)],
+    prestige_of: &HashMap<String, u32>,
 ) -> QuestNode {
     let tz = |key: &str| -> String {
         match zh.get(key) {
@@ -566,9 +601,12 @@ fn build_one(
         wiki: format!("https://www.eftarkov.com/news/id/{qid}.html"),
         objectives,
         rewards,
-        legacy: !raw.tasks_season.contains_key(qid),
+        // 转生（Prestige）任务不算「往期赛季任务」：上游 pvp-season 列表并未收录全部转生任务
+        // （转生 2/3/4 就不在其中），按原判定会被当作旧任务而默认隐藏，这里显式排除。
+        legacy: !raw.tasks_season.contains_key(qid) && prestige_of.get(qid).is_none(),
         special: SPECIAL_TRADERS.contains(&trader_norm.as_str()),
         modes: modes.to_vec(),
+        prestige_level: prestige_of.get(qid).copied(),
     }
 }
 

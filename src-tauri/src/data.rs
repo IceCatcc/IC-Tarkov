@@ -84,6 +84,8 @@ pub struct GraphNode {
     pub prereqs_pve: Vec<String>,
     /// 任务可用模式：pvp / pve
     pub modes: Vec<String>,
+    /// 转生（Prestige）等级：该任务是第 N 次转生的门槛任务时为 Some(N)
+    pub prestige_level: Option<u32>,
     /// 需要提交的物品（全部目标中出现的物品扁平化）
     pub turn_ins: Vec<ItemPayload>,
 }
@@ -130,6 +132,8 @@ pub struct QuestDetail {
     pub prereqs_pve: Vec<String>,
     /// 任务可用模式：pvp / pve
     pub modes: Vec<String>,
+    /// 转生（Prestige）等级：该任务是第 N 次转生的门槛任务时为 Some(N)
+    pub prestige_level: Option<u32>,
 }
 
 /// 接取事件所需信息（watcher 使用）
@@ -331,6 +335,7 @@ pub fn get_graph() -> QuestGraph {
             special: n.special,
             prereqs_pve: n.prereqs_pve.clone(),
             modes: n.modes.clone(),
+            prestige_level: n.prestige_level,
             turn_ins: flatten_turn_ins(n),
         });
         for p in &n.prereqs {
@@ -385,5 +390,6 @@ pub fn get_detail(quest_id: &str) -> Option<QuestDetail> {
         special: n.special,
         prereqs_pve: n.prereqs_pve.clone(),
         modes: n.modes.clone(),
+        prestige_level: n.prestige_level,
     })
 }
