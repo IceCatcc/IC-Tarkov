@@ -212,6 +212,41 @@ img.extract-req-icon {
 .req-btr { background: rgba(95, 166, 255, 0.18); color: #9ec5ff; border-color: rgba(95, 166, 255, 0.6); }
 .req-info { background: rgba(139, 148, 158, 0.16); color: #c9d1d9; border-color: rgba(139, 148, 158, 0.5); }
 
+/* 图标右下角的楼层方向角标：在上一层显示向上的尖角、下一层显示向下的，
+   相差超过一层就叠两个（内容由 MapPage 的 applyOneMarker 维护）。
+   形状是「« 转 90°」的线形尖角，不是实心三角。 */
+.lvl-arrow {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none;
+}
+.lvl-arrow.up,
+.lvl-arrow.down {
+    display: flex;
+}
+.lvl-arrow i {
+    display: block;
+    width: 5px;
+    height: 5px;
+    border-top: 2px solid #f0f6fc;
+    border-right: 2px solid #f0f6fc;
+    filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.95));
+}
+/* 叠两个时轻微咬合，形成双层尖角 */
+.lvl-arrow i + i {
+    margin-top: -2px;
+}
+.lvl-arrow.up i {
+    transform: rotate(-45deg);
+}
+.lvl-arrow.down i {
+    transform: rotate(135deg);
+}
+
 /* 狙击 AI 出生点：图标套红色光晕，和普通 AI 明显区分 */
 .marker-sniper {
     filter:

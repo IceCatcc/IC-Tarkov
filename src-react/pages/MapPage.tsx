@@ -94,6 +94,9 @@ const floorOrder = (lyr: SkeletonLayer | null): number | null => {
 /** 数据里用 1000 / 10000 表示「一直到顶 / 无上限」，排序时要排除这些哨兵值 */
 const FLOOR_TOP_SENTINEL = 1000
 
+/** 非当前楼层的标记透明度：稍微透明一点，仍能看清位置 */
+const DIMMED_MARKER_OPACITY = 0.45
+
 /**
  * 楼层的代表高度，用于楼层列表排序（越高越靠上）；主层（null）按 0 处理。
  *
@@ -113,6 +116,50 @@ const floorHeight = (lyr: SkeletonLayer | null): number => {
   if (maxBottom < 0) return maxBottom
   const caps = hs.map((h) => h[1]).filter((t) => t < FLOOR_TOP_SENTINEL)
   return caps.length ? Math.max(...caps) : Math.max(...hs.map((h) => h[1]))
+}
+
+/**
+ * 楼层从高到低的顺序（下标即「楼层排名」，0 最高），与楼层列表的展示顺序一致：
+ * 先按名字里的层号，名字没有层号的再按高度。i = -1 表示主层。
+ */
+function sortFloors(layers: SkeletonLayer[]): { lyr: SkeletonLayer | null; i: number }[] {
+  return [{ lyr: null, i: -1 }, ...layers.map((lyr, i) => ({ lyr, i }))].sort((a, b) => {
+    const oa = floorOrder(a.lyr)
+    const ob = floorOrder(b.lyr)
+    if (oa != null && ob != null && oa !== ob) return ob - oa
+    return floorHeight(b.lyr) - floorHeight(a.lyr)
+  })
+}
+
+/**
+ * 标记所属楼层的排名（对应 sortFloors 的下标）。
+ *
+ * 数据里标记只带一个高度 position.y（没有楼层字段），所以按各层 extents 的高度区间匹配；
+ * 一个点可能落在多个区间里（区间会重叠、还有贯穿整栋的哨兵区间），取**最窄**的那个。
+ * 匹配不到时算作主层——绝大多数标记（撤离点、容器…）的 y 就在地表。
+ */
+function markerFloorRank(
+  en: MarkerEntry,
+  ranks: { lyr: SkeletonLayer | null; i: number }[],
+  mainRank: number,
+): number {
+  const y = en.position?.y
+  if (typeof y !== 'number') return mainRank
+  let best = mainRank
+  let bestSpan = Infinity
+  ranks.forEach((r, rank) => {
+    for (const e of r.lyr?.extents ?? []) {
+      const h = e.height
+      if (!Array.isArray(h) || h.length !== 2) continue
+      if (y < h[0] || y > h[1]) continue
+      const span = h[1] - h[0]
+      if (span < bestSpan) {
+        bestSpan = span
+        best = rank
+      }
+    }
+  })
+  return best
 }
 // 图标文件名映射与「是否为狙击点」判定已移到 mapIconGroups.ts（图层与筛选面板共用）
 
@@ -575,9 +622,58 @@ export function MapPage() {
     }
     const showSvgMain = () => applySvgLayer(imap.svgLayer ?? null, false, false)
 
+    /* ---- 标记按楼层分级 ---- */
+    // 楼层从高到低的排名（下标 0 = 最高），与楼层列表展示顺序一致
+    const ranks = sortFloors(imap.layers ?? [])
+    const mainRank = Math.max(0, ranks.findIndex((r) => r.i === -1))
+    const rankOfFloorIdx = (idx: number) => {
+      const r = ranks.findIndex((it) => it.i === idx)
+      return r < 0 ? mainRank : r
+    }
+    interface Leveled {
+      mk: L.Marker
+      /** 标记所属楼层的排名 */
+      rank: number
+      /** 右下角的方向角标（marker 加入地图后才有） */
+      arrow: HTMLElement | null
+    }
+    const markerLevels: Leveled[] = []
+    let curRank = mainRank
+
+    /** 单个标记：当前楼层正常显示，其它楼层压暗图标并标出相对方向（角标不跟着变透明） */
+    const applyOneMarker = (rec: Leveled, rank: number) => {
+      const diff = rec.rank - rank
+      const el = rec.mk.getElement()
+      // 只给图标本身设透明度：marker.setOpacity 会把右下角的方向角标一起压暗
+      const img = el?.querySelector<HTMLElement>('img')
+      if (img) img.style.opacity = diff === 0 ? '' : String(DIMMED_MARKER_OPACITY)
+      // 角标只有加入地图后才查得到，这里兼作兜底查询
+      if (!rec.arrow) {
+        rec.arrow = el?.querySelector<HTMLElement>('.lvl-arrow') ?? null
+        if (!rec.arrow) return
+      }
+      const arrow = rec.arrow
+      if (diff === 0) {
+        arrow.className = 'lvl-arrow'
+        arrow.replaceChildren()
+        return
+      }
+      // 排名更小 = 楼层更高 → 箭头朝上；相差超过一层就叠两个
+      arrow.className = `lvl-arrow ${diff < 0 ? 'up' : 'down'}`
+      arrow.replaceChildren(
+        ...Array.from({ length: Math.min(2, Math.abs(diff)) }, () => document.createElement('i')),
+      )
+    }
+
+    const applyMarkerLevels = (rank: number) => {
+      curRank = rank
+      for (const rec of markerLevels) applyOneMarker(rec, rank)
+    }
+
     const applyFloor = (idx: number) => {
       defaultHandle?.[idx === -1 ? 'show' : 'hide']()
       for (const [i, h] of floorHandles) h[i === idx ? 'show' : 'hide']()
+      applyMarkerLevels(rankOfFloorIdx(idx))
     }
     floorApplyRef.current = applyFloor
 
@@ -677,18 +773,21 @@ export function MapPage() {
       return parts.length ? [parts.join(' · ')] : []
     }
 
-    // 狙击 AI：图标外面套一圈醒目的红色光晕，和普通 AI 明显区分
+    // 狙击 AI：图标外面套一圈醒目的红色光晕，和普通 AI 明显区分。
+    // 用 divIcon 而非 icon（后者渲染出的是 <img>，不能有子节点）：
+    // 图标里要嵌一个可更新的楼层方向角标。
     const makeIcon = (file: string, opts?: { highlight?: 'red' }) =>
-      L.icon({
-        iconUrl: `${ICON_BASE}${file}.png`,
+      L.divIcon({
+        // 尺寸必须写在 style 里：HTML 的 width/height 属性优先级低于样式表，
+        // 会让源图尺寸（撤离点图标比 20px 大）直接生效
+        html:
+          `<img src="${ICON_BASE}${file}.png" alt="" ` +
+          'style="width:20px;height:20px;display:block"/><span class="lvl-arrow"></span>',
         iconSize: [20, 20],
         iconAnchor: [10, 10],
-        className: opts?.highlight === 'red' ? 'marker-sniper' : undefined,
+        // 不传时会落到 leaflet-div-icon 的默认样式（白底 + 边框）
+        className: opts?.highlight === 'red' ? 'marker-sniper' : '',
       })
-
-    /* 按楼层的灰显已移除：实测效果不好（切换楼层时大量标记忽明忽暗，
-       且高度区间判定在有误差时会误灰显相邻层的标记）。现在所有标记始终正常显示，
-       楼层切换只影响底图本身。 */
 
     const groupOf = (
       list: MarkerEntry[],
@@ -729,6 +828,13 @@ export function MapPage() {
               offset: [0, -10],
             })
         }
+        // 楼层归属：角标已在图标 html 里，加入地图后取到引用并应用分级样式
+        const rec: Leveled = { mk, rank: markerFloorRank(en, ranks, mainRank), arrow: null }
+        markerLevels.push(rec)
+        mk.on('add', () => {
+          rec.arrow = mk.getElement()?.querySelector<HTMLElement>('.lvl-arrow') ?? null
+          applyOneMarker(rec, curRank)
+        })
         lg.addLayer(mk)
       }
       return lg
@@ -831,6 +937,10 @@ export function MapPage() {
       }
     }
 
+    // 标记此时还没加入地图（等 syncAll），先把分级状态算好；
+    // 每个 marker 加入时会自行补一次（见 groupOf 里的 on('add')）
+    applyMarkerLevels(curRank)
+
     const syncAll = () => {
       const cur = chipsRef.current
       for (const [key, { lg, follow }] of subLayers) {
@@ -858,7 +968,7 @@ export function MapPage() {
   }, [imap, markers])
 
   useEffect(() => {
-    // 楼层切换只切换底图（applyFloor），不再改变标记的透明度
+    // 切换楼层：底图 + 标记的楼层分级（当前层正常，其它层压暗并标方向箭头）
     floorApplyRef.current?.(floorSel)
   }, [floorSel, imap])
 
@@ -1039,18 +1149,9 @@ export function MapPage() {
   }
 
   const floors = imap?.layers ?? []
-  // 楼层排序：先按名字里的层号（2nd / 3rd / 4th Floor → 二 / 三 / 四楼），
-  // 名字里没有层号的（医务室 / 隧道 / 车库 / Bunkers…）再按实际高度；主层层号 0。
-  // 光看高度会被上游噪声带偏（海关「二楼」图层里混着 14~15 米的点位），层号更可靠。
-  const floorItems: { lyr: SkeletonLayer | null; i: number }[] = [
-    { lyr: null, i: -1 },
-    ...floors.map((lyr, i) => ({ lyr, i })),
-  ].sort((a, b) => {
-    const oa = floorOrder(a.lyr)
-    const ob = floorOrder(b.lyr)
-    if (oa != null && ob != null && oa !== ob) return ob - oa
-    return floorHeight(b.lyr) - floorHeight(a.lyr)
-  })
+  // 楼层列表（从高到低）：先按名字里的层号，名字里没有层号的（医务室 / 隧道 / 车库…）
+  // 再按实际高度。同一顺序在图层构建里用作标记的「楼层排名」。
+  const floorItems = sortFloors(floors)
   // 地图任务浮窗数据：本图的进行中任务（无 zone 数据时不过滤，避免误隐藏）
   const mapInProgressQuests = playerQuests.filter((q) => {
     if (q.status !== 'in_progress') return false
