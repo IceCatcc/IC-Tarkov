@@ -53,6 +53,8 @@ export function QuestBoardView() {
   const [trader, setTrader] = useState<string | null>(null)
   // 地图筛选：'' = 全部；由顶部工具栏（与搜索同一栏）控制，无地图信息的任务保留显示
   const mapFilter = useStore((s) => s.boardMapFilter)
+  // 是否显示已完成任务（顶部工具栏开关，默认显示）
+  const showCompleted = useStore((s) => s.showCompletedBoard)
   // 分页：每张卡会按需拉取任务详情，一次铺开全部（500+）会瞬间发出大量请求
   const [limit, setLimit] = useState(60)
 
@@ -82,6 +84,8 @@ export function QuestBoardView() {
       if (n.modes && n.modes.length > 0 && !n.modes.includes(questMode)) continue
       if (hideLegacy && n.legacy) continue
       if (!showPrestige && n.prestigeLevel != null) continue
+      // 「显示已完成」关闭时排除已完成任务
+      if (!showCompleted && statusOf.get(n.id) === 'completed') continue
       if (q && !n.name.toLowerCase().includes(q)) continue
       // 地图筛选：任务涉及该地图即命中；无地图信息的任务保持显示
       if (mapFilter) {
@@ -109,6 +113,7 @@ export function QuestBoardView() {
     search,
     hideLegacy,
     showPrestige,
+    showCompleted,
     mapFilter,
   ])
 
@@ -294,6 +299,14 @@ function QuestBoardCard({
   const openWiki = useStore((s) => s.openWiki)
   const wikiUrlFor = useStore((s) => s.wikiUrlFor)
   const manualSetStatus = useStore((s) => s.manualSetStatus)
+  const setGraphTab = useStore((s) => s.setGraphTab)
+  const setGraphFocusId = useStore((s) => s.setGraphFocusId)
+
+  // 跳到任务链：只发出「聚焦」信号，由图谱页负责「画布平滑移过去 → 到位后再打开详情」
+  const openInChain = (id: string) => {
+    setGraphTab('chain')
+    setGraphFocusId(id)
+  }
   const profile = useStore((s) => s.settings.profile)
   const detail = useQuestDetail(n.id)
   const url = wikiUrlFor(n.id)
@@ -355,6 +368,32 @@ function QuestBoardCard({
           <span className="shrink-0 px-1.5 py-0.5 rounded border border-line/40 text-[12px] text-muted/70">
             Lv{n.minLevel}+
           </span>
+        )}
+        {/* 有前置时，在前置 tag 最前面加「在任务链中查看」链接图标：
+            切到任务链视图、选中该任务并把视图居中过去 */}
+        {preReqs.length > 0 && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              openInChain(n.id)
+            }}
+            title="在任务链中查看该任务"
+            className="shrink-0 w-5 h-5 grid place-items-center rounded text-muted/70 hover:text-[#e6edf3] hover:bg-ink-700/60 transition-colors"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            >
+              <path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11 5" />
+              <path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07L13 19" />
+            </svg>
+          </button>
         )}
         {preReqs.slice(0, 2).map((p) => (
           <span

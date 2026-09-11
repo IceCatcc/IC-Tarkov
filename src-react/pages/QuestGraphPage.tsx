@@ -369,6 +369,12 @@ export function QuestGraphPage() {
   const mapNames = useStore((s) => s.mapNames)
   const boardMapFilter = useStore((s) => s.boardMapFilter)
   const setBoardMapFilter = useStore((s) => s.setBoardMapFilter)
+  const showCompletedBoard = useStore((s) => s.showCompletedBoard)
+  const setShowCompletedBoard = useStore((s) => s.setShowCompletedBoard)
+  const graphFocusId = useStore((s) => s.graphFocusId)
+  const setGraphFocusId = useStore((s) => s.setGraphFocusId)
+  const followDetail = useStore((s) => s.followDetail)
+  const setFollowDetail = useStore((s) => s.setFollowDetail)
   const page = useStore((s) => s.page)
   const openWiki = useStore((s) => s.openWiki)
   const wikiUrlFor = useStore((s) => s.wikiUrlFor)
@@ -406,6 +412,11 @@ export function QuestGraphPage() {
   }, [graph, questMode, mapNames])
 
   const [view, setView] = useState({ x: 30, y: 30, scale: DEFAULT_SCALE })
+  // 选中闪烁：选中某个节点后，短时间内给它加几轮扩散光环做视觉反馈（不常驻）
+  const flashRef = useRef<{ id: string; t0: number } | null>(null)
+  useEffect(() => {
+    if (selectedId) flashRef.current = { id: selectedId, t0: performance.now() }
+  }, [selectedId])
   const dragRef = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(
     null,
   )
@@ -1398,6 +1409,129 @@ export function QuestGraphPage() {
     return out
   }, [height])
 
+  // —— 从任务列表点「在任务链中查看」跳过来 ——
+  // 画布平滑移到该节点（easeOutCubic），动画结束后再打开详情：这样不会出现
+  // 「详情面板先弹出、画布还在飞」。viewRef 记录动画起点，避免 effect 依赖 view 自激循环。
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const focusRafRef = useRef<number | null>(null)
+  // 打开详情：优先用缓存，否则异步拉取（与图谱内点选节点的行为一致）
+  const openDetail = (id: string) => {
+    const cached = useStore.getState().questDetails[id] ?? null
+    setSelected(id, cached)
+    if (!cached) {
+      void getQuestDetail(id)
+        .then((d) => {
+          if (d) {
+            useStore.getState().setQuestDetail(id, d)
+            setSelected(id, d)
+          }
+        })
+        .catch(() => {})
+    }
+  }
+  useEffect(() => {
+    if (!graphFocusId) return
+    const id = graphFocusId
+    const p = positions[id]
+    // 节点被当前筛选隐藏：无法居中，清掉信号
+    if (!p) {
+      setGraphFocusId(null)
+      return
+    }
+    // 画布尺寸还没测出来（刚从列表切到图谱，canvas 刚挂载）：保留信号，
+    // 等 ResizeObserver 更新 csize 后本 effect 会重跑，再播动画
+    if (csize.w <= 0 || csize.h <= 0) return
+    const from = viewRef.current
+    const to = {
+      scale: from.scale,
+      x: csize.w / 2 - (p.x + NODE_W / 2) * from.scale,
+      y: csize.h / 2 - (p.y + NODE_H / 2) * from.scale,
+    }
+    const t0 = performance.now()
+    const dur = 460
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / dur)
+      const e = 1 - Math.pow(1 - k, 3) // easeOutCubic
+      setView({
+        scale: from.scale,
+        x: from.x + (to.x - from.x) * e,
+        y: from.y + (to.y - from.y) * e,
+      })
+      if (k < 1) {
+        focusRafRef.current = requestAnimationFrame(step)
+      } else {
+        focusRafRef.current = null
+        setGraphFocusId(null)
+        openDetail(id)
+      }
+    }
+    focusRafRef.current = requestAnimationFrame(step)
+    return () => {
+      if (focusRafRef.current) {
+        cancelAnimationFrame(focusRafRef.current)
+        focusRafRef.current = null
+      }
+    }
+  }, [graphFocusId, positions, csize.w, csize.h, setGraphFocusId])
+
+  // —— 详情跟随：面板贴在选中节点卡片下方（左对齐），随画布一起移动 ——
+  // 每帧直接写 DOM 的 left/top，避免 setState 触发整页重渲染；面板在画布容器内，
+  // 节点被拖到视图外时随之被 overflow-hidden 裁掉。
+  useEffect(() => {
+    if (!followDetail || !selectedId) return
+    const place = () => {
+      const panel = panelRef.current
+      const p = selectedId ? positions[selectedId] : undefined
+      if (!panel || !p) return
+      const v = viewRef.current
+      panel.style.left = `${Math.round(p.x * v.scale + v.x)}px`
+      panel.style.top = `${Math.round((p.y + NODE_H) * v.scale + v.y + 6)}px`
+    }
+    // 先立即定位一次，避免首帧闪现在左上角
+    place()
+    let raf = 0
+    const tick = () => {
+      place()
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [followDetail, selectedId, positions])
+
+  // —— 自由浮层模式：面板尺寸变化（切换任务导致内容多少不同）后重新夹取位置，
+  // 保证右下两边不会越出画布（原来拖到底部再切成大面板会溢出窗口） ——
+  useEffect(() => {
+    if (followDetail) return
+    const panel = panelRef.current
+    const host = panel?.parentElement
+    if (!panel || !host) return
+    const clamp = () => {
+      const cur = useStore.getState().detailPanelPos
+      if (!cur) return
+      const h = host.getBoundingClientRect()
+      const maxX = Math.max(8, h.width - panel.offsetWidth - 8)
+      const maxY = Math.max(8, h.height - panel.offsetHeight - 8)
+      const x = Math.min(maxX, Math.max(8, cur.x))
+      const y = Math.min(maxY, Math.max(8, cur.y))
+      if (Math.abs(x - cur.x) > 0.5 || Math.abs(y - cur.y) > 0.5) setPanelPos({ x, y })
+    }
+    clamp()
+    const ro = new ResizeObserver(clamp)
+    ro.observe(panel)
+    ro.observe(host)
+    return () => ro.disconnect()
+  }, [followDetail, selectedId, detail, setPanelPos])
+
+  // 从跟随模式切回自由浮层：清掉 rAF 写在行内的 left/top，交回 React 的 style
+  useEffect(() => {
+    if (followDetail) return
+    const panel = panelRef.current
+    if (!panel) return
+    panel.style.left = ''
+    panel.style.top = ''
+  }, [followDetail])
+
   // 可见卡片的矩形（世界坐标），供走线判断是否被遮挡
   const nodeRects = useMemo(() => {
     const out: Rect[] = []
@@ -2006,6 +2140,28 @@ export function QuestGraphPage() {
         ctx.strokeStyle = '#ef9f27'
         ctx.lineWidth = 2
         ctx.stroke()
+
+        // 选中闪烁：0.8s 内两圈向外扩散的琥珀光环，提示「已经定位到这个任务」
+        const f = flashRef.current
+        if (f && f.id === n.id && !REDUCED_MOTION) {
+          const age = performance.now() - f.t0
+          if (age < 800) {
+            const k = (age % 400) / 400
+            rr(
+              ctx,
+              p.x - 3 - k * 10,
+              p.y - 3 - k * 10,
+              NODE_W + 6 + k * 20,
+              NODE_H + 6 + k * 20,
+              10 + k * 6,
+            )
+            ctx.strokeStyle = `rgba(239,159,39,${(0.75 * (1 - k)).toFixed(3)})`
+            ctx.lineWidth = 2.2
+            ctx.stroke()
+          } else {
+            flashRef.current = null
+          }
+        }
       }
 
       // 节点上的文字（标题 / Lv / 条件徽章 / ✦）统一在「屏幕空间」绘制，
@@ -2397,6 +2553,21 @@ export function QuestGraphPage() {
 
         {/* 搜索 + 地图筛选 + 缩略图：整体靠右 */}
         <div className="ml-auto shrink-0 flex items-center gap-2">
+          {/* 任务板：是否显示已完成任务（默认显示） */}
+          {graphTab === 'list' && (
+            <label
+              title="是否在任务列表中显示已完成的任务"
+              className="flex items-center gap-1.5 shrink-0 text-[14px] text-muted cursor-pointer select-none hover:text-[#e6edf3]"
+            >
+              <input
+                type="checkbox"
+                checked={showCompletedBoard}
+                onChange={(e) => setShowCompletedBoard(e.target.checked)}
+                className="accent-[#ef9f27]"
+              />
+              显示已完成
+            </label>
+          )}
           {graphTab === 'list' && (
             <select
               value={boardMapFilter}
@@ -2488,7 +2659,8 @@ export function QuestGraphPage() {
           </div>
         )}
 
-        {/* 概览面板 */}
+        {/* 概览面板：外层面板不滚动、只有内层内容区滚动，
+            这样拖动条 / Wiki / 关闭按钮永远停在顶部，不会被内容滚走 */}
         {selectedId && (
           <div
             ref={panelRef}
@@ -2497,43 +2669,78 @@ export function QuestGraphPage() {
             style={{
               width: DETAIL_PANEL_W,
               maxHeight: `min(88%, calc(100% - ${miniDim.h + 36}px))`,
-              ...(panelPos ? { left: panelPos.x, top: panelPos.y } : { right: 12, top: 12 }),
+              // 跟随模式的位置由每帧计算后直接写 DOM，这里不设 left/top（否则会被 React 覆盖）
+              ...(followDetail
+                ? {}
+                : panelPos
+                  ? { left: panelPos.x, top: panelPos.y }
+                  : { right: 12, top: 12 }),
             }}
-            className="absolute min-w-[360px] max-w-[calc(100%-24px)] overflow-y-auto bg-ink-800/90 backdrop-blur-sm border border-line rounded-xl px-4 pb-4 pt-7 shadow-xl z-50 cursor-default"
+            className="absolute min-w-[360px] max-w-[calc(100%-24px)] flex flex-col bg-ink-800/90 backdrop-blur-sm border border-line rounded-xl shadow-xl z-50 cursor-default"
           >
-            {/* 顶部拖动条：按住拖到画布任意位置（位置只在本次运行内记住） */}
+            {/* 固定头部：拖动条（按住拖到画布任意位置）+ Wiki + 关闭，均不参与滚动 */}
             <div
-              onPointerDown={onPanelDragStart}
-              onPointerMove={onPanelDragMove}
-              onPointerUp={onPanelDragEnd}
-              onPointerCancel={onPanelDragEnd}
-              title="拖动移动面板"
-              className="absolute inset-x-0 top-0 h-6 flex items-center justify-center cursor-grab active:cursor-grabbing touch-none"
+              onPointerDown={followDetail ? undefined : onPanelDragStart}
+              onPointerMove={followDetail ? undefined : onPanelDragMove}
+              onPointerUp={followDetail ? undefined : onPanelDragEnd}
+              onPointerCancel={followDetail ? undefined : onPanelDragEnd}
+              title={
+                followDetail
+                  ? '详情跟随中：面板贴在任务卡片下方，关闭跟随后可拖动'
+                  : '拖动移动面板'
+              }
+              className={`relative shrink-0 h-6 flex items-center justify-center touch-none ${
+                followDetail ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+              }`}
             >
               <span className="w-10 h-[3px] rounded-full bg-line" />
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                if (detail) {
-                  const u = wikiUrlFor(detail.id)
-                  if (u) openWiki(u)
+              {/* 详情跟随开关：面板贴在任务卡片下方、随画布移动 */}
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setFollowDetail(!followDetail)
+                }}
+                title={
+                  followDetail
+                    ? '详情跟随已开启：面板贴在任务卡片下方并随画布移动（点击关闭）'
+                    : '开启详情跟随：面板贴在任务卡片下方并随画布移动'
                 }
-              }}
-              className="absolute right-9 top-2 text-amber hover:underline text-[13px]"
-              title="在浏览器打开 Wiki 资料"
-            >
-              Wiki ↗
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setSelected(null, null)
-              }}
-              className="absolute right-3 top-2 text-muted hover:text-[#e6edf3] text-[14px]"
-            >
-              ✕
-            </button>
+                className={`absolute left-2 top-1 text-[12px] leading-none px-1.5 py-0.5 rounded border transition-colors ${
+                  followDetail
+                    ? 'border-amber/60 bg-amber/10 text-[#d4a174]'
+                    : 'border-line/50 text-muted hover:text-[#e6edf3]'
+                }`}
+              >
+                跟随
+              </button>
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (detail) {
+                    const u = wikiUrlFor(detail.id)
+                    if (u) openWiki(u)
+                  }
+                }}
+                className="absolute right-9 top-2 text-amber hover:underline text-[13px]"
+                title="在浏览器打开 Wiki 资料"
+              >
+                Wiki ↗
+              </button>
+              <button
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setSelected(null, null)
+                }}
+                className="absolute right-3 top-2 text-muted hover:text-[#e6edf3] text-[14px]"
+              >
+                ✕
+              </button>
+            </div>
+            {/* 内容滚动区（只有这里滚动） */}
+            <div className="overflow-y-auto px-4 pb-4 pt-1">
             {detail ? (
               <>
                 <div className="flex items-start gap-2 pr-6 flex-wrap">
@@ -2775,6 +2982,8 @@ export function QuestGraphPage() {
             ) : (
               <div className="text-[14px] text-muted">加载中…</div>
             )}
+            </div>
+            {/* /内容滚动区 */}
           </div>
         )}
 

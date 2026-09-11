@@ -134,6 +134,8 @@ export async function initTauri(): Promise<UnlistenFn> {
     'repMetGraph',
     'lvlMetGraph',
     'mapUnlockedGraph',
+    'showCompletedBoard',
+    'followDetail',
     'hideLegacyGraph',
     'disabledTradersGraph',
     'questMode',

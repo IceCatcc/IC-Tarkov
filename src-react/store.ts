@@ -143,6 +143,19 @@ interface AppState {
   boardMapFilter: string
   setBoardMapFilter: (m: string) => void
 
+  /** 任务板是否显示已完成任务（默认显示；关闭后只看未完成的） */
+  showCompletedBoard: boolean
+  setShowCompletedBoard: (v: boolean) => void
+
+  /** 从任务列表跳到任务链时要聚焦的任务 id：图谱把视图居中到该节点后清空 */
+  graphFocusId: string | null
+  setGraphFocusId: (id: string | null) => void
+
+  /** 详情跟随：选中任务时详情面板贴在节点卡片下方左对齐，并随画布一起移动
+   *  （移出视口即被裁剪不可见）。关闭时为可自由拖动的浮层 */
+  followDetail: boolean
+  setFollowDetail: (v: boolean) => void
+
   /** 监控页任务列表的关键字过滤（在所选分类内过滤任务名 / 商人名） */
   searchMonitor: string
   setSearchMonitor: (s: string) => void
@@ -249,6 +262,10 @@ interface GraphPrefs {
   repMet: boolean
   lvlMet: boolean
   mapUnlocked: boolean
+  /** 任务板是否显示已完成任务 */
+  showCompletedBoard: boolean
+  /** 详情面板是否跟随节点卡片 */
+  followDetail: boolean
   hideLegacy: boolean
   showPrestige: boolean
   disabledTraders: Record<string, boolean>
@@ -260,6 +277,8 @@ function loadGraphPrefs(): GraphPrefs {
     repMet: true,
     lvlMet: false,
     mapUnlocked: false,
+    showCompletedBoard: true, // 任务板默认显示已完成任务
+    followDetail: false, // 详情面板默认是自由拖动的浮层
     hideLegacy: false,
     showPrestige: true, // 默认显示转生任务（「转生任务」不勾选才隐藏）
     disabledTraders: Object.fromEntries(DEFAULT_DISABLED_TRADERS.map((id) => [id, true])),
@@ -275,6 +294,10 @@ function loadGraphPrefs(): GraphPrefs {
       repMet: false,
       lvlMet: false,
       mapUnlocked: false,
+      // 任务板「显示已完成」：首次升级时没有该字段，按默认「显示」处理
+      showCompletedBoard:
+        typeof p.showCompletedBoard === 'boolean' ? p.showCompletedBoard : true,
+      followDetail: typeof p.followDetail === 'boolean' ? p.followDetail : false,
       hideLegacy: false,
       showPrestige: true,
       disabledTraders: { ...fallback.disabledTraders, ...(p.disabledTraders ?? {}) },
@@ -291,6 +314,8 @@ function persistGraphPrefs() {
     repMet: s.repMetGraph,
     lvlMet: s.lvlMetGraph,
     mapUnlocked: s.mapUnlockedGraph,
+    showCompletedBoard: s.showCompletedBoard,
+    followDetail: s.followDetail,
     hideLegacy: s.hideLegacyGraph,
     showPrestige: s.showPrestigeGraph,
     disabledTraders: s.disabledTradersGraph,
@@ -314,6 +339,8 @@ export function collectUiPrefs(): Record<string, unknown> {
       repMet: s.repMetGraph,
       lvlMet: s.lvlMetGraph,
       mapUnlocked: s.mapUnlockedGraph,
+      showCompletedBoard: s.showCompletedBoard,
+      followDetail: s.followDetail,
       hideLegacy: s.hideLegacyGraph,
       showPrestige: s.showPrestigeGraph,
       disabledTraders: s.disabledTradersGraph,
@@ -613,6 +640,18 @@ export const useStore = create<AppState>((set, get) => ({
 
   boardMapFilter: '',
   setBoardMapFilter: (m) => set({ boardMapFilter: m }),
+  showCompletedBoard: prefs0.showCompletedBoard,
+  setShowCompletedBoard: (v) => {
+    set({ showCompletedBoard: v })
+    persistGraphPrefs()
+  },
+  graphFocusId: null,
+  setGraphFocusId: (id) => set({ graphFocusId: id }),
+  followDetail: prefs0.followDetail,
+  setFollowDetail: (v) => {
+    set({ followDetail: v })
+    persistGraphPrefs()
+  },
 
   searchMonitor: '',
   setSearchMonitor: (s) => set({ searchMonitor: s }),
@@ -639,7 +678,8 @@ export const useStore = create<AppState>((set, get) => ({
     set({ showPrestigeGraph: v })
     persistGraphPrefs()
   },
-  graphTab: 'chain',
+  // 任务页默认打开「任务列表」（任务板）；任务链图谱需手动切换
+  graphTab: 'list',
   setGraphTab: (v) => set({ graphTab: v }),
   detailPanelPos: null,
   setDetailPanelPos: (p) => set({ detailPanelPos: p }),
@@ -674,6 +714,10 @@ export const useStore = create<AppState>((set, get) => ({
       if (typeof g.repMet === 'boolean') patch.repMetGraph = g.repMet
       if (typeof g.lvlMet === 'boolean') patch.lvlMetGraph = g.lvlMet
       if (typeof g.mapUnlocked === 'boolean') patch.mapUnlockedGraph = g.mapUnlocked
+      if (typeof g.showCompletedBoard === 'boolean') {
+        patch.showCompletedBoard = g.showCompletedBoard
+      }
+      if (typeof g.followDetail === 'boolean') patch.followDetail = g.followDetail
       if (typeof g.hideLegacy === 'boolean') patch.hideLegacyGraph = g.hideLegacy
       if (typeof g.showPrestige === 'boolean') patch.showPrestigeGraph = g.showPrestige
       if (g.questMode === 'pve' || g.questMode === 'pvp' || g.questMode === 'pvps') {
