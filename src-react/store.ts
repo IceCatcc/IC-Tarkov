@@ -21,6 +21,7 @@ import {
   getCollectedItems,
   getSettings,
   setViewMode,
+  setQuestStatus,
 } from './tauri'
 import { buildWikiUrl, type WikiSite } from './wiki'
 import { ICON_DEFAULTS, migrateChips } from './mapIconGroups'
@@ -102,6 +103,13 @@ interface AppState {
   /** 收藏家：已收集的物品 id（后端 collected.json 持久化） */
   collectedItems: string[]
   setCollectedItems: (list: string[]) => void
+
+  /** 手动修改任务状态：complete=完成、reset=重置为未接取（另支持 accept / unlock）。
+   *  成功后用返回结果同步任务列表与解锁集合，任务链/任务板/监控页状态随之刷新 */
+  manualSetStatus: (
+    questId: string,
+    action: 'accept' | 'complete' | 'unlock' | 'reset',
+  ) => Promise<void>
 
   selectedId: string | null
   detail: QuestDetail | null
@@ -553,6 +561,21 @@ export const useStore = create<AppState>((set, get) => ({
 
   collectedItems: [],
   setCollectedItems: (list) => set({ collectedItems: list }),
+
+  manualSetStatus: async (questId, action) => {
+    try {
+      const res = await setQuestStatus(questId, action)
+      set({ playerQuests: res.quests, unlockedQuests: res.unlocked })
+    } catch (e) {
+      console.error('手动修改任务状态失败', e)
+      set((s) => ({
+        toasts: [
+          ...s.toasts,
+          { id: `${Date.now()}-${Math.random()}`, text: `修改任务状态失败：${String(e)}`, kind: 'info' as ToastKind, bornAt: Date.now() },
+        ].slice(-5),
+      }))
+    }
+  },
 
   selectedId: null,
   detail: null,

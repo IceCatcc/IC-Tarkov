@@ -227,18 +227,31 @@ function escapeHtml(s: string): string {
   )
 }
 
-/** 标记弹窗内容 */
+/**
+ * 标记弹窗内容。
+ * - 标题点击：有 questId 时展开右下角任务浮窗并定位到该任务；否则有 wikiUrl 时打开 Wiki
+ * - Wiki 文字按钮固定在标题行最右
+ * - coordMeta 精简为一行的坐标信息，右对齐显示在弹窗右下角
+ */
 function popupHtml(
   title: string,
   meta: string[],
   wikiUrl?: string | null,
   coordMeta?: string[],
+  questId?: string,
 ) {
-  const titleCls = wikiUrl ? 'map-popup-title map-popup-title-link' : 'map-popup-title'
-  const titleAttr = wikiUrl
-    ? ` data-wiki="${encodeURIComponent(wikiUrl)}" title="点击查看 Wiki"`
+  const titleAttr = questId
+    ? ` data-quest="${encodeURIComponent(questId)}" title="点击展开任务列表并定位该任务"`
+    : wikiUrl
+      ? ` data-wiki="${encodeURIComponent(wikiUrl)}" title="点击查看 Wiki"`
+      : ''
+  const titleLink = questId || wikiUrl ? ' map-popup-title-link' : ''
+  const wikiBtn = wikiUrl
+    ? `<button type="button" class="map-popup-wiki" data-wiki="${encodeURIComponent(
+        wikiUrl,
+      )}">Wiki ↗</button>`
     : ''
-  return `<div><div class="map-popup-title${wikiUrl ? ' map-popup-title-link' : ''}"${titleAttr}>${title}</div>${meta
+  return `<div><div class="map-popup-head"><div class="map-popup-title${titleLink}"${titleAttr}>${title}</div>${wikiBtn}</div>${meta
     .map((m) => `<div class="map-popup-meta">${m}</div>`)
     .join('')}${(coordMeta ?? [])
     .map((m) => `<div class="map-popup-coord">${m}</div>`)
@@ -267,7 +280,9 @@ export function MapPage() {
   const [floorSel, setFloorSel] = useState(-1) // -1 = 默认主层
   const [floorOpen, setFloorOpen] = useState(false) // 层级切换浮层
   const [mapMenuOpen, setMapMenuOpen] = useState(false) // 左下角地图选单浮层
-  const [tasksOpen, setTasksOpen] = useState(false) // 右下角任务浮窗
+  const [tasksOpen, setTasksOpen] = useState(false) // 工具栏「任务」按钮下方展开的浮窗
+  // 从地图弹窗标题跳转过来的任务：展开浮窗后滚动定位到该卡片（定位完即清空）
+  const [focusQuestId, setFocusQuestId] = useState<string | null>(null)
   const [infoOpen, setInfoOpen] = useState(true) // 右下角地图信息浮窗（默认展开）
   const [focusOpen, setFocusOpen] = useState(false) // 左下角「聚焦」浮动按钮展开面板
   const [chipsOpen, setChipsOpen] = useState(false) // 左下角「标记」浮动选单
@@ -451,13 +466,27 @@ export function MapPage() {
     const openWiki = useStore.getState().openWiki
     const onMapClick = (ev: MouseEvent) => {
       const target = ev.target as HTMLElement
+      // Wiki 文字按钮：打开 Wiki 抽屉
       const btn = target.closest('[data-wiki]') as HTMLElement | null
-      if (!btn) return
-      ev.preventDefault()
-      const url = decodeURIComponent(btn.getAttribute('data-wiki') ?? '')
-      if (url) {
-        container.closePopup()
-        openWiki(url)
+      if (btn) {
+        ev.preventDefault()
+        const url = decodeURIComponent(btn.getAttribute('data-wiki') ?? '')
+        if (url) {
+          container.closePopup()
+          openWiki(url)
+        }
+        return
+      }
+      // 弹窗标题：展开右下角任务浮窗并滚动定位到该任务
+      const titleEl = target.closest('[data-quest]') as HTMLElement | null
+      if (titleEl) {
+        ev.preventDefault()
+        const qid = decodeURIComponent(titleEl.getAttribute('data-quest') ?? '')
+        if (qid) {
+          container.closePopup()
+          setTasksOpen(true)
+          setFocusQuestId(qid)
+        }
       }
     }
     container.getContainer().addEventListener('click', onMapClick)
@@ -847,6 +876,19 @@ export function MapPage() {
     map.setView(ll, autoZoomRef.current ? targetZoom : map.getZoom(), { animate: false })
   }, [shotPos, imap])
 
+  // 地图弹窗标题 → 任务浮窗：展开后滚动到对应任务卡片（等一帧让列表渲染出来）。
+  // 必须放在条件 return 之前，否则违反 Hooks 规则（首次渲染 hook 数不一致而崩溃）
+  useEffect(() => {
+    if (!tasksOpen || !focusQuestId) return
+    const t = window.setTimeout(() => {
+      document
+        .getElementById(`mapq-${focusQuestId}`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      setFocusQuestId(null)
+    }, 40)
+    return () => window.clearTimeout(t)
+  }, [tasksOpen, focusQuestId])
+
   /* ---------- 进行中任务的目标标记 ---------- */
 
   useEffect(() => {
@@ -902,12 +944,11 @@ export function MapPage() {
                   ...(o.optional ? ['可选目标'] : []),
                 ],
                 wikiUrlFor(tid),
+                // 坐标精简：直接 x y z，右下角一行；不再有「坐标 / 高度」这类说明
                 [
-                  ...(typeof z.top === 'number' || typeof z.bottom === 'number'
-                    ? [`高度 ${fmtNum(z.top)} ~ ${fmtNum(z.bottom)}`]
-                    : []),
-                  `坐标 X ${z.position.x.toFixed(1)} · Z ${z.position.z.toFixed(1)}`,
+                  `${z.position.x.toFixed(1)} ${fmtNum(z.position.y)} ${z.position.z.toFixed(1)}`,
                 ],
+                tid,
               ),
             ),
           )
@@ -1185,27 +1226,18 @@ export function MapPage() {
                   本地图暂无进行中任务
                 </div>
               ) : (
-                mapInProgressQuests.map((q) => {
-                  const tracked = !untrackedQuests.includes(q.questId)
-                  return (
-                    <div key={q.questId} className="flex items-start gap-1.5">
-                      <button
-                        onClick={() => toggleQuestTracked(q.questId)}
-                        title={tracked ? '取消跟踪：不在地图绘制该任务目标' : '跟踪：在地图绘制该任务目标'}
-                        className={`mt-3 shrink-0 w-5 h-5 grid place-items-center rounded border text-[12px] ${
-                          tracked
-                            ? 'border-amber text-[#d4a174] bg-amber/10'
-                            : 'border-line text-muted hover:text-[#e6edf3]'
-                        }`}
-                      >
-                        {tracked ? '◉' : '○'}
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <QuestCard quest={q} />
-                      </div>
-                    </div>
-                  )
-                })
+                mapInProgressQuests.map((q) => (
+                  <div key={q.questId} id={`mapq-${q.questId}`}>
+                    <QuestCard
+                      quest={q}
+                      // 这里只列进行中任务，状态药丸没有信息量，隐藏
+                      hideStatus
+                      // 跟踪开关内置成标题前的罗盘按钮
+                      tracked={!untrackedQuests.includes(q.questId)}
+                      onToggleTrack={() => toggleQuestTracked(q.questId)}
+                    />
+                  </div>
+                ))
               )}
             </div>
           )}

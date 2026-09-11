@@ -61,6 +61,12 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     font-size: 30px !important;
     padding: 8px 10px 0 0 !important;
 }
+.map-popup-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
 .map-popup-title {
     font-size: 19.5px;
     font-weight: 700;
@@ -73,16 +79,33 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
 .map-popup-title-link:hover {
     text-decoration: underline;
 }
+/* 标题行最右的 Wiki 文字按钮 */
+.map-popup-wiki {
+    flex: none;
+    margin-top: 4px;
+    padding: 0;
+    font-size: 14px;
+    color: #d4a174;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+.map-popup-wiki:hover {
+    text-decoration: underline;
+}
 .map-popup-meta {
     font-size: 16.5px;
     color: #c9d1d9;
     line-height: 1.5;
 }
+/* 坐标信息：贴在弹窗右下角，弱化显示 */
 .map-popup-coord {
+    margin-top: 4px;
     font-size: 12.5px;
     color: #6e7681;
     line-height: 1.4;
     white-space: nowrap;
+    text-align: right;
 }
 
 /* 撤离要求：物品类（图片 + 中文名），对齐任务 tooltip 风格 */

@@ -594,7 +594,7 @@ export function QuestGraphPage() {
   // 手动修改任务状态：接取/完成/解锁（含任务链前置处理，由后端执行）
   const onSetStatus = async (
     id: string,
-    action: 'accept' | 'complete' | 'unlock',
+    action: 'accept' | 'complete' | 'unlock' | 'reset',
   ) => {
     try {
       const res = await setQuestStatus(id, action)
@@ -2572,6 +2572,18 @@ export function QuestGraphPage() {
                       title="手动解锁该任务（连同其前置）"
                     >
                       手动解锁
+                    </button>
+                  )}
+                  {selStatus === 'completed' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onSetStatus(detail.id, 'reset')
+                      }}
+                      className="text-[12px] text-muted hover:text-[#e6edf3] hover:underline mt-1.5 shrink-0"
+                      title="重置为未接取（清除接取与完成记录）"
+                    >
+                      手动重置
                     </button>
                   )}
                 </div>

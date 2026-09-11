@@ -226,10 +226,10 @@ export async function setItemCollected(
   })
 }
 
-/** 手动修改任务状态：accept=接取（同时完成前置）、complete=完成、unlock=解锁（含前置未结束任务） */
+/** 手动修改任务状态：accept=接取（同时完成前置）、complete=完成、unlock=解锁、reset=重置为未接取 */
 export async function setQuestStatus(
   questId: string,
-  action: 'accept' | 'complete' | 'unlock',
+  action: 'accept' | 'complete' | 'unlock' | 'reset',
 ): Promise<{ quests: PlayerQuest[]; unlocked: string[] }> {
   return await invoke<{ quests: PlayerQuest[]; unlocked: string[] }>('set_quest_status', {
     questId,

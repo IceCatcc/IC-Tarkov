@@ -293,6 +293,7 @@ function QuestBoardCard({
 }) {
   const openWiki = useStore((s) => s.openWiki)
   const wikiUrlFor = useStore((s) => s.wikiUrlFor)
+  const manualSetStatus = useStore((s) => s.manualSetStatus)
   const profile = useStore((s) => s.settings.profile)
   const detail = useQuestDetail(n.id)
   const url = wikiUrlFor(n.id)
@@ -375,10 +376,26 @@ function QuestBoardCard({
             +{preReqs.length - 2}
           </span>
         )}
-        <span
-          className={`ml-auto px-2 py-0.5 rounded-full text-[13px] border shrink-0 ${STATE_CHIP[state]}`}
-        >
-          {STATE_TEXT[state]}
+        <span className="ml-auto flex items-center gap-1.5 shrink-0">
+          <span className={`px-2 py-0.5 rounded-full text-[13px] border ${STATE_CHIP[state]}`}>
+            {STATE_TEXT[state]}
+          </span>
+          {/* 手动改状态：已完成 → 手动重置；其余 → 手动完成（后端会补上接取时间）；排最右 */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              void manualSetStatus(n.id, state === 'completed' ? 'reset' : 'complete')
+            }}
+            title={state === 'completed' ? '重置为未接取（清除接取与完成记录）' : '手动标记该任务为已完成'}
+            className={`text-[12px] hover:underline shrink-0 transition-colors ${
+              state === 'completed'
+                ? 'text-muted hover:text-[#e6edf3]'
+                : 'text-[#2ea043] hover:text-[#3fb950]'
+            }`}
+          >
+            {state === 'completed' ? '手动重置' : '手动完成'}
+          </button>
         </span>
       </div>
 

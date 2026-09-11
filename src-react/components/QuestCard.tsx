@@ -3,13 +3,28 @@ import { useStore, useQuestDetail, dedupeItems } from '../store'
 import { traderImage } from '../traderImages'
 import { traderDisplayName } from '../traderMeta'
 
-export function QuestCard({ quest }: { quest: PlayerQuest }) {
+/**
+ * hideStatus：隐藏状态药丸（如地图浮窗里只列进行中任务，状态无信息量）；
+ * tracked / onToggleTrack：传入后标题前显示「罗盘」跟踪按钮（地图浮窗用）
+ */
+export function QuestCard({
+  quest,
+  hideStatus,
+  tracked,
+  onToggleTrack,
+}: {
+  quest: PlayerQuest
+  hideStatus?: boolean
+  tracked?: boolean
+  onToggleTrack?: () => void
+}) {
   const completed = quest.status === 'completed'
   const avatar = traderImage(quest.traderId)
   // 商人统一展示中文名
   const traderLabel = traderDisplayName(quest.traderId, quest.traderName)
   const openWiki = useStore((s) => s.openWiki)
   const wikiUrlFor = useStore((s) => s.wikiUrlFor)
+  const manualSetStatus = useStore((s) => s.manualSetStatus)
   const detail = useQuestDetail(quest.questId)
   // 按设置里的 Wiki 站点生成链接（后端带的是默认站点地址，仅作兜底）
   const url = wikiUrlFor(quest.questId)
@@ -27,8 +42,34 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
       onClick={() => url && openWiki(url)}
       title={url ? '点击查看资料' : undefined}
     >
-      {/* 第一行：头像 + 任务名（优先显示，加粗加大）+ 状态药丸 */}
+      {/* 第一行：跟踪罗盘 + 头像 + 任务名（优先显示，加粗加大）+ 状态药丸 */}
       <div className="flex items-center gap-2 min-w-0">
+        {/* 跟踪开关：与地图上的玩家朝向标记同款图标，放在最左（地图浮窗用）。
+            跟踪中=正常显示，已取消跟踪=整体变浅 */}
+        {onToggleTrack && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleTrack()
+            }}
+            title={
+              tracked
+                ? '正在地图上跟踪该任务的目标（点击取消跟踪）'
+                : '已取消跟踪（点击重新跟踪）'
+            }
+            className={`shrink-0 w-6 h-6 grid place-items-center rounded transition-opacity hover:bg-amber/10 ${
+              tracked ? 'opacity-100' : 'opacity-35'
+            }`}
+          >
+            {/* 与地图上「任务目标」标记同一个图标文件 */}
+            <img
+              src="/maps/interactive/quest_objective.png"
+              alt=""
+              className="w-5 h-5 object-contain"
+            />
+          </button>
+        )}
         {avatar && (
           <img
             src={avatar}
@@ -37,14 +78,32 @@ export function QuestCard({ quest }: { quest: PlayerQuest }) {
           />
         )}
         <span className="text-[18px] font-semibold truncate min-w-0">{quest.name}</span>
-        <span
-          className={`ml-auto px-2 py-0.5 rounded-full text-[13px] border shrink-0 ${
-            completed
-              ? 'bg-[#1b1f24] border-done text-muted'
-              : 'bg-blue-soft border-blue text-blue'
-          }`}
-        >
-          {completed ? '已完成' : '进行中'}
+        <span className="ml-auto flex items-center gap-1.5 shrink-0">
+          {!hideStatus && (
+            <span
+              className={`px-2 py-0.5 rounded-full text-[13px] border ${
+                completed
+                  ? 'bg-[#1b1f24] border-done text-muted'
+                  : 'bg-blue-soft border-blue text-blue'
+              }`}
+            >
+              {completed ? '已完成' : '进行中'}
+            </span>
+          )}
+          {/* 手动改状态：进行中 → 手动完成；已完成 → 手动重置为未接取（排最右） */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              void manualSetStatus(quest.questId, completed ? 'reset' : 'complete')
+            }}
+            title={completed ? '重置为未接取（清除接取与完成记录）' : '手动标记该任务为已完成'}
+            className={`text-[12px] hover:underline shrink-0 transition-colors ${
+              completed ? 'text-muted hover:text-[#e6edf3]' : 'text-[#2ea043] hover:text-[#3fb950]'
+            }`}
+          >
+            {completed ? '手动重置' : '手动完成'}
+          </button>
         </span>
       </div>
 

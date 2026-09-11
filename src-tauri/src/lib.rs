@@ -789,6 +789,23 @@ fn set_quest_status(
                     wiki: None,
                 });
             }
+            "reset" => {
+                // 重置为未接取：清掉接取/完成时间，并取消该任务的手动解锁标记
+                if let Some(e) = md.quests.get_mut(&quest_id) {
+                    e.accepted_at = None;
+                    e.completed_at = None;
+                }
+                md.unlocked.remove(&quest_id);
+                md.push_activity(store::ActivityRow {
+                    id: format!("rst|{quest_id}|manual|{ts}"),
+                    ts: ts.clone(),
+                    kind: "progress".to_string(),
+                    quest_id: quest_id.clone(),
+                    quest_name: data::resolve_name(&quest_id),
+                    text: format!("手动重置为未接取：{}", data::resolve_name(&quest_id)),
+                    wiki: None,
+                });
+            }
             other => return Err(format!("未知操作：{other}")),
         }
         Ok(())
