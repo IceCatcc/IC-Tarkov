@@ -277,8 +277,8 @@ export function CollectorPage() {
             <span
               className={`inline-flex items-center h-6 px-1.5 rounded border ${
                 (profile?.level ?? 1) >= detail.minLevel
-                  ? 'border-[#2c4a35] bg-[#12161a] text-[#83a291]'
-                  : 'border-[#5c2b2b] bg-[#1a1214] text-red-400'
+                  ? 'border-line/45 text-muted/75'
+                  : 'border-line/35 text-muted/55'
               }`}
               title={`角色等级需 Lv${detail.minLevel}+，当前 Lv${profile?.level ?? 1}`}
             >
@@ -305,11 +305,9 @@ export function CollectorPage() {
                 <span
                   key={`${r.traderId}-${r.reqType}-${r.value}-${i}`}
                   className={`inline-flex items-center h-6 px-1.5 rounded border ${
-                    !isLv && r.reqType !== 'reputation'
-                      ? 'border-line bg-ink-700 text-[#c9d1d9]'
-                      : met
-                        ? 'border-[#2c4a35] bg-[#12161a] text-[#83a291]'
-                        : 'border-[#5c2b2b] bg-[#1a1214] text-red-400'
+                    met || (!isLv && r.reqType !== 'reputation')
+                      ? 'border-line/45 text-muted/75'
+                      : 'border-line/35 text-muted/55'
                   }`}
                 >
                   {traderDisplayName(r.traderId, r.traderName)} {text}

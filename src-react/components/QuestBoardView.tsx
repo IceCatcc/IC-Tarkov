@@ -14,10 +14,11 @@ interface BoardItem {
 }
 
 const STATE_CHIP: Record<ItemState, string> = {
-  completed: 'bg-[#1b1f24] border-done text-muted',
-  in_progress: 'bg-blue-soft border-blue text-blue',
-  available: 'bg-amber/15 border-amber/60 text-[#d4a174]',
-  locked: 'bg-ink-700 border-line text-muted',
+  completed: 'bg-ink-700/50 border-line/50 text-muted',
+  in_progress:
+    'bg-blue border-blue text-black font-medium animate-pill-ring motion-reduce:animate-none',
+  available: 'bg-amber/20 border-amber/60 text-[#d4a174]',
+  locked: 'bg-ink-700/40 border-line/40 text-muted',
 }
 const STATE_TEXT: Record<ItemState, string> = {
   completed: '已完成',
@@ -48,7 +49,6 @@ export function QuestBoardView() {
   const search = useStore((s) => s.searchGraph)
   const hideLegacy = useStore((s) => s.hideLegacyGraph)
   const showPrestige = useStore((s) => s.showPrestigeGraph)
-  const showCompleted = useStore((s) => s.showCompletedGraph)
   // null = 全部商人
   const [trader, setTrader] = useState<string | null>(null)
   // 地图筛选：'' = 全部；由顶部工具栏（与搜索同一栏）控制，无地图信息的任务保留显示
@@ -82,7 +82,6 @@ export function QuestBoardView() {
       if (n.modes && n.modes.length > 0 && !n.modes.includes(questMode)) continue
       if (hideLegacy && n.legacy) continue
       if (!showPrestige && n.prestigeLevel != null) continue
-      if (!showCompleted && statusOf.get(n.id) === 'completed') continue
       if (q && !n.name.toLowerCase().includes(q)) continue
       // 地图筛选：任务涉及该地图即命中；无地图信息的任务保持显示
       if (mapFilter) {
@@ -110,7 +109,6 @@ export function QuestBoardView() {
     search,
     hideLegacy,
     showPrestige,
-    showCompleted,
     mapFilter,
   ])
 
@@ -309,24 +307,51 @@ function QuestBoardCard({
   return (
     <div
       id={`qb-${n.id}`}
-      className={`bg-ink-800 border rounded-xl p-4 transition-colors ${
-        focused ? 'border-amber ring-2 ring-amber/40' : 'border-line'
+      className={`relative overflow-hidden rounded-xl border p-4 transition-colors ${
+        focused
+          ? 'border-amber ring-2 ring-amber/40'
+          : state === 'in_progress'
+            ? 'border-blue/45 bg-blue-soft/50'
+            : state === 'available'
+              ? 'border-amber/30 border-l-[3px] border-l-amber/70'
+              : state === 'completed'
+                ? 'border-line/50 bg-ink-800/40'
+                : 'border-line/40 bg-ink-800/25'
       } ${url ? 'cursor-pointer hover:border-amber/60' : ''}`}
       onClick={() => url && openWiki(url)}
       title={url ? '点击查看资料' : undefined}
     >
+      {/* 进行中：左侧蓝色强调条缓慢呼吸（减少动效偏好下自动关闭） */}
+      {state === 'in_progress' && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-0 top-0 h-full w-[3px] bg-blue animate-bar-breathe motion-reduce:animate-none"
+        />
+      )}
       {/* 第一行：头像 + 任务名 + 关键需求（忠诚等级 / 等级 / 前置）+ 状态 */}
       <div className="flex items-center gap-2 min-w-0">
         {avatar && (
           <img
             src={avatar}
             alt={traderLabel}
-            className="w-6 h-6 rounded-full object-cover border border-line shrink-0"
+            className={`w-6 h-6 rounded-full object-cover border shrink-0 ${
+              state === 'completed' || state === 'locked'
+                ? 'border-line/40 opacity-60'
+                : 'border-line'
+            }`}
           />
         )}
-        <span className="text-[18px] font-semibold truncate min-w-0 flex-1">{n.name}</span>
+        <span
+          className={`text-[18px] truncate min-w-0 flex-1 ${
+            state === 'completed' || state === 'locked'
+              ? 'font-medium text-muted'
+              : 'font-semibold text-[#e6edf3]'
+          }`}
+        >
+          {n.name}
+        </span>
         {n.minLevel != null && n.minLevel > 0 && (
-          <span className="shrink-0 px-1.5 py-0.5 rounded border border-line text-[12px] text-muted">
+          <span className="shrink-0 px-1.5 py-0.5 rounded border border-line/40 text-[12px] text-muted/70">
             Lv{n.minLevel}+
           </span>
         )}
@@ -339,14 +364,14 @@ function QuestBoardCard({
             }}
             title={`跳转到前置任务：${p.name}`}
             className={`shrink-0 max-w-[130px] truncate px-1.5 py-0.5 rounded border text-[12px] cursor-pointer hover:border-amber/60 ${
-              p.done ? 'border-ok/50 bg-ok/10 text-ok' : 'border-line text-muted'
+              p.done ? 'border-ok/25 text-ok/75' : 'border-line/40 text-muted/70'
             }`}
           >
             前置 · {p.name}
           </span>
         ))}
         {preReqs.length > 2 && (
-          <span className="shrink-0 px-1.5 py-0.5 rounded border border-line text-[12px] text-muted">
+          <span className="shrink-0 px-1.5 py-0.5 rounded border border-line/40 text-[12px] text-muted/70">
             +{preReqs.length - 2}
           </span>
         )}
@@ -372,9 +397,7 @@ function QuestBoardCard({
               <span
                 key={`${r.traderId}-${i}`}
                 className={`px-1.5 py-0.5 rounded border text-[12px] ${
-                  met
-                    ? 'border-ok/50 bg-ok/10 text-ok'
-                    : 'border-red-500/40 bg-red-500/10 text-red-300'
+                  met ? 'border-line/45 text-muted/75' : 'border-line/35 text-muted/55'
                 }`}
               >
                 {traderDisplayName(r.traderId, r.traderName)}{' '}
@@ -383,22 +406,22 @@ function QuestBoardCard({
             )
           })}
           {n.prestigeLevel != null && (
-            <span className="px-1.5 py-0.5 rounded border border-amber/40 bg-amber/15 text-amber text-[12px]">
+            <span className="px-1.5 py-0.5 rounded border border-amber/25 bg-amber/10 text-[#d4a174] text-[12px]">
               转生 {n.prestigeLevel}
             </span>
           )}
           {n.legacy && (
-            <span className="px-1.5 py-0.5 rounded border border-line text-[12px] text-muted">
+            <span className="px-1.5 py-0.5 rounded border border-line/40 text-[12px] text-muted/70">
               赛季任务
             </span>
           )}
           {n.modes && n.modes.length > 0 && !n.modes.includes('pve') && (
-            <span className="px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/15 text-red-300 text-[12px]">
+            <span className="px-1.5 py-0.5 rounded border border-line/45 bg-ink-700/40 text-muted/80 text-[12px]">
               仅 PvP
             </span>
           )}
           {n.modes && n.modes.length > 0 && !n.modes.includes('pvp') && (
-            <span className="px-1.5 py-0.5 rounded border border-amber/40 bg-amber/15 text-amber text-[12px]">
+            <span className="px-1.5 py-0.5 rounded border border-line/45 bg-ink-700/40 text-muted/80 text-[12px]">
               仅 PvE
             </span>
           )}

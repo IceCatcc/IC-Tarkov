@@ -27,7 +27,7 @@ const NODE_W = 204
 const NODE_H = 78
 const BAND_GAP = 26
 
-/** 默认视图缩放（初始打开与「重置视图」按钮共用）：偏大以便看清节点文字 */
+/** 默认视图缩放（初始打开时使用）：偏大以便看清节点文字 */
 const DEFAULT_SCALE = 0.8
 
 // 网格布局常量（布局与绘制共用）
@@ -85,7 +85,12 @@ const STATE_STYLE: Record<NodeState, { bg: string; border: string; text: string 
   available: { bg: '#231b0d', border: '#9aa5b1', text: '#e6c089' },
   locked: { bg: '#1f2730', border: '#6b7682', text: '#c2cad3' },
 }
-const SPECIAL_BORDER = '#a371f7'
+const SPECIAL_BORDER = '#c4a7ff'
+
+/// 系统是否要求「减少动态效果」：开启时画布上的进行中脉冲动画不播放
+const REDUCED_MOTION =
+  typeof window !== 'undefined' &&
+  !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 
 // —— 图片缓存（本地图标，异步加载完成后随下一帧自动出现）——
 const imgCache = new Map<string, HTMLImageElement>()
@@ -371,9 +376,6 @@ export function QuestGraphPage() {
   const mapUnlocked = useStore((s) => s.mapUnlockedGraph)
   const setMapUnlocked = useStore((s) => s.setMapUnlockedGraph)
   const profile = useStore((s) => s.settings.profile)
-  // 「已完成」显示开关：勾选显示已完成任务，不勾选排除（替代原专注模式）
-  const showCompleted = useStore((s) => s.showCompletedGraph)
-  const setShowCompleted = useStore((s) => s.setShowCompletedGraph)
   // 「转生任务」显示开关：转生（Prestige）门槛任务，默认显示
   const showPrestige = useStore((s) => s.showPrestigeGraph)
   const setShowPrestige = useStore((s) => s.setShowPrestigeGraph)
@@ -426,15 +428,14 @@ export function QuestGraphPage() {
       return true
     }
   })
-  const toggleMiniMap = () =>
-    setShowMiniMap((v) => {
-      try {
-        localStorage.setItem('ic-tarkov.graphMiniMap.v1', v ? '0' : '1')
-      } catch {
-        /* ignore */
-      }
-      return !v
-    })
+  const setMiniMap = (on: boolean) => {
+    setShowMiniMap(on)
+    try {
+      localStorage.setItem('ic-tarkov.graphMiniMap.v1', on ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }
 
   // 持续 rAF 绘制循环（硬件加速合成，单画布 ~2000 图元 ≈1ms/帧）。
   // 必须与其它 Hooks 一样位于条件 return 之前，否则触发 Hooks 顺序错误。
@@ -639,9 +640,6 @@ export function QuestGraphPage() {
       if (!showPrestige && n.prestigeLevel != null) continue
       // 地图可用过滤：涉及未解锁地图的任务不显示
       if (hasLockedMap(n.maps)) continue
-      // 「已完成」开关：不勾选时排除已完成任务（仅在显示层排除，不参与任务链传播——
-      // 已完成的前置不应隐藏其下游）
-      if (!showCompleted && statusMap[n.id] === 'completed') continue
       // 搜索不再剔除节点：只记录命中集合，未命中项在绘制时淡化，保留上下文与布局稳定
       vis.add(n.id)
     }
@@ -1301,7 +1299,7 @@ export function QuestGraphPage() {
       chainRows,
       matches,
     }
-  }, [graph, search, hideLegacy, repMet, lvlMet, mapUnlocked, profile, statusMap, completedSet, unlockedSet, questMode, showCompleted, showPrestige, graphTab])
+  }, [graph, search, hideLegacy, repMet, lvlMet, mapUnlocked, profile, statusMap, completedSet, unlockedSet, questMode, showPrestige, graphTab])
 
   // 搜索唯一命中项：命中数恰好为 1 时自动把视图居中过去（不改变缩放）
   const soleMatchId = useMemo(() => {
@@ -1378,6 +1376,8 @@ export function QuestGraphPage() {
       /** 正交折线路径点（起点 → … → 终点） */
       pts: number[][]
       doneEdge: boolean
+      /** 起点任务是「进行中」：这条线用于流动动画，提示下一步走向 */
+      flowing: boolean
       from: string
       to: string
     }[] = []
@@ -1401,6 +1401,7 @@ export function QuestGraphPage() {
           nodeRects,
         ),
         doneEdge: statusMap[e.from] === 'completed',
+        flowing: statusMap[e.from] === 'in_progress',
         from: e.from,
         to: e.to,
       })
@@ -1702,10 +1703,6 @@ export function QuestGraphPage() {
   const selectedNode = selectedId ? (graph.nodes.find((n) => n.id === selectedId) ?? null) : null
   const selAvatar = traderImage(selectedNode?.traderId)
 
-  const chip =
-    'px-2.5 py-1 rounded-full text-[14px] border transition-colors whitespace-nowrap'
-  const chipOff = 'bg-ink-800 border-line text-muted hover:text-[#e6edf3]'
-
   // 悬浮 tooltip 数据
   const hoverTip = (() => {
     if (!hover || hover.icon < 0) return null
@@ -1834,10 +1831,16 @@ export function QuestGraphPage() {
     ctx.lineCap = 'round'
     for (const e of edges) {
       ctx.globalAlpha = alphaOfEdge(e.from, e.to)
-      // 未完成依赖：加粗且提亮（浅灰白），在深色画布上清晰可辨；
-      // 已完成依赖：保持细而暗的绿色，与「弱化已完成」的整体取向一致
-      ctx.strokeStyle = e.doneEdge ? 'rgba(86,140,104,0.6)' : '#aab6c2'
-      ctx.lineWidth = e.doneEdge ? 3 : 3.8
+      if (e.flowing) {
+        // 进行中出发的连线：整体走蓝色系，与流动层同色，避免两种颜色叠在一起发花
+        ctx.strokeStyle = 'rgba(88,166,255,0.45)'
+        ctx.lineWidth = 3.4
+      } else {
+        // 未完成依赖：加粗且提亮（浅灰白），在深色画布上清晰可辨；
+        // 已完成依赖：保持细而暗的绿色，与「弱化已完成」的整体取向一致
+        ctx.strokeStyle = e.doneEdge ? 'rgba(86,140,104,0.6)' : '#aab6c2'
+        ctx.lineWidth = e.doneEdge ? 3 : 3.8
+      }
       strokePolyline(ctx, e.pts, EDGE_CORNER)
     }
     if (chainIds.size > 0) {
@@ -1849,6 +1852,22 @@ export function QuestGraphPage() {
         ctx.lineWidth = 5.2
         strokePolyline(ctx, e.pts, EDGE_CORNER)
       }
+    }
+    // 进行中任务出发的连线：同色系的浅蓝虚线沿路径流动，提示「接下来往哪走」。
+    // 放在所有连线（含链高亮）之后绘制，保证流动层压在最上面，不会被别的线盖住
+    if (!REDUCED_MOTION) {
+      const phase = (performance.now() % 1700) / 1700
+      ctx.setLineDash([12, 16])
+      ctx.lineDashOffset = -phase * 28
+      ctx.strokeStyle = 'rgba(173,216,255,0.9)'
+      ctx.lineWidth = 3.4
+      for (const e of edges) {
+        if (!e.flowing) continue
+        ctx.globalAlpha = alphaOfEdge(e.from, e.to)
+        strokePolyline(ctx, e.pts, EDGE_CORNER)
+      }
+      ctx.setLineDash([])
+      ctx.lineDashOffset = 0
     }
     ctx.globalAlpha = 1
     // 端点圆点：只画在真正接入卡片的端点上，
@@ -1913,6 +1932,22 @@ export function QuestGraphPage() {
       ctx.lineWidth = n.special ? 1.4 : 1.2
       ctx.stroke()
       ctx.setLineDash([])
+
+      // 进行中：边框呼吸 + 向外扩散的脉冲环。
+      // 周期与下方「进行中连线」的流动保持一致（1.7s），两个动效节奏同步更协调
+      if (st === 'in_progress' && !REDUCED_MOTION) {
+        const k = (performance.now() % 1700) / 1700
+        const breathe = Math.sin(k * Math.PI * 2) * 0.5 + 0.5
+        rr(ctx, p.x, p.y, NODE_W, NODE_H, 8)
+        ctx.strokeStyle = `rgba(88,166,255,${(0.4 + breathe * 0.6).toFixed(3)})`
+        ctx.lineWidth = 1.2 + breathe
+        ctx.stroke()
+        // 外扩环：贴着卡片边缘向外扩散并淡出
+        rr(ctx, p.x - k * 7, p.y - k * 7, NODE_W + k * 14, NODE_H + k * 14, 8 + k * 5)
+        ctx.strokeStyle = `rgba(88,166,255,${(0.3 * (1 - k)).toFixed(3)})`
+        ctx.lineWidth = 1.4
+        ctx.stroke()
+      }
 
       // 任务链高亮（点击节点所属的整条链，含自身）
       if (chainIds.has(n.id)) {
@@ -2040,14 +2075,37 @@ export function QuestGraphPage() {
         lvReserve = lvW + lvPadX * 2 + 4 * TS
       }
 
-      // 标题（为右上角 Lv/✦ 预留宽度）
+      // 标题行：商人头像 + 状态符号 + 任务名（为右上角 Lv/✦ 预留宽度）
+      const avatarR = 9 * TS
+      const avatarCx = sx + 10 * TS + avatarR
+      const avatarCy = sy + 15 * TS
+      const avatarSrc = traderImage(n.traderId)
+      if (avatarSrc) {
+        const im = getImage(avatarSrc)
+        if (imgReady(im)) {
+          ctx.save()
+          ctx.beginPath()
+          ctx.arc(avatarCx, avatarCy, avatarR, 0, Math.PI * 2)
+          ctx.closePath()
+          ctx.clip()
+          ctx.drawImage(im, avatarCx - avatarR, avatarCy - avatarR, avatarR * 2, avatarR * 2)
+          ctx.restore()
+        }
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.arc(avatarCx, avatarCy, avatarR, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+      // 头像尚未加载完成时也保留同样的起始位置，避免标题在首帧后整体跳动
+      const titleX = sx + 12 * TS + avatarR * 2 + 6 * TS
       ctx.font = `600 ${Math.max(9, Math.round(14.5 * TS))}px "Segoe UI", system-ui, sans-serif`
       ctx.fillStyle = stl.text
       const glyph = st === 'completed' ? '✓ ' : st === 'available' ? '● ' : st === 'in_progress' ? '▶ ' : ''
       const rightReserve = (n.special ? 19 * TS : 5 * TS) + lvReserve
-      const titleMax = Math.max(24, sw - 12 * TS - rightReserve)
+      const titleMax = Math.max(24, sw - (18 * TS + avatarR * 2) - rightReserve)
       const title = truncateText(ctx, glyph + n.name, titleMax)
-      ctx.fillText(title, Math.round(sx + 12 * TS), Math.round(sy + 19 * TS))
+      ctx.fillText(title, Math.round(titleX), Math.round(sy + 19 * TS))
 
       // 元信息 chips（贸易条件 / 旧 / 仅PvP / 未解锁）
       let bx = sx + 12 * TS
@@ -2082,22 +2140,25 @@ export function QuestGraphPage() {
           r.reqType === 'level' || r.reqType === 'variable'
             ? `${traderDisplayName(r.traderId, r.traderName)} LL${r.value}`
             : `好感${compareLabel(r.compare)}${r.value}`
+        // 条件 chip 一律中性灰（未满足的再淡一档）：图谱的重点是「进行到哪一步」，
+        // 而不是后续任务里哪个条件还没满足，不该用彩色抢注意力
         drawChip(
           label,
-          met ? '#7ee0c8' : '#ff9d9d',
-          met ? '#2a6b5e' : '#8b3a3a',
-          met ? '#10231f' : '#2a1518',
+          met ? '#8b949e' : '#6e7681',
+          met ? '#30363d' : '#262c33',
+          'rgba(255,255,255,0.03)',
         )
       }
-      // 转生（Prestige）门槛任务：同名任务靠这个标记区分是第几转
-      if (n.prestigeLevel != null) drawChip(`转生${n.prestigeLevel}`, '#ffd479', '#8a6a2f', '#2a2416')
-      if (n.legacy) drawChip('赛季', '#8b949e', '#30363d', '#ffffff1a')
-      // 模式专属标记：与隐藏逻辑一致，基于 modes 判定（而非 legacy）
+      // 转生（Prestige）门槛任务：同名任务靠这个标记区分是第几转（低饱和琥珀）
+      if (n.prestigeLevel != null) drawChip(`转生${n.prestigeLevel}`, '#d4a174', '#5a4a2f', 'rgba(239,159,39,0.10)')
+      if (n.legacy) drawChip('赛季', '#8b949e', '#30363d', 'rgba(255,255,255,0.03)')
+      // 模式专属标记：与隐藏逻辑一致，基于 modes 判定（而非 legacy）；中性色，不抢注意力
       if (n.modes && n.modes.length > 0 && !n.modes.includes('pve'))
-        drawChip('仅PvP', '#ffb3b3', '#8b3a3a', '#2a1518')
+        drawChip('仅PvP', '#8b949e', '#30363d', 'rgba(255,255,255,0.03)')
       if (n.modes && n.modes.length > 0 && !n.modes.includes('pvp'))
-        drawChip('仅PvE', '#ffd9a3', '#8b6b3a', '#2a2418')
-      if ((loyalty[n.traderId] ?? 1) === 0) drawChip('商人未解锁', '#ffb3b3', '#8b3a3a', '#2a1518')
+        drawChip('仅PvE', '#8b949e', '#30363d', 'rgba(255,255,255,0.03)')
+      if ((loyalty[n.traderId] ?? 1) === 0)
+        drawChip('商人未解锁', '#8b949e', '#30363d', 'rgba(255,255,255,0.03)')
       ctx.textBaseline = 'alphabetic'
       ctx.globalAlpha = 1
     }
@@ -2291,37 +2352,8 @@ export function QuestGraphPage() {
           ))}
         </div>
 
-        {/* 缩略图显隐开关 */}
-        <button
-          onClick={toggleMiniMap}
-          title="显示 / 隐藏右下角缩略图"
-          className={`${chip} shrink-0 ${
-            graphTab === 'list' ? 'hidden' : ''
-          } ${showMiniMap ? 'bg-amber/15 text-[#d4a174] border-amber/60' : chipOff}`}
-        >
-          缩略图
-        </button>
-
-        {/* 重置视图：右对齐 */}
-        <button
-          onClick={() => setView({ x: 30, y: 30, scale: DEFAULT_SCALE })}
-          className={`${chip} ${chipOff} shrink-0 ${graphTab === 'list' ? 'hidden' : ''}`}
-        >
-          重置视图
-        </button>
-
-        {/* 搜索 + 任务板筛选（显示已完成 / 地图）：同一栏，整体靠右 */}
+        {/* 搜索 + 地图筛选 + 缩略图：整体靠右 */}
         <div className="ml-auto shrink-0 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowCompleted(!showCompleted)}
-            title="显示已完成任务（默认关闭：图谱与列表都只显示未完成的任务）"
-            className={`${chip} shrink-0 ${
-              showCompleted ? 'bg-amber/15 text-[#d4a174] border-amber/60' : chipOff
-            }`}
-          >
-            已完成
-          </button>
           {graphTab === 'list' && (
             <select
               value={boardMapFilter}
@@ -2336,6 +2368,21 @@ export function QuestGraphPage() {
                 </option>
               ))}
             </select>
+          )}
+          {/* 缩略图显隐：搜索框左侧，仅任务链视图有意义 */}
+          {graphTab === 'chain' && (
+            <label
+              title="显示 / 隐藏右下角缩略图"
+              className="flex items-center gap-1.5 shrink-0 text-[14px] text-muted cursor-pointer select-none hover:text-[#e6edf3]"
+            >
+              <input
+                type="checkbox"
+                checked={showMiniMap}
+                onChange={(e) => setMiniMap(e.target.checked)}
+                className="accent-[#ef9f27]"
+              />
+              缩略图
+            </label>
           )}
           <input
             value={search}
@@ -2381,7 +2428,7 @@ export function QuestGraphPage() {
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#0e2438] border border-[#58a6ff]" />进行中</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#231b0d] border border-[#9aa5b1]" />待接取</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#1f2730] border border-[#6b7682]" />后续解锁</span>
-          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-ink-800 border border-dashed border-[#a371f7]" />特殊✦</span>
+          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-ink-800 border border-dashed border-[#c4a7ff]" />特殊✦</span>
         </div>
 
         {/* 物品悬浮 tooltip（仅在物品图标上触发） */}
@@ -2494,27 +2541,27 @@ export function QuestGraphPage() {
                     }`}
                   </span>
                   {detail.prestigeLevel != null && (
-                    <span className="px-1.5 rounded border border-amber/40 bg-amber/15 text-amber text-[12px]">
+                    <span className="px-1.5 rounded border border-amber/25 bg-amber/10 text-[#d4a174] text-[12px]">
                       转生 {detail.prestigeLevel}
                     </span>
                   )}
                   {detail.legacy && (
-                    <span className="px-1.5 rounded border border-line text-[12px] text-muted">
+                    <span className="px-1.5 rounded border border-line/40 text-[12px] text-muted/70">
                       赛季任务
                     </span>
                   )}
                   {detail.modes && detail.modes.length > 0 && !detail.modes.includes('pve') && (
-                    <span className="px-1.5 rounded border border-red-500/40 bg-red-500/15 text-red-300 text-[12px]">
+                    <span className="px-1.5 rounded border border-line/45 bg-ink-700/40 text-muted/80 text-[12px]">
                       仅 PvP
                     </span>
                   )}
                   {detail.modes && detail.modes.length > 0 && !detail.modes.includes('pvp') && (
-                    <span className="px-1.5 rounded border border-amber/40 bg-amber/15 text-amber text-[12px]">
+                    <span className="px-1.5 rounded border border-line/45 bg-ink-700/40 text-muted/80 text-[12px]">
                       仅 PvE
                     </span>
                   )}
                   {detail.special && (
-                    <span className="px-1.5 rounded border border-dashed border-[#a371f7] text-[#a371f7] text-[12px]">
+                    <span className="px-1.5 rounded border border-dashed border-[#c4a7ff] text-[#c4a7ff] text-[12px]">
                       特殊 ✦
                     </span>
                   )}
@@ -2547,9 +2594,9 @@ export function QuestGraphPage() {
                             </span>
                             {(isLv || r.reqType === 'reputation') &&
                               (met ? (
-                                <span className="text-ok shrink-0">✓ 已达标</span>
+                                <span className="text-muted/80 shrink-0">✓ 已达标</span>
                               ) : (
-                                <span className="text-red-400 shrink-0">✗ 未达标</span>
+                                <span className="text-muted/55 shrink-0">✗ 未达标</span>
                               ))}
                           </div>
                         )

@@ -30,6 +30,23 @@ export default {
       fontSize: {
         '13': '13px',
       },
+      keyframes: {
+        // 进行中卡片：左侧色条柔呼吸
+        'bar-breathe': {
+          '0%, 100%': { opacity: '0.45' },
+          '50%': { opacity: '1' },
+        },
+        // 进行中状态药丸：向外扩散的蓝色光圈
+        'pill-ring': {
+          '0%': { boxShadow: '0 0 0 0 rgba(88, 166, 255, 0.5)' },
+          '70%': { boxShadow: '0 0 0 6px rgba(88, 166, 255, 0)' },
+          '100%': { boxShadow: '0 0 0 0 rgba(88, 166, 255, 0)' },
+        },
+      },
+      animation: {
+        'bar-breathe': 'bar-breathe 2.4s ease-in-out infinite',
+        'pill-ring': 'pill-ring 2.4s ease-out infinite',
+      },
     },
   },
   plugins: [],
