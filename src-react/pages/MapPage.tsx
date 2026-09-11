@@ -44,18 +44,18 @@ const ICON_BASE = 'maps/interactive/'
 const FLOOR_NAME_ZH: Record<string, string> = {
   'Ground Floor': '主层',
   'Ground Level': '主层',
-  '1st Floor': '1楼',
-  'First Floor': '1楼',
-  '2nd Floor': '2楼',
-  'Second Floor': '2楼',
-  'Second Level': '2楼',
-  '3rd Floor': '3楼',
-  'Third Floor': '3楼',
-  '4th Floor': '4楼',
-  'Fourth Floor': '4楼',
-  '5th Floor': '5楼',
-  'Fifth Floor': '5楼',
-  '6th Floor': '6楼',
+  '1st Floor': '一楼',
+  'First Floor': '一楼',
+  '2nd Floor': '二楼',
+  'Second Floor': '二楼',
+  'Second Level': '二楼',
+  '3rd Floor': '三楼',
+  'Third Floor': '三楼',
+  '4th Floor': '四楼',
+  'Fourth Floor': '四楼',
+  '5th Floor': '五楼',
+  'Fifth Floor': '五楼',
+  '6th Floor': '六楼',
   Basement: '地下',
   Tunnels: '隧道',
   Underground: '地下',
@@ -69,13 +69,50 @@ const FLOOR_NAME_ZH: Record<string, string> = {
 }
 const floorNameZh = (name: string | undefined): string =>
   name ? FLOOR_NAME_ZH[name] ?? name : '主层'
-/** 楼层实际高度（extents height 上限的最大值），用于排序；主层（null）按 0 处理 */
+
+/** 楼层名里的层号：2nd Floor / 2 楼 -> 2、First Floor -> 1、Ground Level -> 0；解析不出时为 null */
+const FLOOR_ORDER_WORD: Record<string, number> = {
+  ground: 0,
+  first: 1,
+  second: 2,
+  third: 3,
+  fourth: 4,
+  fifth: 5,
+  sixth: 6,
+}
+const floorOrder = (lyr: SkeletonLayer | null): number | null => {
+  if (!lyr) return 0 // 主层
+  const name = (lyr.name ?? '').toLowerCase()
+  if (!name) return null
+  const digits = name.match(/\d+/)
+  if (digits) return Number(digits[0])
+  for (const [word, n] of Object.entries(FLOOR_ORDER_WORD)) {
+    if (name.includes(word)) return n
+  }
+  return null
+}
+/** 数据里用 1000 / 10000 表示「一直到顶 / 无上限」，排序时要排除这些哨兵值 */
+const FLOOR_TOP_SENTINEL = 1000
+
+/**
+ * 楼层的代表高度，用于楼层列表排序（越高越靠上）；主层（null）按 0 处理。
+ *
+ * extents 的 height 是 [下限, 上限]，但不能简单地取上限：数据里有两类会误导的区间——
+ *  - 贯穿整栋楼的（海关 2 楼/3 楼的 [5.7,1000]、街区 5 楼的 [25,10000]）；
+ *  - 只跨越地面的（海关 Underground 的 [-1000,0.5]，上限比主层的 0 还高）。
+ * 规则：整层都在地面以下（所有下限都 < 0）时取「下限的最大值」；否则取上限，
+ * 并排除「到顶」的哨兵区间；若整层都是到顶的，则退回上限值（它本来就该排最上）。
+ */
 const floorHeight = (lyr: SkeletonLayer | null): number => {
   if (!lyr) return 0
   const hs = (lyr.extents ?? [])
-    .map((e) => e.height?.[1])
-    .filter((v): v is number => typeof v === 'number')
-  return hs.length ? Math.max(...hs) : Number.NEGATIVE_INFINITY
+    .map((e) => e.height)
+    .filter((h): h is [number, number] => Array.isArray(h) && h.length === 2)
+  if (!hs.length) return Number.NEGATIVE_INFINITY
+  const maxBottom = Math.max(...hs.map((h) => h[0]))
+  if (maxBottom < 0) return maxBottom
+  const caps = hs.map((h) => h[1]).filter((t) => t < FLOOR_TOP_SENTINEL)
+  return caps.length ? Math.max(...caps) : Math.max(...hs.map((h) => h[1]))
 }
 // 图标文件名映射与「是否为狙击点」判定已移到 mapIconGroups.ts（图层与筛选面板共用）
 
@@ -1002,12 +1039,18 @@ export function MapPage() {
   }
 
   const floors = imap?.layers ?? []
-  // 楼层按实际高度排序（越高越上面），主层（高度 0）参与排序：
-  // 如工厂 → 3楼、2楼、主层、隧道。i=-1 表示主层。
+  // 楼层排序：先按名字里的层号（2nd / 3rd / 4th Floor → 二 / 三 / 四楼），
+  // 名字里没有层号的（医务室 / 隧道 / 车库 / Bunkers…）再按实际高度；主层层号 0。
+  // 光看高度会被上游噪声带偏（海关「二楼」图层里混着 14~15 米的点位），层号更可靠。
   const floorItems: { lyr: SkeletonLayer | null; i: number }[] = [
     { lyr: null, i: -1 },
     ...floors.map((lyr, i) => ({ lyr, i })),
-  ].sort((a, b) => floorHeight(b.lyr) - floorHeight(a.lyr))
+  ].sort((a, b) => {
+    const oa = floorOrder(a.lyr)
+    const ob = floorOrder(b.lyr)
+    if (oa != null && ob != null && oa !== ob) return ob - oa
+    return floorHeight(b.lyr) - floorHeight(a.lyr)
+  })
   // 地图任务浮窗数据：本图的进行中任务（无 zone 数据时不过滤，避免误隐藏）
   const mapInProgressQuests = playerQuests.filter((q) => {
     if (q.status !== 'in_progress') return false
