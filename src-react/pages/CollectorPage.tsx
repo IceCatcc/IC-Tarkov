@@ -109,6 +109,8 @@ export function CollectorPage() {
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [hideCollected, setHideCollected] = useState(false)
+  // 物品排序：默认（任务目标顺序）/ 按物品类型 / 未完成优先
+  const [sortMode, setSortMode] = useState<'default' | 'type' | 'todo'>('default')
 
   useEffect(() => {
     let alive = true
@@ -181,10 +183,36 @@ export function CollectorPage() {
     }
   }
 
-  const shown = useMemo(
-    () => items.filter((it) => !hideCollected || !collectedSet.has(it.id)),
-    [items, hideCollected, collectedSet],
-  )
+  const shown = useMemo(() => {
+    const list = items.filter((it) => !hideCollected || !collectedSet.has(it.id))
+    if (sortMode === 'todo') {
+      // 未完成优先，两组内部保持原顺序
+      return list
+        .map((it, i) => ({ it, i }))
+        .sort(
+          (a, b) =>
+            (collectedSet.has(a.it.id) ? 1 : 0) - (collectedSet.has(b.it.id) ? 1 : 0) || a.i - b.i,
+        )
+        .map((x) => x.it)
+    }
+    // 默认顺序 / 按类型：都保持任务目标里的原顺序（类型模式由下面的分组负责归类）
+    return list
+  }, [items, hideCollected, collectedSet, sortMode])
+
+  // 「按物品类型」时分组渲染（组内保持原顺序）；其它模式只有一组、不显示组标题
+  const groups = useMemo(() => {
+    if (sortMode !== 'type') return [{ key: '__all__', label: '', items: shown }]
+    const m = new Map<string, ItemRef[]>()
+    for (const it of shown) {
+      const k = it.category ?? '其它'
+      const arr = m.get(k)
+      if (arr) arr.push(it)
+      else m.set(k, [it])
+    }
+    return Array.from(m.entries())
+      .sort((a, b) => a[0].localeCompare(b[0], 'zh'))
+      .map(([k, list]) => ({ key: k, label: k, items: list }))
+  }, [shown, sortMode])
 
   // 卡片区可用尺寸（ResizeObserver）：窗口缩放时重新求解列数与卡宽
   const gridRef = useRef<HTMLDivElement>(null)
@@ -360,6 +388,16 @@ export function CollectorPage() {
               {doneCount}/{items.length || '—'}
             </span>
           </span>
+          <select
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as 'default' | 'type' | 'todo')}
+            title="物品排序方式"
+            className="bg-ink-700 border border-line text-[13px] rounded px-2 py-1 text-muted"
+          >
+            <option value="default">默认顺序</option>
+            <option value="type">按物品类型</option>
+            <option value="todo">未完成优先</option>
+          </select>
           <label className="flex items-center gap-1.5 text-[13px] text-muted cursor-pointer select-none">
             <input
               type="checkbox"
@@ -399,22 +437,37 @@ export function CollectorPage() {
         )}
 
         {shown.length > 0 && (
-          <div
-            className="grid"
-            style={{
-              gap: `${GAP}px`,
-              gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-            }}
-          >
-            {shown.map((it) => (
-              <ItemCard
-                key={it.id}
-                item={it}
-                collected={collectedSet.has(it.id)}
-                busy={busyId === it.id}
-                onToggle={() => toggle(it.id)}
-                width={cw}
-              />
+          <div className="space-y-4">
+            {groups.map((g) => (
+              <div key={g.key}>
+                {/* 分组标题（仅「按物品类型」时显示）：吸顶，滚到哪一类都看得见 */}
+                {g.label && (
+                  <div className="sticky top-0 z-10 py-1.5">
+                    <span className="inline-flex items-baseline bg-ink-900/90 backdrop-blur-sm rounded px-2 py-0.5 text-[14px] font-semibold text-[#e6edf3]">
+                      {g.label}
+                      <span className="text-muted font-normal ml-1">· {g.items.length}</span>
+                    </span>
+                  </div>
+                )}
+                <div
+                  className="grid"
+                  style={{
+                    gap: `${GAP}px`,
+                    gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+                  }}
+                >
+                  {g.items.map((it) => (
+                    <ItemCard
+                      key={it.id}
+                      item={it}
+                      collected={collectedSet.has(it.id)}
+                      busy={busyId === it.id}
+                      onToggle={() => toggle(it.id)}
+                      width={cw}
+                    />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}

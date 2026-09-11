@@ -41,6 +41,9 @@ pub const ENDPOINTS: &[Endpoint] = &[
     Endpoint { file: "regular_traders.json", path: "regular/traders", label: "商人" },
     Endpoint { file: "regular_traders_zh.json", path: "regular/traders_zh", label: "商人中文" },
     Endpoint { file: "regular_items_zh.json", path: "regular/items_zh", label: "物品中文" },
+    // 物品类别（types）：仅用于收藏家物品「按类型」排序；体积较大且为可选数据，
+    // 老数据包里没有该文件时功能自动退化为按默认顺序
+    Endpoint { file: "regular_items.json", path: "regular/items", label: "物品类别" },
 ];
 
 const BASE_URL: &str = "https://json.tarkov.dev";

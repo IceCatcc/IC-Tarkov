@@ -32,6 +32,8 @@ pub struct ItemPayload {
     pub count: Option<i64>,
     /// 是否必须在战局内拾取（目标级 foundInRaid）
     pub found_in_raid: bool,
+    /// 物品主类型中文名（收藏家物品「按类型排序」用）；无数据时为 null
+    pub category: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -210,6 +212,7 @@ fn flatten_turn_ins(n: &dataset::QuestNode) -> Vec<ItemPayload> {
                 name: it.name.clone(),
                 count: it.count,
                 found_in_raid: it.found_in_raid,
+                category: it.category.clone(),
             });
         }
     }
@@ -229,6 +232,7 @@ fn objectives_payload(n: &dataset::QuestNode) -> Vec<ObjectivePayload> {
                     name: it.name.clone(),
                     count: it.count,
                     found_in_raid: it.found_in_raid,
+                    category: it.category.clone(),
                 })
                 .collect(),
         })

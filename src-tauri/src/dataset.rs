@@ -31,6 +31,8 @@ pub struct ItemRef {
     pub count: Option<i64>,
     /// 是否必须在战局内拾取（目标级 foundInRaid，收藏家类任务全为 true）
     pub found_in_raid: bool,
+    /// 物品主类型中文名（如「医疗」「钥匙」）；数据包缺少物品类别文件时为空
+    pub category: Option<String>,
 }
 
 #[derive(Clone)]
@@ -188,6 +190,8 @@ pub struct Raw {
     pub traders: HashMap<String, Value>,
     pub zh_traders: HashMap<String, String>,
     pub zh_items: HashMap<String, String>,
+    /// 物品 id -> 主类型中文名（来自 items 的 types 字段；数据包缺少该文件时为空）
+    pub item_types: HashMap<String, String>,
 }
 
 fn read_json(dir: &Path, file: &str) -> Result<Value, String> {
@@ -230,6 +234,11 @@ impl Raw {
         let traders_doc = read_json(dir, "regular_traders.json")?;
         let zh_traders_doc = read_json(dir, "regular_traders_zh.json")?;
         let zh_items_doc = read_json(dir, "regular_items_zh.json")?;
+        // 物品类别：可选数据（老数据包没有该文件时不报错，仅「按类型排序」退化）
+        let item_types = read_json(dir, "regular_items.json")
+            .ok()
+            .map(|doc| build_item_types(&doc))
+            .unwrap_or_default();
 
         let maps_data = maps_doc.get("data").cloned().unwrap_or(Value::Null);
 
@@ -252,6 +261,7 @@ impl Raw {
             traders: as_val_map(traders_doc.get("data")),
             zh_traders: as_str_map(zh_traders_doc.get("data").unwrap_or(&Value::Null)),
             zh_items: as_str_map(zh_items_doc.get("data").unwrap_or(&Value::Null)),
+            item_types,
         })
     }
 }
@@ -318,6 +328,68 @@ fn item_name(raw: &Raw, id: &str) -> String {
         .get(&format!("{id} Name"))
         .cloned()
         .unwrap_or_else(|| id.to_string())
+}
+
+/// 物品类型（tarkov.dev 的 `types` 标签）-> 中文名。
+/// 只收录常见类型；未收录的标签不参与分类（前端归入「其它」）。
+const ITEM_TYPE_ZH: &[(&str, &str)] = &[
+    ("gun", "武器"),
+    ("melee", "近战武器"),
+    ("knife", "近战武器"),
+    ("ammo", "弹药"),
+    ("ammoBox", "弹药"),
+    ("magazine", "弹匣"),
+    ("mods", "武器配件"),
+    ("grenade", "投掷物"),
+    ("throwable", "投掷物"),
+    ("armor", "护甲"),
+    ("rig", "胸挂"),
+    ("backpack", "背包"),
+    ("headwear", "头盔"),
+    ("visor", "头盔"),
+    ("meds", "医疗"),
+    ("injectors", "医疗"),
+    ("provisions", "食物与饮料"),
+    ("keys", "钥匙"),
+    ("keyMechanical", "钥匙"),
+    ("map", "地图"),
+    ("info", "情报"),
+    ("dogtag", "狗牌"),
+    ("questItem", "任务物品"),
+    ("barter", "交易品"),
+    ("mobility", "工具"),
+    ("tools", "工具"),
+    ("electronics", "电子"),
+    ("household", "家用品"),
+    ("specialSlot", "特殊物品"),
+];
+
+fn item_type_zh(t: &str) -> Option<&'static str> {
+    ITEM_TYPE_ZH
+        .iter()
+        .find(|(k, _)| *k == t)
+        .map(|(_, v)| *v)
+}
+
+/// 从 items 数据里提取「物品 id -> 主类型中文名」。
+/// 一件物品可能有多个 types（如护甲同时是 rig），取第一个能映射到中文的标签。
+fn build_item_types(doc: &Value) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let Some(items) = doc.pointer("/data/items").and_then(|v| v.as_object()) else {
+        return out;
+    };
+    for (id, it) in items {
+        let Some(types) = it.get("types").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for t in types.iter().filter_map(|x| x.as_str()) {
+            if let Some(zh) = item_type_zh(t) {
+                out.insert(id.clone(), zh.to_string());
+                break;
+            }
+        }
+    }
+    out
 }
 
 fn trader_name(raw: &Raw, trader_id: &str) -> String {
@@ -559,6 +631,7 @@ fn build_one(
                 name: item_name(raw, iid),
                 count,
                 found_in_raid,
+                category: raw.item_types.get(iid).cloned(),
             })
             .collect();
         objectives.push(Objective { description: desc, items });

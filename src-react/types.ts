@@ -85,6 +85,8 @@ export interface ItemRef {
   count: number | null
   /** 是否必须在战局内拾取（目标级 foundInRaid，收藏家类任务全为 true） */
   foundInRaid: boolean
+  /** 物品主类型中文名（如「医疗」「钥匙」）；数据包缺少物品类别数据时为 null/undefined */
+  category?: string | null
 }
 
 export interface ObjectiveInfo {
