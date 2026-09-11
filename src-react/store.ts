@@ -155,6 +155,10 @@ interface AppState {
   setShowPrestigeGraph: (v: boolean) => void
   /** 任务页当前视图：'list' 任务列表 / 'chain' 任务链图谱 */
   graphTab: 'list' | 'chain'
+  /** 任务链详情面板位置（画布容器坐标）；null = 默认右上角。
+   *  只在本次运行内记住（切换页面/重选任务都不丢），不写入磁盘 */
+  detailPanelPos: { x: number; y: number } | null
+  setDetailPanelPos: (p: { x: number; y: number } | null) => void
   setGraphTab: (v: 'list' | 'chain') => void
   /** 任务模式：pvp / pvps / pve（三套数据独立；持久化，日志检测到会话模式时自动跟随） */
   questMode: QuestMode
@@ -614,6 +618,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
   graphTab: 'chain',
   setGraphTab: (v) => set({ graphTab: v }),
+  detailPanelPos: null,
+  setDetailPanelPos: (p) => set({ detailPanelPos: p }),
   questMode: prefs0.questMode,
   setQuestMode: (v) => {
     if (useStore.getState().questMode === v) return

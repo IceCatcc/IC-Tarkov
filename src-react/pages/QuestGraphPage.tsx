@@ -7,7 +7,12 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from 'react'
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  TouchEvent as ReactTouchEvent,
+  WheelEvent as ReactWheelEvent,
+} from 'react'
 import { useStore, useTopPad } from '../store'
 import { getQuestGraph, getQuestDetail, setQuestStatus, getMaps } from '../tauri'
 import { traderImage } from '../traderImages'
@@ -432,6 +437,44 @@ export function QuestGraphPage() {
     setShowMiniMap(on)
     try {
       localStorage.setItem('ic-tarkov.graphMiniMap.v1', on ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // —— 详情面板拖动 ——
+  // 位置存在 store（仅本次运行内有效、不落盘）：切换页面或重选任务后仍保持上次位置
+  const panelPos = useStore((s) => s.detailPanelPos)
+  const setPanelPos = useStore((s) => s.setDetailPanelPos)
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const panelDragRef = useRef<{ ox: number; oy: number } | null>(null)
+  const onPanelDragStart = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const panel = panelRef.current
+    if (!panel) return
+    e.preventDefault()
+    e.stopPropagation()
+    const r = panel.getBoundingClientRect()
+    panelDragRef.current = { ox: e.clientX - r.left, oy: e.clientY - r.top }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  const onPanelDragMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = panelDragRef.current
+    const panel = panelRef.current
+    const host = panel?.parentElement
+    if (!d || !panel || !host) return
+    // 限制在画布区域内（四周各留 8px），拖出边界会被夹住
+    const h = host.getBoundingClientRect()
+    const maxX = Math.max(8, h.width - panel.offsetWidth - 8)
+    const maxY = Math.max(8, h.height - panel.offsetHeight - 8)
+    setPanelPos({
+      x: Math.min(maxX, Math.max(8, e.clientX - h.left - d.ox)),
+      y: Math.min(maxY, Math.max(8, e.clientY - h.top - d.oy)),
+    })
+  }
+  const onPanelDragEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+    panelDragRef.current = null
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
     } catch {
       /* ignore */
     }
@@ -2448,14 +2491,27 @@ export function QuestGraphPage() {
         {/* 概览面板 */}
         {selectedId && (
           <div
+            ref={panelRef}
             onMouseDown={(e) => e.stopPropagation()}
             onWheel={(e) => e.stopPropagation()}
             style={{
               width: DETAIL_PANEL_W,
               maxHeight: `min(88%, calc(100% - ${miniDim.h + 36}px))`,
+              ...(panelPos ? { left: panelPos.x, top: panelPos.y } : { right: 12, top: 12 }),
             }}
-            className="absolute right-3 top-3 min-w-[360px] max-w-[calc(100%-24px)] overflow-y-auto bg-ink-800/90 backdrop-blur-sm border border-line rounded-xl p-4 shadow-xl z-50 cursor-default"
+            className="absolute min-w-[360px] max-w-[calc(100%-24px)] overflow-y-auto bg-ink-800/90 backdrop-blur-sm border border-line rounded-xl px-4 pb-4 pt-7 shadow-xl z-50 cursor-default"
           >
+            {/* 顶部拖动条：按住拖到画布任意位置（位置只在本次运行内记住） */}
+            <div
+              onPointerDown={onPanelDragStart}
+              onPointerMove={onPanelDragMove}
+              onPointerUp={onPanelDragEnd}
+              onPointerCancel={onPanelDragEnd}
+              title="拖动移动面板"
+              className="absolute inset-x-0 top-0 h-6 flex items-center justify-center cursor-grab active:cursor-grabbing touch-none"
+            >
+              <span className="w-10 h-[3px] rounded-full bg-line" />
+            </div>
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -2464,7 +2520,7 @@ export function QuestGraphPage() {
                   if (u) openWiki(u)
                 }
               }}
-              className="absolute right-9 top-2.5 text-amber hover:underline text-[13px]"
+              className="absolute right-9 top-2 text-amber hover:underline text-[13px]"
               title="在浏览器打开 Wiki 资料"
             >
               Wiki ↗
@@ -2474,7 +2530,7 @@ export function QuestGraphPage() {
                 e.stopPropagation()
                 setSelected(null, null)
               }}
-              className="absolute right-3 top-3 text-muted hover:text-[#e6edf3] text-[14px]"
+              className="absolute right-3 top-2 text-muted hover:text-[#e6edf3] text-[14px]"
             >
               ✕
             </button>
