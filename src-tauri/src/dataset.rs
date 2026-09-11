@@ -881,66 +881,81 @@ fn build_markers(raw: &Raw, map_meta: &HashMap<String, MapEntry>) -> Value {
             out.insert("spawns".into(), Value::Array(spawns));
         }
 
-        let bosses: Vec<Value> = arr(m, "bosses")
-            .iter()
-            .map(|b| {
-                let mut d = entry_val(b, raw);
-                let mob_id = s(b, "mob").or_else(|| s(b, "id")).unwrap_or("");
-                let mob = raw.mobs.get(mob_id);
-                let name = mob.and_then(|x| s(x, "name")).or_else(|| s(b, "name"));
-                let name_zh = zh_of(
-                    raw,
-                    &[name, mob.and_then(|x| s(x, "normalizedName"))],
-                )
+        // Boss 出生点：原始数据的单个 boss 条目没有 position 字段，坐标藏在
+        // spawnLocations（区域 -> 多个坐标）里。原先直接下发整条，前端因缺坐标会整条跳过，
+        // 地图上的 Boss 出生点实际只来自 spawns（那批点没有 Boss 名）。
+        // 这里按「区域 -> 坐标」展开成多个点，每点都带上 Boss 名与刷新率，
+        // 地图上就能直接显示「Boss 名 + 刷新率」（对齐 tarkov.dev 的展示）。
+        let mut bosses: Vec<Value> = Vec::new();
+        for b in arr(m, "bosses") {
+            let d = entry_val(b, raw);
+            let mob_id = s(b, "mob").or_else(|| s(b, "id")).unwrap_or("");
+            let mob = raw.mobs.get(mob_id);
+            let name = mob.and_then(|x| s(x, "name")).or_else(|| s(b, "name"));
+            let name_zh = zh_of(raw, &[name, mob.and_then(|x| s(x, "normalizedName"))])
                 .or_else(|| d.get("nameZh").and_then(|v| v.as_str()).map(|v| v.to_string()))
                 .or_else(|| name.map(|v| v.to_string()));
-                if let Some(o) = d.as_object_mut() {
-                    o.insert(
-                        "name".into(),
-                        name.map(|v| Value::String(v.to_string())).unwrap_or(Value::Null),
-                    );
-                    o.insert(
-                        "nameZh".into(),
-                        name_zh.map(Value::String).unwrap_or(Value::Null),
-                    );
-                    o.insert("type".into(), Value::String("boss".to_string()));
-                    o.insert("categories".into(), serde_json::json!(["boss"]));
-                    let escs: Vec<Value> = b
-                        .get("escapes")
-                        .or_else(|| b.get("escorts"))
-                        .and_then(|v| v.as_array())
-                        .map(|a| a.as_slice())
-                        .unwrap_or(EMPTY_ARR)
-                        .iter()
-                        .map(|es| {
-                            let mut ed = entry_val(es, raw);
-                            let emob = raw.mobs.get(s(es, "mob").unwrap_or(""));
-                            let ename = emob.and_then(|x| s(x, "name")).or_else(|| s(es, "name"));
-                            let ezh = zh_of(raw, &[emob.and_then(|x| s(x, "normalizedName"))])
-                                .or_else(|| {
-                                    ed.get("nameZh")
-                                        .and_then(|v| v.as_str())
-                                        .map(|v| v.to_string())
-                                });
-                            if let Some(o) = ed.as_object_mut() {
-                                o.insert(
-                                    "name".into(),
-                                    ename.map(|v| Value::String(v.to_string())).unwrap_or(Value::Null),
-                                );
-                                if let Some(z) = ezh {
-                                    o.insert("nameZh".into(), Value::String(z));
-                                }
-                            }
-                            ed
-                        })
-                        .collect();
-                    if !escs.is_empty() {
-                        o.insert("escorts".into(), Value::Array(escs));
+            let spawn_chance = b.get("spawnChance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let escs: Vec<Value> = b
+                .get("escapes")
+                .or_else(|| b.get("escorts"))
+                .and_then(|v| v.as_array())
+                .map(|a| a.as_slice())
+                .unwrap_or(EMPTY_ARR)
+                .iter()
+                .map(|es| {
+                    let mut ed = entry_val(es, raw);
+                    let emob = raw.mobs.get(s(es, "mob").unwrap_or(""));
+                    let ename = emob.and_then(|x| s(x, "name")).or_else(|| s(es, "name"));
+                    let ezh = zh_of(raw, &[emob.and_then(|x| s(x, "normalizedName"))]).or_else(|| {
+                        ed.get("nameZh").and_then(|v| v.as_str()).map(|v| v.to_string())
+                    });
+                    if let Some(o) = ed.as_object_mut() {
+                        o.insert(
+                            "name".into(),
+                            ename.map(|v| Value::String(v.to_string())).unwrap_or(Value::Null),
+                        );
+                        if let Some(z) = ezh {
+                            o.insert("nameZh".into(), Value::String(z));
+                        }
                     }
+                    ed
+                })
+                .collect();
+            for loc in b
+                .get("spawnLocations")
+                .and_then(|v| v.as_array())
+                .map(|a| a.as_slice())
+                .unwrap_or(EMPTY_ARR)
+            {
+                let loc_name = s(loc, "name").unwrap_or("");
+                let loc_chance = loc.get("chance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                for p in loc
+                    .get("positions")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.as_slice())
+                    .unwrap_or(EMPTY_ARR)
+                {
+                    if !p.is_object() {
+                        continue;
+                    }
+                    bosses.push(serde_json::json!({
+                        "id": mob_id,
+                        "name": name,
+                        "nameZh": name_zh,
+                        "type": "boss",
+                        "categories": ["boss"],
+                        "position": pos_val(Some(p)),
+                        // 该 Boss 在这个地图出现的概率（0~1）
+                        "spawnChance": spawn_chance,
+                        "locationName": loc_name,
+                        // 落在这个区域的概率（0~1）
+                        "locationChance": loc_chance,
+                        "escorts": escs,
+                    }));
                 }
-                d
-            })
-            .collect();
+            }
+        }
         if !bosses.is_empty() {
             out.insert("bosses".into(), Value::Array(bosses));
         }

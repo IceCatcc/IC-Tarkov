@@ -924,6 +924,20 @@ export function MapPage() {
         s.zIndex = () => 400
       }
     }
+    // Boss 出生点：标题已是 Boss 名，弹窗补刷新率与所在区域
+    for (const g of groups) {
+      if (g.key !== 'spawns') continue
+      for (const s of g.subs) {
+        if (s.key !== 'spawns:boss') continue
+        s.meta = (en) => {
+          const lines: string[] = []
+          if (typeof en.spawnChance === 'number' && en.spawnChance > 0)
+            lines.push(`刷新率 ${Math.round(en.spawnChance * 100)}%`)
+          if (en.locationName) lines.push(`区域 ${en.locationName}`)
+          return lines
+        }
+      }
+    }
     // 每个子分类一个独立图层：面板里可单独开关（分类只作批量开关，不参与渲染判断）。
     // hidden 子项（共用 / 过境撤离点）不在面板列出，改为跟随指定子项：任一开启即显示。
     const subLayers = new Map<string, { lg: L.LayerGroup; follow: string[] }>()

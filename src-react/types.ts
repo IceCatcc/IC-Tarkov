@@ -320,6 +320,12 @@ export interface MarkerEntry {
     name?: string
     count?: number | null
   }[] | null
+  /** Boss 出生点专用：该 Boss 在本图出现的概率（0~1） */
+  spawnChance?: number | null
+  /** Boss 出生点专用：区域名（如 ZoneDormitory） */
+  locationName?: string | null
+  /** Boss 出生点专用：落在该区域的概率（0~1） */
+  locationChance?: number | null
   /** 转移点（transits）专用：目的地本地化 key（如 LAB_TRANSIT_8_DESC） */
   destKey?: string | null
   /** 转移点专用：目的地中文名（如「灯塔」） */

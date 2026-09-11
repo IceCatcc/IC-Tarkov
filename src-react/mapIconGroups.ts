@@ -194,7 +194,10 @@ export function buildIconGroups(mm: MapMarkers): IconGroup[] {
   const player = spawns.filter((s) => !isBoss(s) && isPlayer(s))
   const sniper = spawns.filter((s) => isSniper(s) && !isBoss(s) && !isPlayer(s))
   const ai = spawns.filter((s) => !isBoss(s) && !isPlayer(s) && !isSniper(s))
-  const boss = [...(mm.bosses ?? []), ...spawns.filter(isBoss)]
+  // bosses 已按「区域 -> 坐标」展开且带 Boss 名与刷新率，优先用它；
+  // 少数地图没有 bosses 数据时才回退到 spawns 里带 boss 标记的点（那批点没有名字）
+  const bossList = mm.bosses ?? []
+  const boss = bossList.length ? bossList : spawns.filter(isBoss)
   push(
     'spawns',
     '出生点',
@@ -212,8 +215,11 @@ export function buildIconGroups(mm: MapMarkers): IconGroup[] {
         label: SPAWN_LABEL[sub] ?? sub,
         list,
         icon: iconFn,
-        // 数据在这些点上没有名称，给固定中文名
-        name: () => SPAWN_LABEL[sub] ?? sub,
+        // Boss 出生点用 Boss 自己的名字；其余点数据里没有名称，给固定中文名
+        name:
+          sub === 'boss'
+            ? (en: MarkerEntry) => en.nameZh || SPAWN_LABEL.boss
+            : () => SPAWN_LABEL[sub] ?? sub,
         highlight,
       })),
   )
