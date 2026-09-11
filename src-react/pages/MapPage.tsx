@@ -1093,7 +1093,8 @@ export function MapPage() {
               weight: 2,
               opacity: 0.9,
               fillColor: '#f5c518',
-              fillOpacity: 0.18,
+              // 与 .quest-zone 的呼吸动画下限一致（动画生效时以 CSS 为准）
+              fillOpacity: 0.07,
               interactive: false,
               className: 'quest-zone',
             }).addTo(lg)

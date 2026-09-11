@@ -256,13 +256,13 @@ img.extract-req-icon {
         drop-shadow(0 0 11px rgba(255, 46, 46, 0.55));
 }
 
-/* 任务区域半透明黄色区块 */
+/* 任务区域半透明黄色区块：缓慢呼吸（频率比原来低一半以上），整体也更透 */
 .quest-zone {
-    animation: quest-zone-pulse 2.4s ease-in-out infinite;
+    animation: quest-zone-pulse 3.5s ease-in-out infinite;
 }
 @keyframes quest-zone-pulse {
-    0%, 100% { fill-opacity: 0.16; }
-    50% { fill-opacity: 0.30; }
+    0%, 100% { fill-opacity: 0.08; }
+    50% { fill-opacity: 0.12; }
 }
 /* 任务目标 marker：图标发光（见下方 .quest-obj-marker img），任务名紧随图标右侧 */
 
