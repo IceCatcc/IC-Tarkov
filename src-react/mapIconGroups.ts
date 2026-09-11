@@ -265,6 +265,16 @@ export function buildIconGroups(mm: MapMarkers): IconGroup[] {
   simple('weapons', '固定武器', mm.stationaryWeapons ?? [], 'stationarygun')
   simple('btr', 'BTR 站点', mm.btrStops ?? [], 'btr_stop')
 
+  // 转移点（地图间转移）：每条都是「去往哪张图」，标题直接用目的地
+  const transits = mm.transits ?? []
+  push('transits', '转移点', transits.length ? [{
+    key: 'transits:all',
+    label: '全部',
+    list: transits,
+    icon: () => 'extract_transit',
+    name: (en) => (en.destZh ? `转移至 ${en.destZh}` : '转移点'),
+  }] : [])
+
   return groups
 }
 
@@ -285,6 +295,7 @@ export const ICON_DEFAULTS: Record<string, boolean> = {
   'cat:switches': false,
   'cat:weapons': false,
   'cat:btr': false,
+  'cat:transits': true,
   'sub:extracts:pmc': true,
   'sub:extracts:scav': true,
   'sub:extracts:shared': true,

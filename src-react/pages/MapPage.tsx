@@ -756,6 +756,31 @@ export function MapPage() {
         s.zIndex = (en) => EXTRACT_ZINDEX[(en.faction ?? 'shared').toLowerCase()] ?? 500
       }
     }
+    // 转移点：与撤离点同款——名称永久绘制在地图上（琥珀色，与撤离点的阵营配色区分），
+    // 弹窗里再补一行目标地图
+    const TRANSIT_COLOR = '#d4a174'
+    const transitLabel = (en: MarkerEntry): HTMLElement => {
+      const wrap = document.createElement('div')
+      wrap.className = 'extract-label'
+      const nameEl = document.createElement('div')
+      // 比撤离点小一号且不加粗，避免抢走撤离点的视觉重点
+      nameEl.className = 'extract-name transit-name'
+      nameEl.textContent = en.destZh ? `转移至 ${en.destZh}` : '转移点'
+      nameEl.style.color = TRANSIT_COLOR
+      // 与撤离点一致：用 --req-outline 合成与字体同色的描边
+      nameEl.style.setProperty('--req-outline', TRANSIT_COLOR)
+      wrap.appendChild(nameEl)
+      return wrap
+    }
+    for (const g of groups) {
+      if (g.key !== 'transits') continue
+      for (const s of g.subs) {
+        s.meta = (en) => (en.toMapZh ? [`目标地图：${en.toMapZh}`] : [])
+        s.tooltip = transitLabel
+        // 压在撤离点之下、普通标记之上
+        s.zIndex = () => 400
+      }
+    }
     // 每个子分类一个独立图层：面板里可单独开关（分类只作批量开关，不参与渲染判断）。
     // hidden 子项（共用 / 过境撤离点）不在面板列出，改为跟随指定子项：任一开启即显示。
     const subLayers = new Map<string, { lg: L.LayerGroup; follow: string[] }>()

@@ -320,6 +320,14 @@ export interface MarkerEntry {
     name?: string
     count?: number | null
   }[] | null
+  /** 转移点（transits）专用：目的地本地化 key（如 LAB_TRANSIT_8_DESC） */
+  destKey?: string | null
+  /** 转移点专用：目的地中文名（如「灯塔」） */
+  destZh?: string | null
+  /** 转移点专用：目标地图 normalizedName */
+  toMap?: string | null
+  /** 转移点专用：目标地图中文名 */
+  toMapZh?: string | null
 }
 
 export interface MapMarkersDoc {

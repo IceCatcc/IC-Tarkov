@@ -147,6 +147,11 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
 .extract-label.leaflet-tooltip::before {
     display: none; /* 去掉小箭头 */
 }
+/* 转移点标签：比撤离点名小一号且不加粗，避免抢走视觉重点 */
+.extract-name.transit-name {
+    font-size: 14px;
+    font-weight: 400;
+}
 .extract-name {
     display: block; /* 撤离要求换行显示在名称下方 */
     font-size: 19px;

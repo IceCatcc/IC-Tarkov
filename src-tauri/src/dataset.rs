@@ -799,6 +799,18 @@ fn build_markers(raw: &Raw, map_meta: &HashMap<String, MapEntry>) -> Value {
         }
     }
 
+    // 地图 id -> (normalizedName, 中文名)：转移点（transits）的 map 字段指向**目标地图的 id**
+    let mut mid_to: HashMap<String, (String, String)> = HashMap::new();
+    for (mid, m) in &raw.maps {
+        if let Some(nn) = s(m, "normalizedName").filter(|v| !v.is_empty()) {
+            let zh = map_meta
+                .get(mid)
+                .map(|e| if e.zh.is_empty() { e.nn.clone() } else { e.zh.clone() })
+                .unwrap_or_else(|| nn.to_string());
+            mid_to.insert(mid.to_string(), (nn.to_string(), zh));
+        }
+    }
+
     let mut maps_out = Map::new();
     for (mid, m) in &raw.maps {
         let nn = match s(m, "normalizedName") {
@@ -1033,6 +1045,28 @@ fn build_markers(raw: &Raw, map_meta: &HashMap<String, MapEntry>) -> Value {
         let btr: Vec<Value> = arr(m, "btrStops").iter().map(|b| entry_val(b, raw)).collect();
         if !btr.is_empty() {
             out.insert("btrStops".into(), Value::Array(btr));
+        }
+
+        // 地图间转移点：description 是本地化 key（如 LAB_TRANSIT_8_DESC），
+        // 中文表里存的就是目的地名；map 字段指向目标地图的 id。
+        let transits: Vec<Value> = arr(m, "transits")
+            .iter()
+            .filter_map(|t| {
+                let pos = t.get("position").filter(|p| p.is_object())?;
+                let dest_key = s(t, "description").unwrap_or("");
+                let (to_nn, to_zh) = mid_to.get(s(t, "map").unwrap_or("")).cloned().unwrap_or_default();
+                Some(serde_json::json!({
+                    "id": num_or_str(t.get("id")),
+                    "position": pos_val(Some(pos)),
+                    "destKey": dest_key,
+                    "destZh": raw.zh_maps.get(dest_key).cloned(),
+                    "toMap": to_nn,
+                    "toMapZh": to_zh,
+                }))
+            })
+            .collect();
+        if !transits.is_empty() {
+            out.insert("transits".into(), Value::Array(transits));
         }
 
         out.insert(
