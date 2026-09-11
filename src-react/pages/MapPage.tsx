@@ -298,10 +298,6 @@ function iconRotationDeg(baseRot: number, coordinateRotation: number | undefined
   return baseRot + add
 }
 
-function fmtNum(v: number | null | undefined) {
-  return typeof v === 'number' ? v.toFixed(1) : '-'
-}
-
 /** HTML 转义（任务名等文本注入到 divIcon/popup 前使用） */
 function escapeHtml(s: string): string {
   return s.replace(
@@ -315,13 +311,11 @@ function escapeHtml(s: string): string {
  * 标记弹窗内容。
  * - 标题点击：有 questId 时展开右下角任务浮窗并定位到该任务；否则有 wikiUrl 时打开 Wiki
  * - Wiki 文字按钮固定在标题行最右
- * - coordMeta 精简为一行的坐标信息，右对齐显示在弹窗右下角
  */
 function popupHtml(
   title: string,
   meta: string[],
   wikiUrl?: string | null,
-  coordMeta?: string[],
   questId?: string,
 ) {
   const titleAttr = questId
@@ -337,8 +331,6 @@ function popupHtml(
     : ''
   return `<div><div class="map-popup-head"><div class="map-popup-title${titleLink}"${titleAttr}>${title}</div>${wikiBtn}</div>${meta
     .map((m) => `<div class="map-popup-meta">${m}</div>`)
-    .join('')}${(coordMeta ?? [])
-    .map((m) => `<div class="map-popup-coord">${m}</div>`)
     .join('')}</div>`
 }
 
@@ -763,16 +755,6 @@ export function MapPage() {
     applyFloor(-1)
 
     /* ---- 标记 ---- */
-    // 坐标与高度合并为一行，减少弹窗高度
-    const coordMeta = (en: MarkerEntry) => {
-      const parts: string[] = []
-      if (en.position)
-        parts.push(`坐标 X ${en.position.x.toFixed(1)} · Z ${en.position.z.toFixed(1)}`)
-      if (typeof en.top === 'number' || typeof en.bottom === 'number')
-        parts.push(`高度 ${fmtNum(en.top)} ~ ${fmtNum(en.bottom)}`)
-      return parts.length ? [parts.join(' · ')] : []
-    }
-
     // 狙击 AI：图标外面套一圈醒目的红色光晕，和普通 AI 明显区分。
     // 用 divIcon 而非 icon（后者渲染出的是 <img>，不能有子节点）：
     // 图标里要嵌一个可更新的楼层方向角标。
@@ -814,8 +796,6 @@ export function MapPage() {
           popupHtml(
             title,
             meta ? meta(en) : [...(en.faction ? [`阵营 ${en.faction}`] : [])],
-            undefined,
-            coordMeta(en),
           ),
         )
         if (tooltip) {
@@ -827,6 +807,16 @@ export function MapPage() {
               className: 'extract-label',
               offset: [0, -10],
             })
+        } else {
+          // 悬浮提示：鼠标移上去显示名称，移开自动隐藏。
+          // 已有永久标签的（撤离点 / 转移点）不再挂，避免同一标记叠两层。
+          const tip = document.createElement('div')
+          tip.textContent = title
+          mk.bindTooltip(tip, {
+            direction: 'top',
+            className: 'marker-hover-tip',
+            offset: [0, -10],
+          })
         }
         // 楼层归属：角标已在图标 html 里，加入地图后取到引用并应用分级样式
         const rec: Leveled = { mk, rank: markerFloorRank(en, ranks, mainRank), arrow: null }
@@ -1131,10 +1121,6 @@ export function MapPage() {
                   ...(o.optional ? ['可选目标'] : []),
                 ],
                 wikiUrlFor(tid),
-                // 坐标精简：直接 x y z，右下角一行；不再有「坐标 / 高度」这类说明
-                [
-                  `${z.position.x.toFixed(1)} ${fmtNum(z.position.y)} ${z.position.z.toFixed(1)}`,
-                ],
                 tid,
               ),
             ),

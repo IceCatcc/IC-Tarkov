@@ -38,13 +38,14 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     pointer-events: none;
 }
 
-/* 标记弹窗暗色化 + 放大 1.5 倍 */
+/* 标记弹窗暗色化 + 放大 1.5 倍；背景半透明并加轻微模糊，避免完全遮住地图 */
 .leaflet-popup-content-wrapper,
 .leaflet-popup-tip {
-    background: #161b22;
+    background: rgba(22, 27, 34, 0.88);
     color: #e6edf3;
     border: 1px solid #30363d;
     box-shadow: none;
+    backdrop-filter: blur(3px);
 }
 .leaflet-popup-content-wrapper {
     border-radius: 8px;
@@ -98,16 +99,6 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     color: #c9d1d9;
     line-height: 1.5;
 }
-/* 坐标信息：贴在弹窗右下角，弱化显示 */
-.map-popup-coord {
-    margin-top: 4px;
-    font-size: 12.5px;
-    color: #6e7681;
-    line-height: 1.4;
-    white-space: nowrap;
-    text-align: right;
-}
-
 /* 撤离要求：物品类（图片 + 中文名），对齐任务 tooltip 风格 */
 .req-item {
     display: inline-flex;
@@ -245,6 +236,22 @@ img.extract-req-icon {
 }
 .lvl-arrow.down i {
     transform: rotate(135deg);
+}
+
+/* 图标悬浮提示：鼠标移上去显示名称，移开自动隐藏（与下方永久标签区分） */
+.leaflet-tooltip.marker-hover-tip {
+    background: rgba(22, 27, 34, 0.92);
+    color: #e6edf3;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+    padding: 2px 7px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+.leaflet-tooltip.marker-hover-tip::before {
+    display: none; /* 去掉默认小箭头 */
 }
 
 /* 狙击 AI 出生点：图标套红色光晕，和普通 AI 明显区分 */
