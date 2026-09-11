@@ -1158,7 +1158,7 @@ fn refresh_game_data(app: tauri::AppHandle, force: Option<bool>) -> Result<(), S
     if apidata::status(&app).syncing {
         return Err("数据更新正在进行中".to_string());
     }
-    spawn_sync(app, force.unwrap_or(true));
+    spawn_sync(app, force.unwrap_or(false));
     Ok(())
 }
 

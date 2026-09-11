@@ -58,6 +58,11 @@ static SYNCING: AtomicBool = AtomicBool::new(false);
 pub struct FileInfo {
     pub bytes: u64,
     pub updated_at: i64,
+    /// 远端 ETag（json.tarkov.dev 上就是响应体的 MD5，实测与文件 MD5 完全一致）。
+    /// 下次更新时带上它发条件请求：内容没变服务端直接返回 304，整个响应体都不用传输。
+    /// 老清单里没有该字段，反序列化为空串（视作「未知」，退化为全量下载）。
+    #[serde(default)]
+    pub etag: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -67,6 +72,11 @@ pub struct Manifest {
     pub version: u32,
     #[serde(default)]
     pub updated_at: i64,
+    /// 最近一次与服务端「核对过版本」的时间（含内容没变、只有 304 的情况）。
+    /// 与 updated_at（数据真正发生变化的时间）区分开：过期判断用这个，
+    /// 否则数据长期没变化时会每次启动都重复联网检查。
+    #[serde(default)]
+    pub checked_at: i64,
     #[serde(default)]
     pub files: HashMap<String, FileInfo>,
 }
@@ -224,6 +234,8 @@ pub fn ensure_cache(app: &tauri::AppHandle) -> Result<PathBuf, String> {
                     FileInfo {
                         bytes: meta.len(),
                         updated_at: mtime_secs(&p),
+                        // 种子数据没有远端 ETag：首次检查/更新会全量下载一次，之后才有可比对的值
+                        etag: String::new(),
                     },
                 );
                 changed = true;
@@ -279,9 +291,11 @@ pub struct DataFileStat {
 pub struct DataStatus {
     /// 缓存目录里是否已有完整数据
     pub cached: bool,
-    /// 最近一次更新时间（epoch 秒，0 = 未更新过）
+    /// 最近一次数据真正发生变化的时间（epoch 秒，0 = 未更新过）
     pub updated_at: i64,
-    /// 是否过期（无清单或超过 SYNC_INTERVAL_SECS）
+    /// 最近一次与服务端核对版本的时间（含「已是最新」的情况，epoch 秒）
+    pub checked_at: i64,
+    /// 是否过期（缺失，或距上次核对已超过 SYNC_INTERVAL_SECS）
     pub stale: bool,
     pub syncing: bool,
     pub files: Vec<DataFileStat>,
@@ -319,10 +333,13 @@ pub fn status(app: &tauri::AppHandle) -> DataStatus {
         }
     }
     let updated_at = manifest.updated_at;
+    // 过期看「上次核对时间」：数据长期没变化时也不会每次启动都重复联网
+    let last_check = manifest.checked_at.max(updated_at);
     DataStatus {
         cached: missing == 0,
         updated_at,
-        stale: missing > 0 || now_secs() - updated_at > SYNC_INTERVAL_SECS,
+        checked_at: manifest.checked_at,
+        stale: missing > 0 || now_secs() - last_check > SYNC_INTERVAL_SECS,
         syncing: SYNCING.load(Ordering::SeqCst),
         files,
     }
@@ -336,6 +353,8 @@ pub struct SyncProgress {
     pub running: bool,
     pub done: usize,
     pub total: usize,
+    /// 本次已发现并写入的端点数（其余为内容未变、已跳过下载）
+    pub changed: usize,
     pub label: String,
     pub force: bool,
 }
@@ -346,7 +365,8 @@ pub struct SyncReport {
     pub ok: bool,
     pub updated: Vec<String>,
     pub failed: Vec<String>,
-    pub skipped: usize,
+    /// 内容未变化（服务端 304）而跳过下载的端点数
+    pub unchanged: usize,
     pub updated_at: i64,
     pub message: String,
 }
@@ -361,18 +381,52 @@ fn build_agent() -> Result<ureq::Agent, String> {
         .build())
 }
 
-fn fetch_one(agent: &ureq::Agent, ep: &Endpoint) -> Result<Vec<u8>, String> {
+/// 一次请求的结果
+enum Fetched {
+    /// 服务端返回 304：远端内容与本地缓存一致
+    Unchanged,
+    /// 有更新：响应体 + 服务端给出的新 ETag（缺失时为空串）
+    Fresh(Vec<u8>, String),
+}
+
+/// 本地可用于条件请求的 ETag：仅当文件存在、非空、且大小与清单一致时才返回。
+/// 这样能避免「清单里存着旧 ETag，但文件被删除/截断」时服务端回 304、本地却留着坏数据。
+fn local_etag(dir: &Path, manifest: &Manifest, ep: &Endpoint) -> Option<String> {
+    let meta = std::fs::metadata(dir.join(ep.file)).ok()?;
+    if meta.len() == 0 {
+        return None;
+    }
+    let info = manifest.files.get(ep.file)?;
+    if info.bytes != 0 && info.bytes != meta.len() {
+        return None;
+    }
+    (!info.etag.is_empty()).then(|| info.etag.clone())
+}
+
+/// 请求一个端点。
+///
+/// etag 非空时发**条件请求**（`If-None-Match`）：内容没变则服务端回 304 且不传响应体，
+/// 于是「更新数据」可以跳过全部重复 JSON（json.tarkov.dev 的 ETag 实测就是响应体 MD5，
+/// 且 304 仍会带回 ETag / Last-Modified，Cloudflare 与源站一致）。
+fn fetch_one(agent: &ureq::Agent, ep: &Endpoint, etag: Option<&str>) -> Result<Fetched, String> {
     let url = format!("{BASE_URL}/{}", ep.path);
-    let resp = agent
+    let mut req = agent
         .get(&url)
         .set("User-Agent", "ic-tarkov/1.0")
-        // 明文返回，落盘即可直接解析
-        .set("Accept-Encoding", "identity")
-        .call()
-        .map_err(|e| format!("{e}"))?;
-    if resp.status() != 200 {
-        return Err(format!("HTTP {}", resp.status()));
+        // 明文返回：落盘即可直接解析，同时保证 ETag 对应明文内容的 MD5
+        .set("Accept-Encoding", "identity");
+    if let Some(tag) = etag {
+        req = req.set("If-None-Match", tag);
     }
+    let resp = req.call().map_err(|e| format!("{e}"))?;
+    let code = resp.status();
+    if code == 304 {
+        return Ok(Fetched::Unchanged);
+    }
+    if code != 200 {
+        return Err(format!("HTTP {code}"));
+    }
+    let new_etag = resp.header("ETag").unwrap_or_default().to_string();
     let mut buf = Vec::new();
     resp.into_reader()
         .take(256 * 1024 * 1024)
@@ -381,7 +435,7 @@ fn fetch_one(agent: &ureq::Agent, ep: &Endpoint) -> Result<Vec<u8>, String> {
     if buf.is_empty() || (buf[0] != b'{' && buf[0] != b'[') {
         return Err("响应不是 JSON".to_string());
     }
-    Ok(buf)
+    Ok(Fetched::Fresh(buf, new_etag))
 }
 
 fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
@@ -413,7 +467,7 @@ fn do_sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
     let mut manifest = read_manifest(&dir);
     let mut updated: Vec<String> = Vec::new();
     let mut failed: Vec<String> = Vec::new();
-    let mut skipped = 0usize;
+    let mut unchanged = 0usize;
 
     for (i, ep) in ENDPOINTS.iter().enumerate() {
         let _ = app.emit(
@@ -422,40 +476,42 @@ fn do_sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
                 running: true,
                 done: i,
                 total,
+                changed: updated.len(),
                 label: ep.label.to_string(),
                 force,
             },
         );
         let path = dir.join(ep.file);
-        if !force {
-            if let Ok(meta) = std::fs::metadata(&path) {
-                let age = now_secs() - mtime_secs(&path);
-                if meta.len() > 0 && age < SYNC_INTERVAL_SECS {
-                    skipped += 1;
-                    continue;
+        // 非强制更新时带上本地 ETag 发条件请求：内容没变服务端回 304，连响应体都不收
+        let known = if force { None } else { local_etag(&dir, &manifest, ep) };
+        match fetch_one(&agent, ep, known.as_deref()) {
+            Ok(Fetched::Unchanged) => unchanged += 1,
+            Ok(Fetched::Fresh(bytes, etag)) => {
+                match write_atomic(&path, &bytes) {
+                    Ok(()) => {
+                        let ts = now_secs();
+                        manifest.files.insert(
+                            ep.file.to_string(),
+                            FileInfo {
+                                bytes: bytes.len() as u64,
+                                updated_at: ts,
+                                etag,
+                            },
+                        );
+                        manifest.updated_at = ts;
+                        write_manifest(&dir, &manifest);
+                        updated.push(ep.label.to_string());
+                    }
+                    Err(e) => failed.push(format!("{} {}", ep.label, e)),
                 }
             }
-        }
-        match fetch_one(&agent, ep) {
-            Ok(bytes) => match write_atomic(&path, &bytes) {
-                Ok(()) => {
-                    let ts = now_secs();
-                    manifest.files.insert(
-                        ep.file.to_string(),
-                        FileInfo {
-                            bytes: bytes.len() as u64,
-                            updated_at: ts,
-                        },
-                    );
-                    manifest.updated_at = ts;
-                    write_manifest(&dir, &manifest);
-                    updated.push(ep.label.to_string());
-                }
-                Err(e) => failed.push(format!("{} {}", ep.label, e)),
-            },
             Err(e) => failed.push(format!("{} {}", ep.label, e)),
         }
     }
+
+    // 无论有没有更新，都记下这次「已与远端核对过版本」的时间（过期判断用它）
+    manifest.checked_at = now_secs();
+    write_manifest(&dir, &manifest);
 
     let _ = app.emit(
         "data-sync-progress",
@@ -463,6 +519,7 @@ fn do_sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
             running: false,
             done: total,
             total,
+            changed: updated.len(),
             label: String::new(),
             force,
         },
@@ -471,18 +528,18 @@ fn do_sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
     let ok = failed.is_empty();
     let message = if ok {
         if updated.is_empty() {
-            format!("数据已是最新（跳过 {skipped} 项）")
+            format!("已是最新：{total} 份文件内容均未变化，已跳过下载")
         } else {
-            format!("已更新 {} 项数据", updated.len())
+            format!("已更新 {} / {} 份文件", updated.len(), total)
         }
     } else {
-        format!("{} 项更新失败：{}", failed.len(), failed.join("；"))
+        format!("{}/{} 份文件更新失败：{}", failed.len(), total, failed.join("；"))
     };
     let report = SyncReport {
         ok,
         updated,
         failed,
-        skipped,
+        unchanged,
         updated_at: manifest.updated_at,
         message,
     };

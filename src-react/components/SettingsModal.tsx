@@ -167,6 +167,7 @@ export default function SettingsModal() {
   /* ---------- 游戏数据（tarkov.dev 原始 API JSON 缓存） ---------- */
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const [syncResult, setSyncResult] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
 
   const loadDataStatus = useCallback(() => {
@@ -192,14 +193,15 @@ export default function SettingsModal() {
       listen<DataSyncProgress>('data-sync-progress', (e) => {
         const p = e.payload
         setSyncing(p.running)
-        setSyncMsg(p.running ? `正在更新：${p.label}（${p.done + 1}/${p.total}）` : null)
+        setSyncMsg(p.running ? `${p.label} · 已更新 ${p.changed}/${p.total} 份` : null)
       }),
     )
     track(
       listen<DataSyncReport>('data-synced', (e) => {
         setSyncing(false)
-        // 成功后由下方「最近更新」时间行接管展示；仅失败时保留原因提示
+        // 失败用红色提示；成功则把「更新了几份中的几份」留在下一行展示
         setSyncMsg(e.payload.ok ? null : e.payload.message)
+        setSyncResult(e.payload.ok ? e.payload.message : null)
         loadDataStatus()
       }),
     )
@@ -211,13 +213,15 @@ export default function SettingsModal() {
     }
   }, [loadDataStatus])
 
+  // 更新数据：后端逐项带 ETag 发条件请求，内容没变的端点（304）直接跳过下载
   const onUpdateData = async () => {
     setError(null)
     setFeedback(null)
     setSyncMsg(null)
+    setSyncResult(null)
     setSyncing(true)
     try {
-      await refreshGameData(true)
+      await refreshGameData(false)
     } catch (e) {
       setSyncing(false)
       setError(String(e))
@@ -519,10 +523,11 @@ export default function SettingsModal() {
           {/* 游戏数据（tarkov.dev） */}
           <div className="border-t border-line pt-4">
             <div className={`${TITLE_CLS} mb-2`}>游戏数据（tarkov.dev）</div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={onUpdateData}
                 disabled={syncing}
+                title="逐项比对远端 ETag：内容没变的不下载，只取有变化的端点"
                 className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
               >
                 {syncing ? '更新中…' : '更新数据'}
@@ -541,8 +546,16 @@ export default function SettingsModal() {
             ) : dataStatus?.updatedAt ? (
               <div className="mt-2 text-[12px] text-muted/80">
                 最近更新：{fmtTime(dataStatus.updatedAt)}
+                {dataStatus.checkedAt > 0 && (
+                  <span className="ml-3 text-muted/60">
+                    上次核对：{fmtTime(dataStatus.checkedAt)}
+                  </span>
+                )}
               </div>
             ) : null}
+            {syncResult && !syncing && (
+              <div className="mt-1 text-[12px] text-muted/70">{syncResult}</div>
+            )}
             {dataStatus && !dataStatus.cached && (
               <div className="text-[14px] text-amber mt-2">
                 缓存为空或不完整：请点击上方「更新数据」联网获取（首次使用需联网）。

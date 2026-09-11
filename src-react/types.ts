@@ -416,9 +416,11 @@ export interface DataFileStat {
 export interface DataStatus {
   /** 缓存里是否已有完整数据 */
   cached: boolean
-  /** 最近一次更新时间（epoch 秒，0 = 未更新过） */
+  /** 最近一次数据真正发生变化的时间（epoch 秒，0 = 未更新过） */
   updatedAt: number
-  /** 是否过期（缺失或超过 7 天） */
+  /** 最近一次与服务端核对版本的时间（含「已是最新」，epoch 秒，0 = 未核对过） */
+  checkedAt: number
+  /** 是否过期（缺失，或距上次核对超过 7 天） */
   stale: boolean
   syncing: boolean
   questCount: number
@@ -431,6 +433,8 @@ export interface DataSyncProgress {
   running: boolean
   done: number
   total: number
+  /** 本次已发现并写入的份数（其余为内容未变、已跳过下载） */
+  changed: number
   label: string
   force: boolean
 }
@@ -440,7 +444,9 @@ export interface DataSyncReport {
   ok: boolean
   updated: string[]
   failed: string[]
-  skipped: number
+  /** 内容未变化（服务端 304）而跳过下载的端点数 */
+  unchanged: number
   updatedAt: number
   message: string
 }
+

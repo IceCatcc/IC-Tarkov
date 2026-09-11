@@ -388,11 +388,11 @@ export async function getDataStatus(): Promise<DataStatus> {
 }
 
 /**
- * 触发数据更新：后端重新请求 tarkov.dev 的原始端点并刷新缓存，
- * 完成后重建派生索引并发出 data-reloaded 事件。
- * @param force true = 忽略 7 天过期判断，全部重下
+ * 触发数据更新：后端向 tarkov.dev 逐项发条件请求（带上次记录的 ETag），
+ * 内容没变的端点返回 304、不传输响应体；有变化的才下载，完成后重建派生索引。
+ * @param force true = 忽略 ETag 强制全量重下（本地缓存疑似损坏时用）
  */
-export async function refreshGameData(force = true): Promise<void> {
+export async function refreshGameData(force = false): Promise<void> {
   await invoke('refresh_game_data', { force })
 }
 
