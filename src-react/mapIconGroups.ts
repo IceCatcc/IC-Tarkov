@@ -65,11 +65,12 @@ const EXTRACT_ICON: Record<string, string> = {
  * 是否为狙击 AI 出生点。
  *
  * 数据里狙击点有两种形态，必须都覆盖，否则会被当成普通 AI：
- * 1. categories 含 sniper（仅 Streets 等少数地图）；
- * 2. 只有 categories: ["bot"]，靠 zoneName 区分（海关 ZoneSnipeTower、中心区 ZoneSandSnipeCenter…）。
+ * 1. categories 里带 sniper / sniper_scav 之类的标记（仅少部分地图）；
+ * 2. 绝大部分点的 categories 只有 ["bot"]，与普通 AI 完全一样，只能靠 zoneName 区分
+ *    （海关 ZoneSnipeTower / ZoneBlockPostSniper、中心区 Zone_SniperPeak…）。
  */
 export function isSniper(en: MarkerEntry): boolean {
-  if ((en.categories ?? []).includes('sniper')) return true
+  if ((en.categories ?? []).some((c) => /snipe/i.test(c))) return true
   return /snip/i.test(en.zoneName ?? '')
 }
 
@@ -184,12 +185,14 @@ export function buildIconGroups(mm: MapMarkers): IconGroup[] {
   }
   push('extracts', '撤离点', extractSubs)
 
-  // 出生点：玩家 / AI / 狙击 AI / Boss（Boss 数据分散在 bosses 与 spawns 两处）
+  // 出生点：玩家 / 普通 AI / 狙击 AI / Boss（Boss 数据分散在 bosses 与 spawns 两处）
   const spawns = mm.spawns ?? []
   const isBoss = (s: MarkerEntry) => (s.categories ?? []).includes('boss')
   const isPlayer = (s: MarkerEntry) => (s.categories ?? []).includes('player')
+  // 四类互斥（Boss > 玩家 > 狙击 AI > 普通 AI）：少数点同时带 sniper 与 boss/player 标记，
+  // 归入优先级更高的一类，否则同一坐标会在两个图层里各画一个图标。
   const player = spawns.filter((s) => !isBoss(s) && isPlayer(s))
-  const sniper = spawns.filter((s) => isSniper(s))
+  const sniper = spawns.filter((s) => isSniper(s) && !isBoss(s) && !isPlayer(s))
   const ai = spawns.filter((s) => !isBoss(s) && !isPlayer(s) && !isSniper(s))
   const boss = [...(mm.bosses ?? []), ...spawns.filter(isBoss)]
   push(

@@ -40,15 +40,13 @@ function TriState({
  *   每个子分类都能单独控制显示隐藏；
  * - 只有一个子分类的分类不再折叠，整行就是开关；
  * - 选择框统一放在文字前；
- * - 「任务目标」不列子项：单个任务的跟踪在右下角任务选单里操作，这里只做整体开关与计数。
+ * - 「任务目标」是任务图标的**总开关**（普通勾选框，不显示计数、不写成三态）：
+ *   单个任务的显示与否由右下角任务选单控制，这里不去动它。
  */
 export function MapIconPanel({ groups }: { groups: IconGroup[] }) {
   const chips = useStore((s) => s.mapChips)
   const setMapChip = useStore((s) => s.setMapChip)
   const setMapChips = useStore((s) => s.setMapChips)
-  const playerQuests = useStore((s) => s.playerQuests)
-  const untracked = useStore((s) => s.untrackedQuests)
-  const toggleQuestTracked = useStore((s) => s.toggleQuestTracked)
   const [open, setOpen] = useState<Record<string, boolean>>({})
 
   const toggleOpen = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }))
@@ -58,35 +56,30 @@ export function MapIconPanel({ groups }: { groups: IconGroup[] }) {
     'flex items-center gap-1.5 pl-5 pr-1.5 py-0.5 rounded cursor-pointer hover:bg-ink-700/70'
   const COUNT = 'text-[11px] text-muted/80 w-8 text-right shrink-0'
 
-  /* ---- 任务目标：只做整体开关（单个任务的跟踪在右下角任务选单里） ---- */
-  const inProgress = playerQuests.filter((q) => q.status === 'in_progress')
-  const trackedCount = inProgress.filter((q) => !untracked.includes(q.questId)).length
-  const questsAll = inProgress.length > 0 && trackedCount === inProgress.length
-  const questsPartial = trackedCount > 0 && trackedCount < inProgress.length
-  const toggleAllQuests = (on: boolean) => {
-    for (const q of inProgress) {
-      if (untracked.includes(q.questId) !== !on) toggleQuestTracked(q.questId)
-    }
-    // 全开时顺带打开分类总开关，避免它被旧值（false）挡住导致勾了也不显示
-    if (on) setMapChip(catKey('quests'), true)
-  }
+  /* ---- 任务目标：任务图标的总开关（单个任务的显示在右下角任务选单里控制） ---- */
+  const questsOn = resolveChipOn(chips, catKey('quests'))
 
   return (
     <div className="flex flex-col gap-0.5 p-1.5 w-[240px] max-h-[calc(52dvh/var(--ui-scale,1))] overflow-y-auto rounded-md border border-line bg-ink-800/95 shadow-lg backdrop-blur-sm">
-      {inProgress.length > 0 && (
-        <div className={ROW}>
-          <TriState
-            checked={questsAll}
-            partial={questsPartial}
-            onChange={toggleAllQuests}
-            title={`任务目标：${questsAll ? '全部隐藏' : '全部显示'}（单个任务在右下角任务选单里跟踪）`}
-          />
-          <span className="flex-1 text-left text-[13px] font-medium text-[#e6edf3]">任务目标</span>
-          <span className={COUNT}>
-            {trackedCount}/{inProgress.length}
-          </span>
-        </div>
-      )}
+      <div
+        className={`${ROW} cursor-pointer`}
+        onClick={() => setMapChip(catKey('quests'), !questsOn)}
+        title={`任务图标：${questsOn ? '隐藏' : '显示'}（单个任务在右下角任务选单里控制）`}
+      >
+        <input
+          type="checkbox"
+          checked={questsOn}
+          onChange={() => setMapChip(catKey('quests'), !questsOn)}
+          className="w-3.5 h-3.5 accent-amber pointer-events-none"
+        />
+        <span
+          className={`flex-1 text-left text-[13px] font-medium ${
+            questsOn ? 'text-[#e6edf3]' : 'text-muted'
+          }`}
+        >
+          任务目标
+        </span>
+      </div>
 
       {/* ---- 其余图标分类：子项由地图数据派生 ---- */}
       {groups.map((g) => {
@@ -185,7 +178,7 @@ export function MapIconPanel({ groups }: { groups: IconGroup[] }) {
         )
       })}
 
-      {groups.length === 0 && inProgress.length === 0 && (
+      {groups.length === 0 && (
         <div className="px-2 py-1 text-[12px] text-muted">当前地图没有可显示的图标</div>
       )}
     </div>
