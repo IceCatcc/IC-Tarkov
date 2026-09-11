@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { getVersion } from '@tauri-apps/api/app'
@@ -108,6 +108,27 @@ export function TopBar() {
   }, [])
   const hideBar = mobile && landscape && page === 'map'
 
+  // 手机端顶栏空间不足时隐藏「图标 + 标题」：用右侧按钮区的实际所需宽度与顶栏宽度比较。
+  // BRAND_W 是品牌块的估算宽度（隐藏后不再变化），避免「显示 → 变窄 → 隐藏」反复抖动。
+  const headerRef = useRef<HTMLElement | null>(null)
+  const rightBarRef = useRef<HTMLDivElement | null>(null)
+  const [tightHeader, setTightHeader] = useState(false)
+  useEffect(() => {
+    if (!mobile) return
+    const el = headerRef.current
+    const right = rightBarRef.current
+    if (!el || !right) return
+    const BRAND_W = 112
+    const check = () => {
+      setTightHeader(el.clientWidth < right.scrollWidth + BRAND_W + 24)
+    }
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    ro.observe(right)
+    return () => ro.disconnect()
+  }, [mobile, watcher.error, version, pcConnected])
+
   // 电脑端连接状态：首次查询一次服务状态（服务可能在打开本窗口前就已启动），
   // 之后由后端 lan-client-connected / lan-client-disconnected 事件实时更新，不做轮询。
   useEffect(() => {
@@ -139,12 +160,17 @@ export function TopBar() {
     <>
       {!hideBar && (
       <header
+        ref={headerRef}
         className="flex items-stretch bg-ink-800 border-b border-line shrink-0 select-none"
       >
-        {/* 左侧：品牌 + 导航（空白处可拖动窗口） */}
-        <div className="flex h-10 items-center gap-2 pl-3">
-        <img src="/icons/icon.png" alt="" className="w-5 h-5 rounded shrink-0" />
-        <span className="font-medium text-[15px]">IC Tarkov</span>
+        {/* 左侧：品牌 + 导航（空白处可拖动窗口）；手机端空间不足时品牌让位 */}
+        <div className="flex h-10 items-center gap-2 pl-3 shrink-0">
+        {!(mobile && tightHeader) && (
+          <>
+            <img src="/icons/icon.png" alt="" className="w-5 h-5 rounded shrink-0" />
+            <span className="font-medium text-[15px]">IC Tarkov</span>
+          </>
+        )}
         {version && (
           <button
             onClick={() => setReleaseOpen(true)}
@@ -190,7 +216,7 @@ export function TopBar() {
       )}
 
       {/* 右侧：错误提示 + 模式切换 + 设置 + 窗口控制 */}
-      <div className="flex h-10 items-center gap-2 pr-2">
+      <div ref={rightBarRef} className="flex h-10 items-center gap-2 pr-2">
         {/* 任务模式切换：PVP / PVPS / PVE（三套数据各自独立） */}
         <div
           className="flex items-center rounded-full border border-line bg-ink-700 p-0.5 shrink-0"

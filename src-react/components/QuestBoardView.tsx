@@ -56,6 +56,11 @@ export function QuestBoardView() {
   // 分页：每张卡会按需拉取任务详情，一次铺开全部（500+）会瞬间发出大量请求
   const [limit, setLimit] = useState(60)
 
+  // 搜索 / 地图筛选 / 任务模式变化时回到第一页（商人切换另有 onClick 重置）
+  useEffect(() => {
+    setLimit(60)
+  }, [search, mapFilter, questMode])
+
   const items = useMemo<BoardItem[]>(() => {
     if (!graph) return []
     const statusOf = new Map<string, 'in_progress' | 'completed'>()

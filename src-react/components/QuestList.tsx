@@ -1,5 +1,9 @@
+import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { QuestCard } from './QuestCard'
+
+/** 每次渲染的任务数（与任务板一致），点击「加载更多」再追加一页 */
+const PAGE = 60
 
 export function QuestList() {
   const list = useStore((s) => s.playerQuests)
@@ -8,6 +12,8 @@ export function QuestList() {
   const mapFilter = useStore((s) => s.mapFilter)
   // 关键字：在已选分类内按任务名过滤（不含商人）
   const search = useStore((s) => s.searchMonitor).trim().toLowerCase()
+  // 分页：任务多时不再一次性铺开全部卡片
+  const [limit, setLimit] = useState(PAGE)
 
   const filtered = list
     .filter((q) => (filter === 'all' ? true : q.status === filter))
@@ -28,6 +34,11 @@ export function QuestList() {
       return (b.acceptedAt ?? '').localeCompare(a.acceptedAt ?? '')
     })
 
+  // 筛选条件或数据来源（切模式 / 新事件）变化时回到第一页
+  useEffect(() => {
+    setLimit(PAGE)
+  }, [filter, traderFilter, search, mapFilter, list])
+
   if (filtered.length === 0) {
     return (
       <div className="text-[14px] text-muted py-10 text-center">
@@ -36,11 +47,23 @@ export function QuestList() {
     )
   }
 
+  const shown = filtered.slice(0, limit)
+
   return (
     <div className="space-y-3">
-      {filtered.map((q) => (
+      {shown.map((q) => (
         <QuestCard key={q.questId} quest={q} />
       ))}
+      {filtered.length > limit && (
+        <div className="flex justify-center py-3">
+          <button
+            onClick={() => setLimit((v) => v + PAGE)}
+            className="px-4 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+          >
+            加载更多（还有 {filtered.length - limit} 个）
+          </button>
+        </div>
+      )}
     </div>
   )
 }
