@@ -1,5 +1,6 @@
 import type { PlayerQuest } from '../types'
 import { useStore, useQuestDetail, dedupeItems } from '../store'
+import { ObjectiveChecklist } from './ObjectiveChecklist'
 import { traderImage } from '../traderImages'
 import { traderDisplayName } from '../traderMeta'
 
@@ -114,19 +115,10 @@ export function QuestCard({
         {quest.minLevel != null && <span className="text-muted/60">最低 Lv{quest.minLevel}</span>}
       </div>
 
-      {/* 任务目标 */}
+      {/* 任务目标（可逐个勾选完成） */}
       {detail?.objectives?.length ? (
         <div className="mt-3 pt-3 border-t border-line">
-          <ul className="space-y-1 text-[14px] text-[#c9d1d9]">
-            {detail.objectives.map((o, i) => (
-              <li key={i} className="leading-snug">
-                - {o.description}
-                {o.count != null && o.count > 0 && (
-                  <span className="text-amber">（{o.count}）</span>
-                )}
-              </li>
-            ))}
-          </ul>
+          <ObjectiveChecklist questId={quest.questId} objectives={detail.objectives} />
         </div>
       ) : null}
 

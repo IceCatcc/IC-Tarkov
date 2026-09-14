@@ -126,6 +126,17 @@ pub fn build_summary(app: &AppHandle) -> SyncSummary {
             buf.push_str(accepted);
             buf.push('|');
             buf.push_str(completed);
+            // 手动勾选完成的目标（顺序无关的确定性拼接）
+            let mut done: Vec<String> = md
+                .quests
+                .get(id)
+                .map(|e| e.objectives_done.iter().cloned().collect())
+                .unwrap_or_default();
+            done.sort();
+            if !done.is_empty() {
+                buf.push_str("|obj=");
+                buf.push_str(&done.join(","));
+            }
             buf.push('\n');
         }
 

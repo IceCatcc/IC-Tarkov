@@ -90,6 +90,8 @@ export interface ItemRef {
 }
 
 export interface ObjectiveInfo {
+  /** 目标 id（上游 objective id）：用于单独标记该目标是否完成 */
+  id: string
   description: string
   type?: string
   typeZh?: string | null
@@ -385,6 +387,8 @@ export interface SkeletonDoc {
 /** 任务目标位置（由原始任务数据的 zones 派生） */
 export interface QuestZone {
   nn: string
+  /** 上游 zone id（day/night 副本共用），地图绘制据此去重 */
+  zid?: string
   position: MarkerPosition
   top?: number | null
   bottom?: number | null
@@ -393,6 +397,10 @@ export interface QuestZone {
 }
 
 export interface QuestZoneObjective {
+  /** 目标 id（与任务详情里的 ObjectiveInfo.id 同源），用于单独标记完成 */
+  id: string
+  /** 目标在任务里的原始序号（与任务详情列表一致），地图图标上显示「#n」用 */
+  idx?: number
   type?: string | null
   optional?: boolean
   descZh?: string | null

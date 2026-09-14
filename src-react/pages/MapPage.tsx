@@ -308,15 +308,64 @@ function escapeHtml(s: string): string {
 }
 
 /**
+ * 目标勾选行（任务目标弹窗用）：data-obj-check 存「任务id|目标id」，点击后由地图容器的
+ * 事件委托切换完成状态。弹窗是静态 HTML，勾选后直接就地改 data-done / 文案，不等重绘。
+ * text 为目标描述（同坐标多目标时用它区分），省略则用通用文案。
+ */
+function objectiveCheckHtml(
+  questId: string,
+  objectiveId: string,
+  done: boolean,
+  text?: string | null,
+): string {
+  const val = `${encodeURIComponent(questId)}|${encodeURIComponent(objectiveId)}`
+  // 有目标描述时始终显示描述（勾选后也不换文案）；没有描述才用通用提示
+  const label = text || '标记该目标已完成'
+  return (
+    `<button type="button" class="map-popup-check${done ? ' is-done' : ''}" data-obj-check="${val}"` +
+    ` data-done="${done ? '1' : '0'}" title="${
+      done ? '点击取消该目标的完成标记' : '点击标记该目标为已完成'
+    }">` +
+    `<span class="map-popup-check-box">${done ? '✓' : ''}</span>` +
+    `<span class="map-popup-check-text">${label}</span>` +
+    `</button>`
+  )
+}
+
+/**
+ * 已勾选完成的目标：把对应地图图标转为半透明（就地改 class，不重建图层，避免弹窗被关掉）。
+ * 图标 img 上带 data-obj-marker="任务id|目标id1,目标id2…"（同一坐标可能合并了多个目标），
+ * 组内目标全部勾选才算完成。
+ */
+function refreshObjectiveMarkers(map: L.Map, doneMap: Record<string, string[]>): void {
+  map.getContainer()
+    .querySelectorAll<HTMLElement>('[data-obj-marker]')
+    .forEach((el) => {
+      const [qid, rawIds] = (el.getAttribute('data-obj-marker') ?? '')
+        .split('|')
+        .map(decodeURIComponent)
+      const ids = (rawIds ?? '').split(',').filter(Boolean)
+      if (!qid || !ids.length) return
+      const box = el.closest('.quest-obj-marker') as HTMLElement | null
+      box?.classList.toggle('is-done', ids.every((id) => (doneMap[qid] ?? []).includes(id)))
+    })
+}
+
+/**
  * 标记弹窗内容。
  * - 标题点击：有 questId 时展开右下角任务浮窗并定位到该任务；否则有 wikiUrl 时打开 Wiki
  * - Wiki 文字按钮固定在标题行最右
+ * - checks：任务目标弹窗的勾选行（同坐标合并了多个目标时每项一行，可分别勾选）
  */
 function popupHtml(
   title: string,
   meta: string[],
   wikiUrl?: string | null,
   questId?: string,
+  checks?: {
+    questId: string
+    items: { objectiveId: string; text?: string | null; done: boolean }[]
+  } | null,
 ) {
   const titleAttr = questId
     ? ` data-quest="${encodeURIComponent(questId)}" title="点击展开任务列表并定位该任务"`
@@ -329,9 +378,17 @@ function popupHtml(
         wikiUrl,
       )}">Wiki ↗</button>`
     : ''
+  const checkHtml =
+    checks && checks.items.length
+      ? `<div class="map-popup-checks">${checks.items
+          .map((it) =>
+            objectiveCheckHtml(checks.questId, it.objectiveId, it.done, escapeHtml(it.text ?? '')),
+          )
+          .join('')}</div>`
+      : ''
   return `<div><div class="map-popup-head"><div class="map-popup-title${titleLink}"${titleAttr}>${title}</div>${wikiBtn}</div>${meta
     .map((m) => `<div class="map-popup-meta">${m}</div>`)
-    .join('')}</div>`
+    .join('')}${checkHtml}</div>`
 }
 
 /* ================= 组件 ================= */
@@ -540,8 +597,28 @@ export function MapPage() {
 
     // 弹窗内任务名称：点击打开 Wiki 抽屉（事件委托到地图容器）
     const openWiki = useStore.getState().openWiki
+    const toggleObjective = useStore.getState().toggleObjective
     const onMapClick = (ev: MouseEvent) => {
       const target = ev.target as HTMLElement
+      // 任务目标弹窗：单独勾选 / 取消勾选该目标（弹窗是静态 HTML，就地更新状态）
+      const checkEl = target.closest('[data-obj-check]') as HTMLElement | null
+      if (checkEl) {
+        ev.preventDefault()
+        const [qid, oid] = (checkEl.getAttribute('data-obj-check') ?? '')
+          .split('|')
+          .map(decodeURIComponent)
+        if (qid && oid) {
+          const done = checkEl.getAttribute('data-done') !== '1'
+          void toggleObjective(qid, oid, done)
+          checkEl.setAttribute('data-done', done ? '1' : '0')
+          checkEl.classList.toggle('is-done', done)
+          checkEl.title = done ? '点击取消该目标的完成标记' : '点击标记该目标为已完成'
+          // 只改勾选框：文字保持目标描述，不随状态换成「该目标已完成」
+          const box = checkEl.querySelector('.map-popup-check-box')
+          if (box) box.textContent = done ? '✓' : ''
+        }
+        return
+      }
       // Wiki 文字按钮：打开 Wiki 抽屉
       const btn = target.closest('[data-wiki]') as HTMLElement | null
       if (btn) {
@@ -1067,6 +1144,13 @@ export function MapPage() {
 
   /* ---------- 进行中任务的目标标记 ---------- */
 
+  // 预取本图进行中任务的目标打勾进度：地图目标弹窗要直接显示勾选态（浮窗卡片自行加载，这里只补弹窗）
+  useEffect(() => {
+    if (!qzDoc) return
+    const ids = Object.keys(qzDoc.tasks).filter((tid) => inProgressIds.has(tid))
+    if (ids.length) void useStore.getState().ensureObjectivesDone(ids)
+  }, [qzDoc, inProgressIds])
+
   useEffect(() => {
     const map = mapRef.current
     if (!map || !imap || !qzDoc) return
@@ -1081,6 +1165,14 @@ export function MapPage() {
     const untracked = untrackedRef.current
     // 按设置里的 Wiki 站点生成链接（取快照即可：切换站点后下次重绘生效）
     const wikiUrlFor = useStore.getState().wikiUrlFor
+    // 目标打勾进度（取快照即可：勾选后弹窗就地更新 DOM，切换地图/任务时重绘会重新读取）
+    const objectivesDone = useStore.getState().objectivesDone
+    // 单个目标内部的重合点只画一次：上游 zones 常带 day/night 两份副本（merge 后 nn 相同、
+    // 坐标也相同），后端已按 zone id 去重，这里再兜一层
+    const drawn = new Set<string>()
+    // 同一任务里坐标相同的多个目标（如「找到物品」+「放置标记器」）合并成一个图标：
+    // 分着画会完全重叠、看不出是两个目标，合并后弹窗里逐条列出并可分别勾选
+    const groups = new Map<string, { tid: string; items: { o: QuestZoneObjective; z: QuestZone }[] }>()
     for (const [tid, t] of Object.entries(qzDoc.tasks)) {
       if (!inProgressIds.has(tid)) continue // 只显示正在进行的任务
       if (untracked.has(tid)) continue // 用户取消跟踪的任务不绘制
@@ -1088,49 +1180,94 @@ export function MapPage() {
         if (!(o.maps ?? []).includes(imap.key)) continue // 目标与本图无关
         for (const z of o.zones ?? []) {
           if (z.nn !== imap.key) continue
-          const qName = escapeHtml(t.nameZh ?? t.name ?? '任务')
-          // 任务区域：半透明黄色区块，提升目标可见度
-          if (z.outline && z.outline.length >= 3) {
-            const pts = z.outline.map((p) => pos({ x: p.x, z: p.z }))
-            L.polygon(pts, {
-              color: '#f5c518',
-              weight: 2,
-              opacity: 0.9,
-              fillColor: '#f5c518',
-              // 与 .quest-zone 的呼吸动画下限一致（动画生效时以 CSS 为准）
-              fillOpacity: 0.07,
-              interactive: false,
-              className: 'quest-zone',
-            }).addTo(lg)
-          }
-          // 图标 + 任务名（文字比地点/撤离点标签小一号）
-          const icon = L.divIcon({
-            className: 'quest-obj-marker',
-            html:
-              `<img src="${ICON_BASE}quest_objective.png" alt="" />` +
-              `<span class="quest-obj-name">${qName}</span>`,
-            iconSize: [30, 30],
-            iconAnchor: [15, 15],
-          })
-          lg.addLayer(
-            L.marker(pos(z.position), { icon, zIndexOffset: 600 }).bindPopup(
-              popupHtml(
-                `◎ ${t.nameZh ?? t.name ?? '任务'}`,
-                [
-                  ...(o.descZh ? [o.descZh] : []),
-                  ...(o.optional ? ['可选目标'] : []),
-                ],
-                wikiUrlFor(tid),
-                tid,
-              ),
-            ),
-          )
+          const zk =
+            z.zid != null && z.zid !== ''
+              ? `${tid}|${o.id ?? ''}|${z.zid}`
+              : `${tid}|${o.id ?? ''}|${z.position.x},${z.position.z}`
+          if (drawn.has(zk)) continue
+          drawn.add(zk)
+          const gk = `${tid}|${z.position.x},${z.position.z}`
+          const g = groups.get(gk) ?? { tid, items: [] }
+          g.items.push({ o, z })
+          groups.set(gk, g)
         }
       }
+    }
+    for (const g of groups.values()) {
+      const tid = g.tid
+      const t = qzDoc.tasks[tid]
+      if (!t) continue
+      const z0 = g.items[0].z
+      const doneList = objectivesDone[tid] ?? []
+      const oids = g.items.map((it) => it.o.id).filter(Boolean)
+      // 图标只标任务名：序号（#1·#2）试过，标签太长且用户不需要，靠弹窗里的目标描述区分
+      const qName = escapeHtml(t.nameZh ?? t.name ?? '任务')
+      // 任务区域：半透明黄色区块，提升目标可见度
+      for (const it of g.items) {
+        const z = it.z
+        if (z.outline && z.outline.length >= 3) {
+          const pts = z.outline.map((p) => pos({ x: p.x, z: p.z }))
+          L.polygon(pts, {
+            color: '#f5c518',
+            weight: 2,
+            opacity: 0.9,
+            fillColor: '#f5c518',
+            // 与 .quest-zone 的呼吸动画下限一致（动画生效时以 CSS 为准）
+            fillOpacity: 0.07,
+            interactive: false,
+            className: 'quest-zone',
+          }).addTo(lg)
+        }
+      }
+      // 组内目标全部勾选才把图标转半透明（与任务卡片里的删除线同一语义）
+      const allDone = oids.length > 0 && oids.every((id) => doneList.includes(id))
+      // 图标 + 任务名（文字比地点/撤离点标签小一号）
+      const icon = L.divIcon({
+        className: `quest-obj-marker${allDone ? ' is-done' : ''}`,
+        html:
+          `<img src="${ICON_BASE}quest_objective.png" alt="" data-obj-marker="${encodeURIComponent(
+            tid,
+          )}|${encodeURIComponent(oids.join(','))}" />` +
+          `<span class="quest-obj-name">${qName}</span>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+      })
+      lg.addLayer(
+        L.marker(pos(z0.position), { icon, zIndexOffset: 600 }).bindPopup(
+          popupHtml(
+            `${t.nameZh ?? t.name ?? '任务'}`,
+            [
+              // 目标描述已写在各自的勾选行里，只有没有勾选行（数据缺目标 id）时才放进正文
+              ...(!oids.length && g.items[0].o.descZh ? [g.items[0].o.descZh] : []),
+              ...(g.items.some((it) => it.o.optional) ? ['可选目标'] : []),
+            ],
+            wikiUrlFor(tid),
+            tid,
+            oids.length
+              ? {
+                  questId: tid,
+                  items: g.items.map((it) => ({
+                    objectiveId: it.o.id,
+                    text: it.o.descZh ?? null,
+                    done: doneList.includes(it.o.id),
+                  })),
+                }
+              : null,
+          ),
+        ),
+      )
     }
     lg.addTo(map)
     questLayerRef.current = lg
   }, [qzDoc, inProgressIds, imap, chips, untrackedQuests])
+
+  // 勾选状态变化（本机勾选 / 对端同步）后刷新图标透明度；只改 DOM class，不重建图层
+  const objectivesDoneMap = useStore((s) => s.objectivesDone)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    refreshObjectiveMarkers(map, objectivesDoneMap)
+  }, [objectivesDoneMap, qzDoc, imap, chips, inProgressIds])
 
   /* ---------- 渲染 ---------- */
 

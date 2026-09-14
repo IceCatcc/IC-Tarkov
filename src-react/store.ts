@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type {
   ActivityItem,
   PlayerQuest,
@@ -22,6 +22,8 @@ import {
   getSettings,
   setViewMode,
   setQuestStatus,
+  getObjectivesDone,
+  setObjectiveStatus,
 } from './tauri'
 import { buildWikiUrl, type WikiSite } from './wiki'
 import { ICON_DEFAULTS, migrateChips } from './mapIconGroups'
@@ -118,6 +120,14 @@ interface AppState {
   /** 任务详情缓存（按 questId）：监控页任务卡片复用，避免重复请求 */
   questDetails: Record<string, QuestDetail>
   setQuestDetail: (id: string, d: QuestDetail) => void
+
+  /** 任务目标手动打勾进度：questId -> 已完成的目标 id（后端按模式持久化） */
+  objectivesDone: Record<string, string[]>
+  setObjectivesDone: (questId: string, ids: string[]) => void
+  /** 勾选 / 取消勾选单个目标（先就地更新，再落后端） */
+  toggleObjective: (questId: string, objectiveId: string, done: boolean) => Promise<void>
+  /** 预取若干任务的目标打勾进度（已加载的跳过）：地图弹窗等需要显示勾选态的场景用 */
+  ensureObjectivesDone: (ids: string[]) => Promise<void>
 
   /** Wiki 内嵌抽屉宽度（右侧占比 %，桌面可拖动调整，范围 30~92） */
   wikiWidth: number
@@ -240,6 +250,8 @@ async function switchBackendMode(m: QuestMode): Promise<void> {
       activities: [],
       historicalActivities: [],
       historicalLoaded: false,
+      // 目标打勾进度按模式各存一份，切换后清空避免串数据
+      objectivesDone: {},
     })
   } catch {
     /* 后端不可用时保持现有数据，不阻塞切换 */
@@ -611,6 +623,39 @@ export const useStore = create<AppState>((set, get) => ({
   questDetails: {},
   setQuestDetail: (id, d) => set((s) => ({ questDetails: { ...s.questDetails, [id]: d } })),
 
+  objectivesDone: {},
+  setObjectivesDone: (questId, ids) =>
+    set((s) => ({ objectivesDone: { ...s.objectivesDone, [questId]: ids } })),
+  ensureObjectivesDone: async (ids) => {
+    const missing = ids.filter((id) => useStore.getState().objectivesDone[id] === undefined)
+    if (!missing.length) return
+    await Promise.all(
+      missing.map((id) =>
+        getObjectivesDone(id)
+          .then((r) => useStore.getState().setObjectivesDone(id, r ?? []))
+          .catch(() => useStore.getState().setObjectivesDone(id, [])),
+      ),
+    )
+  },
+
+  toggleObjective: async (questId, objectiveId, done) => {
+    const prev = useStore.getState().objectivesDone[questId] ?? []
+    const next = done
+      ? prev.includes(objectiveId)
+        ? prev
+        : [...prev, objectiveId]
+      : prev.filter((x) => x !== objectiveId)
+    set((s) => ({ objectivesDone: { ...s.objectivesDone, [questId]: next } }))
+    try {
+      const res = await setObjectiveStatus(questId, objectiveId, done)
+      set((s) => ({ objectivesDone: { ...s.objectivesDone, [questId]: res } }))
+    } catch (e) {
+      // 失败回滚
+      set((s) => ({ objectivesDone: { ...s.objectivesDone, [questId]: prev } }))
+      console.error('更新目标完成状态失败', e)
+    }
+  },
+
   wikiWidth: 62,
   setWikiWidth: (v) => set({ wikiWidth: Math.round(Math.min(92, Math.max(30, v))) }),
   wikiUrl: null,
@@ -822,4 +867,29 @@ export function useQuestDetail(id: string | null): QuestDetail | null {
   }, [id, map, setDetail])
 
   return detail
+}
+
+/**
+ * 取某任务已打勾完成的目标 id 集合并缓存。与 useQuestDetail 同样的「缓存优先 + 异步拉取」策略。
+ * 首次返回空集合（尚未加载完成），加载后由 store 更新触发重渲染。
+ */
+export function useObjectivesDone(id: string | null): Set<string> {
+  const map = useStore((s) => s.objectivesDone)
+  const setDone = useStore((s) => s.setObjectivesDone)
+  const loaded = id ? map[id] !== undefined : false
+
+  useEffect(() => {
+    if (!id || loaded) return
+    let alive = true
+    getObjectivesDone(id)
+      .then((ids) => {
+        if (alive) setDone(id, ids ?? [])
+      })
+      .catch(() => alive && setDone(id, []))
+    return () => {
+      alive = false
+    }
+  }, [id, loaded, setDone])
+
+  return useMemo(() => new Set(id ? map[id] ?? [] : []), [map, id])
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore, useQuestDetail } from '../store'
+import { ObjectiveChecklist } from './ObjectiveChecklist'
 import { traderImage } from '../traderImages'
 import { TRADERS, TRADER_ZH, traderDisplayName } from '../traderMeta'
 import { llLabel, questLoyaltyLevel, type GraphNode, type ItemRef } from '../types'
@@ -484,19 +485,10 @@ function QuestBoardCard({
         </div>
       ) : null}
 
-      {/* 目标 */}
+      {/* 目标（可逐个勾选完成） */}
       {detail?.objectives?.length ? (
         <div className="mt-3 pt-3 border-t border-line">
-          <ul className="space-y-1 text-[14px] text-[#c9d1d9]">
-            {detail.objectives.map((o, i) => (
-              <li key={i} className="leading-snug">
-                - {o.description}
-                {o.count != null && o.count > 0 && (
-                  <span className="text-amber">（{o.count}）</span>
-                )}
-              </li>
-            ))}
-          </ul>
+          <ObjectiveChecklist questId={n.id} objectives={detail.objectives} />
         </div>
       ) : null}
 

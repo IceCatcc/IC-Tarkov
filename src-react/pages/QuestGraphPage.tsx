@@ -17,6 +17,7 @@ import { useStore, useTopPad } from '../store'
 import { getQuestGraph, getQuestDetail, setQuestStatus, getMaps } from '../tauri'
 import { traderImage } from '../traderImages'
 import { QuestBoardView } from '../components/QuestBoardView'
+import { ObjectiveChecklist } from '../components/ObjectiveChecklist'
 import { traderDisplayName } from '../traderMeta'
 import type { GraphEdge, GraphNode, ItemRef, MapInfo } from '../types'
 import {
@@ -2882,17 +2883,12 @@ export function QuestGraphPage() {
 
                 {detail.objectives?.length > 0 && (
                   <div className="mt-3">
-                    <div className="text-[13px] text-muted mb-1">目标</div>
-                    <ul className="space-y-1.5 text-[14px] text-[#c9d1d9]">
-                      {detail.objectives.map((o, i) => (
-                        <li key={i} className="leading-snug">
-                          - {o.description}
-                          {o.count != null && o.count > 0 && (
-                            <span className="text-amber">（{o.count}）</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
+                    <ObjectiveChecklist
+                      questId={detail.id}
+                      objectives={detail.objectives}
+                      showHeader
+                      gap="space-y-1.5"
+                    />
                   </div>
                 )}
 

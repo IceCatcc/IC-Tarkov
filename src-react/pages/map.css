@@ -99,6 +99,55 @@ div.leaflet-overlay-pane > svg.leaflet-zoom-animated > g > path.off-level {
     color: #c9d1d9;
     line-height: 1.5;
 }
+/* 同坐标合并了多个目标时，弹窗里逐条列出、各自可勾选 */
+.map-popup-checks {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+}
+.map-popup-checks .map-popup-check {
+    margin-top: 0;
+}
+/* 任务目标弹窗：勾选框 + 目标描述一行，整行不加外框（只有勾选框本身有边框） */
+.map-popup-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 6px;
+    padding: 0;
+    width: 100%;
+    font-size: 15px;
+    color: #c9d1d9;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+.map-popup-check:hover .map-popup-check-text {
+    color: #e6edf3;
+}
+.map-popup-check-box {
+    flex: 0 0 auto;
+    /* 描述换行时勾选框与首行对齐 */
+    margin-top: 2px;
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    line-height: 1;
+    color: #fff;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+}
+.map-popup-check.is-done .map-popup-check-box {
+    background: #2ea043;
+    border-color: #2ea043;
+}
+.map-popup-check.is-done .map-popup-check-text {
+    color: #8b949e;
+}
 /* 撤离要求：物品类（图片 + 中文名），对齐任务 tooltip 风格 */
 .req-item {
     display: inline-flex;
@@ -296,6 +345,13 @@ img.extract-req-icon {
     background: transparent;
     border: none;
     box-shadow: none;
+}
+/* 已勾选完成的目标：图标整体半透明 + 任务名删除线（与任务卡片里的勾选同一语义） */
+.quest-obj-marker.is-done {
+    opacity: 0.3;
+}
+.quest-obj-marker.is-done .quest-obj-name {
+    text-decoration: line-through;
 }
 .quest-obj-marker img {
     width: 30px;

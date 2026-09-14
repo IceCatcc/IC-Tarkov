@@ -72,6 +72,13 @@ export async function initTauri(): Promise<UnlistenFn> {
       useStore.getState().setCollectedItems(e.payload)
     }),
   )
+  // 同步：任务目标的手动打勾进度（对端改动后同步过来，本机操作的后端回声为同值）
+  track(
+    await listen<{ questId: string; objectivesDone: string[] }>('objective-changed', (e) => {
+      const p = e.payload
+      if (p?.questId) useStore.getState().setObjectivesDone(p.questId, p.objectivesDone ?? [])
+    }),
+  )
   track(
     await listen<{ profile: PlayerProfile; mode?: string }>('profile-changed', (e) => {
       const p = e.payload
@@ -239,6 +246,24 @@ export async function setQuestStatus(
   }).then((r) => {
     // 已连接电脑端时，把操作反向同步过去（电脑端执行后经事件广播回所有端）
     sendLanMsg({ type: 'set-quest-status', questId, action })
+    return r
+  })
+}
+
+/** 某任务里已手动打勾完成的目标 id */
+export async function getObjectivesDone(questId: string): Promise<string[]> {
+  return await invoke<string[]>('get_objectives_done', { questId })
+}
+
+/** 单独勾选 / 取消勾选某个任务目标（不改变任务本身的接取 / 完成状态），返回更新后的全集 */
+export async function setObjectiveStatus(
+  questId: string,
+  objectiveId: string,
+  done: boolean,
+): Promise<string[]> {
+  return await invoke<string[]>('set_objective_status', { questId, objectiveId, done }).then((r) => {
+    // 已连接电脑端时反向同步过去（电脑端执行后经事件广播回所有端）
+    sendLanMsg({ type: 'set-objective-status', questId, objectiveId, done })
     return r
   })
 }

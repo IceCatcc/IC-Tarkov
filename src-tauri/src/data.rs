@@ -39,6 +39,8 @@ pub struct ItemPayload {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ObjectivePayload {
+    /// 目标 id：用于单独标记该目标是否完成（持久化在对应模式的任务条目里）
+    pub id: String,
     pub description: String,
     pub items: Vec<ItemPayload>,
 }
@@ -223,6 +225,7 @@ fn objectives_payload(n: &dataset::QuestNode) -> Vec<ObjectivePayload> {
     n.objectives
         .iter()
         .map(|o| ObjectivePayload {
+            id: o.id.clone(),
             description: o.description.clone(),
             items: o
                 .items

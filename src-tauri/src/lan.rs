@@ -220,6 +220,8 @@ pub fn setup_lan(app: &mut tauri::App) {
         // 手机端需同步：收藏进度变化、档案变化（电脑端手动改任务状态本就走 quest-event）
         "collected-changed",
         "profile-changed",
+        // 手动勾选任务目标的进度变化
+        "objective-changed",
     ] {
         let tx2 = tx.clone();
         let ev_name = ev.to_string();
@@ -395,6 +397,24 @@ async fn handle_socket(socket: WebSocket, ctx: Arc<ServerCtx>) {
                                     {
                                         eprintln!("[lan] set-quest-status 失败：{e}");
                                     }
+                                }
+                            }
+                            // 手机端反向同步：手动勾选任务目标（执行后经 objective-changed 广播）
+                            Some("set-objective-status") => {
+                                let qid = v
+                                    .get("questId")
+                                    .and_then(|x| x.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let oid = v
+                                    .get("objectiveId")
+                                    .and_then(|x| x.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let done = v.get("done").and_then(|x| x.as_bool()).unwrap_or(false);
+                                if !qid.is_empty() && !oid.is_empty() {
+                                    // 命令本身不会失败（返回更新后的全集）；执行后经 objective-changed 广播
+                                    crate::set_objective_status(app.clone(), qid, oid, done);
                                 }
                             }
                             // 手机端反向同步：收藏品标记（执行后经 collected-changed 广播）

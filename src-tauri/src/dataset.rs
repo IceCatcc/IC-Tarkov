@@ -6,7 +6,7 @@
 //! map-bosses.json。数据更新只需替换缓存里的原始 JSON 后重新 build 一次。
 
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -37,6 +37,8 @@ pub struct ItemRef {
 
 #[derive(Clone)]
 pub struct Objective {
+    /// 目标 id（上游 objective id；缺失时用「任务id#序号」兜底），用于单独标记目标完成
+    pub id: String,
     pub description: String,
     pub items: Vec<ItemRef>,
 }
@@ -615,11 +617,18 @@ fn build_one(
         .collect();
 
     let mut objectives: Vec<Objective> = Vec::new();
-    for o in arr(t, "objectives") {
-        let desc = tz(s(o, "description").unwrap_or(""));
+    for (oi, o) in arr(t, "objectives").iter().enumerate() {
+        // 上游 objective 的 description 字段值即目标 id（中文化靠 zh 映射表按该 id 查）
+        let raw_desc = s(o, "description").unwrap_or("");
+        let desc = tz(raw_desc);
         if desc.is_empty() {
             continue;
         }
+        let oid = match s(o, "id") {
+            Some(x) if !x.is_empty() => x.to_string(),
+            _ if !raw_desc.is_empty() => raw_desc.to_string(),
+            _ => format!("{qid}#{oi}"),
+        };
         let count = o.get("count").and_then(|v| v.as_i64());
         // 目标级「必须战局内找到」标记（foundInRaid），上传类任务据此提示玩家
         let found_in_raid = o.get("foundInRaid").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -634,7 +643,11 @@ fn build_one(
                 category: raw.item_types.get(iid).cloned(),
             })
             .collect();
-        objectives.push(Objective { description: desc, items });
+        objectives.push(Objective {
+            id: oid,
+            description: desc,
+            items,
+        });
     }
 
     // 涉及地图：官方 map 字段 + 目标/奖励文本
@@ -1110,6 +1123,27 @@ fn build_markers(raw: &Raw, map_meta: &HashMap<String, MapEntry>) -> Value {
 
 // ---------------- 任务区域 ----------------
 
+/// 往目标的 zone 列表里追加一个点：同一地图里的重复 zone 只保留第一个。
+/// 上游同一个 zone 常有 day/night 两份副本（NN_MERGE 后 nn 相同，如工厂），坐标也可能有
+/// 微小出入，只按坐标去重会漏；带 zone id 时按 id 去重，否则退回按坐标。
+/// 不去重会在地图上画出两个图标——勾选/取消时它们又一起变，看着像「同一目标画了两份」。
+fn push_zone_dedup(zones: &mut Vec<Value>, seen: &mut HashSet<String>, v: Value) {
+    let key = match (
+        v.get("nn").and_then(|x| x.as_str()),
+        v.get("zid").and_then(|x| x.as_str()),
+    ) {
+        (Some(nn), Some(zid)) if !zid.is_empty() => format!("{nn}|{zid}"),
+        (Some(nn), _) => match v.get("position") {
+            Some(p) => format!("{nn}|{p}"),
+            None => String::new(),
+        },
+        _ => String::new(),
+    };
+    if key.is_empty() || seen.insert(key) {
+        zones.push(v);
+    }
+}
+
 fn build_zones(raw: &Raw) -> Value {
     let mut name_ids: HashMap<String, String> = HashMap::new();
     for m in raw.maps.values() {
@@ -1142,8 +1176,9 @@ fn build_zones(raw: &Raw) -> Value {
     let mut tasks_out = Map::new();
     for (tid, t) in &raw.tasks_regular {
         let mut objs_out: Vec<Value> = Vec::new();
-        for o in arr(t, "objectives") {
+        for (oi, o) in arr(t, "objectives").iter().enumerate() {
             let mut zones: Vec<Value> = Vec::new();
+            let mut seen_zones: HashSet<String> = HashSet::new();
             for z in arr(o, "zones") {
                 let Some(znn) = s(z, "map").and_then(&nn_of_loc).map(|n| merge(&n)) else {
                     continue;
@@ -1172,13 +1207,19 @@ fn build_zones(raw: &Raw) -> Value {
                         ];
                     }
                 }
-                zones.push(serde_json::json!({
-                    "nn": znn,
-                    "position": pos_val(Some(position)),
-                    "top": num(z.get("top")),
-                    "bottom": num(z.get("bottom")),
-                    "outline": Value::Array(outline),
-                }));
+                push_zone_dedup(
+                    &mut zones,
+                    &mut seen_zones,
+                    serde_json::json!({
+                        "nn": znn,
+                        // 上游 zone id：day/night 副本共用同一个 id，去重靠它
+                        "zid": s(z, "id").unwrap_or(""),
+                        "position": pos_val(Some(position)),
+                        "top": num(z.get("top")),
+                        "bottom": num(z.get("bottom")),
+                        "outline": Value::Array(outline),
+                    }),
+                );
             }
             // possibleLocations：另一批目标位置来源（如『在 X 找到物品』的多个可能刷新点）。
             // 结构 {map, positions:[{x,y,z},...]}，map 为地图 id。每个 position 派生为一个 zone 点。
@@ -1190,13 +1231,17 @@ fn build_zones(raw: &Raw) -> Value {
                     if !p.is_object() {
                         continue;
                     }
-                    zones.push(serde_json::json!({
-                        "nn": plnn,
-                        "position": pos_val(Some(p)),
-                        "top": Value::Null,
-                        "bottom": Value::Null,
-                        "outline": Value::Array(vec![]),
-                    }));
+                    push_zone_dedup(
+                        &mut zones,
+                        &mut seen_zones,
+                        serde_json::json!({
+                            "nn": plnn,
+                            "position": pos_val(Some(p)),
+                            "top": Value::Null,
+                            "bottom": Value::Null,
+                            "outline": Value::Array(vec![]),
+                        }),
+                    );
                 }
             }
             let mut obj_maps: Vec<String> = Vec::new();
@@ -1219,7 +1264,17 @@ fn build_zones(raw: &Raw) -> Value {
                 continue;
             }
             let desc = s(o, "description").unwrap_or("");
+            // 目标 id（与 dataset::Objective.id 同源）：地图弹窗据此单独标记该目标完成
+            let oid = match s(o, "id") {
+                Some(x) if !x.is_empty() => x.to_string(),
+                _ if !desc.is_empty() => desc.to_string(),
+                _ => format!("{tid}#{oi}"),
+            };
             objs_out.push(serde_json::json!({
+                "id": oid,
+                // 目标在任务 objectives 里的原始序号：地图图标上显示「#n」用，
+                // 与任务详情里的目标顺序一致（objs_out 会跳过无坐标的目标，不能直接用它下标）
+                "idx": oi,
                 "type": s(o, "type").map(|v| Value::String(v.to_string())).unwrap_or(Value::Null),
                 "optional": o.get("optional").and_then(|v| v.as_bool()).unwrap_or(false),
                 "descZh": raw.zh_tasks.get(desc).cloned().map(Value::String).unwrap_or(Value::Null),

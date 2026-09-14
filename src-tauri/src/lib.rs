@@ -620,6 +620,11 @@ fn get_player_quests(app: tauri::AppHandle) -> Vec<store::PlayerQuest> {
     let mut out: Vec<store::PlayerQuest> = Vec::new();
     binding.with_view(|md| {
         for (qid, entry) in &md.quests {
+            // 只有「目标打勾」记录、既未接取也未完成的条目不算玩家任务：
+            // 勾选未接取任务的目标会在 store 里留下条目，不能让它冒到任务列表和地图上
+            if entry.accepted_at.is_none() && entry.completed_at.is_none() {
+                continue;
+            }
             let info = data::resolve_accept(qid);
             let status = if entry.completed_at.is_some() {
                 "completed"
@@ -690,6 +695,56 @@ fn set_item_collected(app: tauri::AppHandle, item_id: String, collected: bool) -
     // 广播给同步的手机端（桌面前端自身已就地更新，重复设置同值无害）
     let _ = app.emit("collected-changed", &all);
     all
+}
+
+/// 某任务里已手动打勾完成的目标 id（随模式持久化）
+#[tauri::command]
+fn get_objectives_done(app: tauri::AppHandle, quest_id: String) -> Vec<String> {
+    let binding = app.state::<AppState>();
+    binding.with_view(|md| {
+        md.quests
+            .get(&quest_id)
+            .map(|e| e.objectives_done.iter().cloned().collect())
+            .unwrap_or_default()
+    })
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ObjectiveChanged {
+    quest_id: String,
+    objectives_done: Vec<String>,
+}
+
+/// 单独勾选 / 取消勾选某个任务目标，立即落盘，返回该任务更新后的已完成目标 id 列表。
+/// 只影响玩家自己记录的进度，不会改变任务的接取/完成状态。
+#[tauri::command]
+fn set_objective_status(
+    app: tauri::AppHandle,
+    quest_id: String,
+    objective_id: String,
+    done: bool,
+) -> Vec<String> {
+    let binding = app.state::<AppState>();
+    let ids = binding.with_view(|md| {
+        let e = md.quests.entry(quest_id.clone()).or_default();
+        if done {
+            e.objectives_done.insert(objective_id);
+        } else {
+            e.objectives_done.remove(&objective_id);
+        }
+        e.objectives_done.iter().cloned().collect::<Vec<String>>()
+    });
+    persist::save_all_from(&app);
+    // 广播给同步的手机端（本机前端已就地更新，回声为同值无害）
+    let _ = app.emit(
+        "objective-changed",
+        ObjectiveChanged {
+            quest_id,
+            objectives_done: ids.clone(),
+        },
+    );
+    ids
 }
 
 #[derive(serde::Serialize)]
@@ -790,10 +845,11 @@ fn set_quest_status(
                 });
             }
             "reset" => {
-                // 重置为未接取：清掉接取/完成时间，并取消该任务的手动解锁标记
+                // 重置为未接取：清掉接取/完成时间、目标打勾，并取消该任务的手动解锁标记
                 if let Some(e) = md.quests.get_mut(&quest_id) {
                     e.accepted_at = None;
                     e.completed_at = None;
+                    e.objectives_done.clear();
                 }
                 md.unlocked.remove(&quest_id);
                 md.push_activity(store::ActivityRow {
@@ -818,6 +874,10 @@ fn set_quest_status(
     let mut out: Vec<store::PlayerQuest> = Vec::new();
     let unlocked_vec = binding2.with_view(|md| {
         for (qid, entry) in &md.quests {
+            // 同上：只有目标打勾记录的条目不进入玩家任务列表
+            if entry.accepted_at.is_none() && entry.completed_at.is_none() {
+                continue;
+            }
             let info = data::resolve_accept(qid);
             let status = if entry.completed_at.is_some() {
                 "completed"
@@ -1413,6 +1473,8 @@ pub fn run() {
                     get_collected_items,
                     set_item_collected,
                     set_quest_status,
+                    get_objectives_done,
+                    set_objective_status,
                     get_data_status,
                     refresh_game_data,
                     get_map_markers,
@@ -1462,6 +1524,8 @@ pub fn run() {
                     get_collected_items,
                     set_item_collected,
                     set_quest_status,
+                    get_objectives_done,
+                    set_objective_status,
                     get_data_status,
                     refresh_game_data,
                     get_map_markers,

@@ -19,6 +19,9 @@ pub struct ActivityRow {
 pub struct QuestEntry {
     pub accepted_at: Option<String>,
     pub completed_at: Option<String>,
+    /// 已单独勾选完成的目标 id（objective id）；仅用于 UI 打勾，不影响任务状态判定
+    #[serde(default)]
+    pub objectives_done: HashSet<String>,
 }
 
 #[derive(Clone, serde::Serialize)]
