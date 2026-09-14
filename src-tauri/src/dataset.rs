@@ -751,6 +751,55 @@ fn zh_of(raw: &Raw, candidates: &[Option<&str>]) -> Option<String> {
     None
 }
 
+/// 开关 / 拉杆（switches）的中文名。
+/// 上游 zh_maps 里 switch 条目存的其实是「英文可读名」（如 Med Elevator Power Button），
+/// 没有中文；这里按那个英文名补一份手工翻译。查不到时保留英文原名（新开关也不会变「未命名」）。
+const SWITCH_ZH: &[(&str, &str)] = &[
+    ("ZB-013 Power Switch", "ZB-013 电源开关"),
+    ("Lightkeeper Switch", "灯塔守护者开关"),
+    ("Bunker Hermetic Door Power Switch", "地堡密封门电源开关"),
+    ("D-2 Power Switch", "D-2 电源开关"),
+    ("D-2 Door Switch", "D-2 门开关"),
+    ("Mall Main Power Switch", "商场主电源开关"),
+    ("Non-Kiba Alarms Switch", "非 Kiba 警报开关"),
+    ("Alarms Switch", "警报开关"),
+    ("Alarm Switch", "警报开关"),
+    ("Saferoom Exfil Switch", "保险室撤离开关"),
+    ("Saferoom Exfil Unlock Switch", "保险室撤离解锁开关"),
+    ("Object 14 Container Switch", "14 号设施集装箱开关"),
+    ("Med Elevator Power Button", "医疗区电梯电源按钮"),
+    ("Med Elevator Call Button", "医疗区电梯呼叫按钮"),
+    ("Med Elevator Extract Button", "医疗区电梯撤离按钮"),
+    ("Main Elevator Power Button", "主电梯电源按钮"),
+    ("Main Elevator Call Button", "主电梯呼叫按钮"),
+    ("Main Elevator Extract Button", "主电梯撤离按钮"),
+    ("Cargo Elevator Power Button", "货运电梯电源按钮"),
+    ("Cargo Elevator Call Button", "货运电梯呼叫按钮"),
+    ("Cargo Elevator Extract Button", "货运电梯撤离按钮"),
+    ("Hangar Gate Switch", "机库闸门开关"),
+    ("Parking Gate Switch", "停车场闸门开关"),
+    ("Water Level Switch", "水位开关"),
+    ("Sewage Conduit Pump Button", "污水管道水泵按钮"),
+    ("Containment Block Power Switch", "隔离区电源开关"),
+    ("Sealed Door", "密封门"),
+    ("Fire Trap Switch", "火焰陷阱开关"),
+    ("Toxic Pool Trap Switch", "毒池陷阱开关"),
+    ("Toxic Puddle Trap Switch", "毒水洼陷阱开关"),
+    ("Shotgun Trap Switch", "霰弹枪陷阱开关"),
+    ("Steam Trap Switch", "蒸汽陷阱开关"),
+];
+
+fn switch_zh(name_en: &str) -> Option<String> {
+    let key = name_en.trim();
+    if key.is_empty() {
+        return None;
+    }
+    SWITCH_ZH
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        .map(|(_, v)| v.to_string())
+}
+
 fn entry_val(e: &Value, raw: &Raw) -> Value {
     let name = s(e, "name");
     let name_zh = name.and_then(|n| zh_of(raw, &[Some(n)]));
@@ -1006,9 +1055,26 @@ fn build_markers(raw: &Raw, map_meta: &HashMap<String, MapEntry>) -> Value {
             .map(|l| {
                 let mut d = entry_val(l, raw);
                 if let Some(o) = d.as_object_mut() {
+                    // 锁本身不带名称（只有 lockType + 钥匙 id），直接用钥匙的中文名命名：
+                    // 前端按名称把「同一把钥匙的几个门」归为一组，此前全都显示成「未命名」
+                    if let Some(kid) = s(l, "key") {
+                        let kn = item_name(raw, kid);
+                        if o.get("nameZh").map(|v| v.is_null()).unwrap_or(true) {
+                            o.insert("nameZh".into(), Value::String(kn.clone()));
+                        }
+                        if o.get("name").map(|v| v.is_null()).unwrap_or(true) {
+                            o.insert("name".into(), Value::String(kn));
+                        }
+                    }
                     o.insert(
                         "keyName".into(),
                         s(l, "key").map(|v| Value::String(v.to_string())).unwrap_or(Value::Null),
+                    );
+                    o.insert(
+                        "lockType".into(),
+                        s(l, "lockType")
+                            .map(|v| Value::String(v.to_string()))
+                            .unwrap_or(Value::Null),
                     );
                 }
                 d
@@ -1064,7 +1130,24 @@ fn build_markers(raw: &Raw, map_meta: &HashMap<String, MapEntry>) -> Value {
             out.insert("lootContainers".into(), Value::Array(containers));
         }
 
-        let switches: Vec<Value> = arr(m, "switches").iter().map(|s2| entry_val(s2, raw)).collect();
+        let switches: Vec<Value> = arr(m, "switches")
+            .iter()
+            .map(|s2| {
+                let mut d = entry_val(s2, raw);
+                // switch 的中文映射表里存的是英文可读名，再套一层手工翻译表
+                if let Some(o) = d.as_object_mut() {
+                    let key = o
+                        .get("nameZh")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| o.get("name").and_then(|v| v.as_str()))
+                        .map(|x| x.to_string());
+                    if let Some(k) = key.and_then(|k| switch_zh(&k)) {
+                        o.insert("nameZh".into(), Value::String(k));
+                    }
+                }
+                d
+            })
+            .collect();
         if !switches.is_empty() {
             out.insert("switches".into(), Value::Array(switches));
         }
