@@ -82,6 +82,9 @@ pub struct QuestNode {
     pub modes: Vec<String>,
     /// 转生（Prestige）等级：该任务是第 N 次转生的门槛任务时为 Some(N)
     pub prestige_level: Option<u32>,
+    /// 互斥任务：这些任务「已完成」时本任务即失败（上游 failConditions 里的 taskStatus/complete，
+    /// 如海关的「大客户」「化学品-4」三选一，交了其中一个另外两个就失败）
+    pub fail_on_done: Vec<String>,
 }
 
 /// 全部派生数据；整体不可变，更新时整体替换
@@ -98,6 +101,8 @@ pub struct Store {
     pub bosses: Value,
     /// 地图骨架（随包分发，运行时补中文名）
     pub skeleton: Value,
+    /// 反向索引：任务 id -> 「因它完成而失败」的任务 id 列表（互斥任务，由 fail_on_done 反推）
+    pub fail_map: HashMap<String, Vec<String>>,
 }
 
 impl Store {
@@ -110,6 +115,7 @@ impl Store {
             zones: Value::Object(Map::new()),
             bosses: Value::Object(Map::new()),
             skeleton: Value::Object(Map::new()),
+            fail_map: HashMap::new(),
         }
     }
 }
@@ -688,6 +694,27 @@ fn build_one(
         .unwrap_or("")
         .to_string();
 
+    // 互斥任务：failConditions 里「某任务达到 complete」= 交了那个任务本任务就失败
+    let mut fail_on_done: Vec<String> = Vec::new();
+    for fc in arr(t, "failConditions") {
+        if s(fc, "type") != Some("taskStatus") {
+            continue;
+        }
+        let completed_cond = fc
+            .get("status")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().any(|x| x.as_str() == Some("complete")))
+            .unwrap_or(false);
+        if !completed_cond {
+            continue;
+        }
+        if let Some(other) = s(fc, "task") {
+            if !other.is_empty() && !fail_on_done.iter().any(|x| x == other) {
+                fail_on_done.push(other.to_string());
+            }
+        }
+    }
+
     QuestNode {
         name: tz(s(t, "name").unwrap_or("")),
         trader_id: trader_id.clone(),
@@ -707,6 +734,7 @@ fn build_one(
         special: SPECIAL_TRADERS.contains(&trader_norm.as_str()),
         modes: modes.to_vec(),
         prestige_level: prestige_of.get(qid).copied(),
+        fail_on_done,
     }
 }
 
@@ -1414,6 +1442,16 @@ pub fn build_from_dir(dir: &Path, skeleton: Option<&Path>) -> Result<Store, Stri
     let zones = build_zones(&raw);
     let bosses = build_bosses(&raw);
     let skeleton = build_skeleton(skeleton, &map_meta);
+    // 互斥关系反向索引：别人完成了会让谁失败
+    let mut fail_map: HashMap<String, Vec<String>> = HashMap::new();
+    for (qid, n) in &quests {
+        for other in &n.fail_on_done {
+            fail_map
+                .entry(other.clone())
+                .or_default()
+                .push(qid.clone());
+        }
+    }
     Ok(Store {
         quests,
         maps: map_meta,
@@ -1422,6 +1460,7 @@ pub fn build_from_dir(dir: &Path, skeleton: Option<&Path>) -> Result<Store, Stri
         zones,
         bosses,
         skeleton,
+        fail_map,
     })
 }
 

@@ -577,6 +577,11 @@ export const useStore = create<AppState>((set, get) => ({
         text: completeText,
         questId: e.questId,
       })
+      // 交了一个互斥任务（多选一）后，同组其它任务会变成「已失败」：
+      // 这个派生状态只有后端算得准，就地更新会漏，这里补一次全量刷新
+      void getPlayerQuests()
+        .then((qs) => useStore.setState({ playerQuests: qs }))
+        .catch(() => {})
       return { playerQuests, activities: activities.slice(0, 20) }
     }),
 

@@ -1,5 +1,6 @@
 // 与 src-tauri 后端事件/命令对应的前端类型定义（Rust 侧 rename_all = "camelCase"）
-export type QuestStatus = 'in_progress' | 'completed'
+/** 任务状态：进行中 / 已完成 / 已失败（互斥任务多选一，别人交了本任务即失败） */
+export type QuestStatus = 'in_progress' | 'completed' | 'failed'
 
 /** 全局通知（顶部居中堆叠，3s 自动关闭） */
 export type ToastKind = 'info' | 'accept' | 'done' | 'map'

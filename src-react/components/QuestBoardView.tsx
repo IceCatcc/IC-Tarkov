@@ -5,7 +5,7 @@ import { traderImage } from '../traderImages'
 import { TRADERS, TRADER_ZH, traderDisplayName } from '../traderMeta'
 import { llLabel, questLoyaltyLevel, type GraphNode, type ItemRef } from '../types'
 
-type ItemState = 'completed' | 'in_progress' | 'available' | 'locked'
+type ItemState = 'completed' | 'failed' | 'in_progress' | 'available' | 'locked'
 
 interface BoardItem {
   n: GraphNode
@@ -16,6 +16,7 @@ interface BoardItem {
 
 const STATE_CHIP: Record<ItemState, string> = {
   completed: 'bg-ink-700/50 border-line/50 text-muted',
+  failed: 'bg-[#2b1416]/60 border-[#f85149]/60 text-[#f85149]',
   in_progress:
     'bg-blue border-blue text-black font-medium animate-pill-ring motion-reduce:animate-none',
   available: 'bg-amber/20 border-amber/60 text-[#d4a174]',
@@ -23,6 +24,7 @@ const STATE_CHIP: Record<ItemState, string> = {
 }
 const STATE_TEXT: Record<ItemState, string> = {
   completed: '已完成',
+  failed: '已失败',
   in_progress: '进行中',
   available: '待接取',
   locked: '未解锁',
@@ -66,7 +68,7 @@ export function QuestBoardView() {
 
   const items = useMemo<BoardItem[]>(() => {
     if (!graph) return []
-    const statusOf = new Map<string, 'in_progress' | 'completed'>()
+    const statusOf = new Map<string, 'in_progress' | 'completed' | 'failed'>()
     const completed = new Set<string>()
     for (const q of playerQuests) {
       statusOf.set(q.questId, q.status)
@@ -96,6 +98,7 @@ export function QuestBoardView() {
       const st = statusOf.get(n.id)
       let state: ItemState = 'locked'
       if (st === 'completed') state = 'completed'
+      else if (st === 'failed') state = 'failed'
       else if (st === 'in_progress') state = 'in_progress'
       else if (unlocked.has(n.id) || prereqsOf(n).every((p) => completed.has(p))) state = 'available'
       const preReqs = prereqsOf(n).map((p) => ({

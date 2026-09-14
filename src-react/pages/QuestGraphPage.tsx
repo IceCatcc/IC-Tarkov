@@ -49,7 +49,7 @@ const BAND_X = 78 // 网格整体右移量：左侧为外置商人头像的固�
 const TOP_GAP = 14 // 泳道顶边到第一行卡片的间距
 const CHAIN_MARGIN = 168 // 左区（独立任务）与右侧任务链区之间的间距：留给链行标签
 
-type NodeState = 'completed' | 'in_progress' | 'available' | 'locked'
+type NodeState = 'completed' | 'failed' | 'in_progress' | 'available' | 'locked'
 
 
 // 视口边界留白（屏幕像素）
@@ -85,6 +85,8 @@ function clampView(
 const STATE_STYLE: Record<NodeState, { bg: string; border: string; text: string }> = {
   // 已完成：贴近画布底色、低饱和低对比的淡绿，边框与文字都压暗，弱化存在感
   completed: { bg: '#12161a', border: '#2a3a31', text: '#6f7f77' },
+  // 已失败：互斥任务（多选一）已提交，本任务无法再交——暗红描边区分于已完成
+  failed: { bg: '#1a1113', border: '#7d3238', text: '#e08b90' },
   in_progress: { bg: '#0e2438', border: '#58a6ff', text: '#a8d1ff' },
   // 待接取：底色与文字保持黄色系，描边改用中性浅灰——
   // 黄色描边会与「任务链高亮」的琥珀色撞色，难以区分
@@ -570,7 +572,7 @@ export function QuestGraphPage() {
 
   // 玩家状态
   const { statusMap, completedSet, unlockedSet } = useMemo(() => {
-    const sm: Record<string, 'in_progress' | 'completed'> = {}
+    const sm: Record<string, 'in_progress' | 'completed' | 'failed'> = {}
     const cs = new Set<string>()
     const us = new Set<string>(unlockedQuests)
     for (const q of playerQuests) {
@@ -590,6 +592,7 @@ export function QuestGraphPage() {
   const classify = (n: GraphNode): NodeState => {
     const st = statusMap[n.id]
     if (st === 'completed') return 'completed'
+    if (st === 'failed') return 'failed'
     if (st === 'in_progress') return 'in_progress'
     if (unlockedSet.has(n.id) || prereqsOf(n).every((p) => completedSet.has(p)))
       return 'available'
@@ -2505,11 +2508,13 @@ export function QuestGraphPage() {
         mctx.fillStyle =
           st === 'completed'
             ? '#2f4438'
-            : st === 'in_progress'
-              ? '#58a6ff'
-              : st === 'available'
-                ? '#ef9f27'
-                : '#3d444d'
+            : st === 'failed'
+              ? '#7d3238'
+              : st === 'in_progress'
+                ? '#58a6ff'
+                : st === 'available'
+                  ? '#ef9f27'
+                  : '#3d444d'
         mctx.fillRect(p.x * k, p.y * k, Math.max(2, NODE_W * k), Math.max(1.5, NODE_H * k * 0.55))
       }
       mctx.globalAlpha = 1
@@ -2640,6 +2645,7 @@ export function QuestGraphPage() {
         {/* 图例：左下角浮动显示 */}
         <div className="absolute bottom-3 left-3 z-40 flex flex-col gap-1 px-2.5 py-2 rounded-md bg-ink-800/85 border border-line shadow-lg backdrop-blur-sm text-[13px] text-muted pointer-events-none">
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#12161a] border border-[#2a3a31]" />已完成</span>
+          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#1a1113] border border-[#7d3238]" />已失败</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#0e2438] border border-[#58a6ff]" />进行中</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#231b0d] border border-[#9aa5b1]" />待接取</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#1f2730] border border-[#6b7682]" />后续解锁</span>
@@ -2794,6 +2800,18 @@ export function QuestGraphPage() {
                       手动重置
                     </button>
                   )}
+                  {selStatus === 'failed' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onSetStatus(detail.id, 'complete')
+                      }}
+                      className="text-[12px] text-[#2ea043] hover:underline mt-1.5 shrink-0"
+                      title="互斥任务已提交导致本任务判定失败；若实际已完成可手动标记"
+                    >
+                      手动完成
+                    </button>
+                  )}
                 </div>
                 <div className="text-[13px] text-muted mt-1.5 flex items-center gap-1.5 flex-wrap">
                   {selAvatar && (
@@ -2809,11 +2827,13 @@ export function QuestGraphPage() {
                     {` · ${
                       selStatus === 'completed'
                         ? '已完成'
-                        : selStatus === 'in_progress'
-                        ? '进行中'
-                        : selStatus === 'available'
-                        ? '可接取'
-                        : '未解锁'
+                        : selStatus === 'failed'
+                          ? '已失败（互斥任务已提交）'
+                          : selStatus === 'in_progress'
+                            ? '进行中'
+                            : selStatus === 'available'
+                              ? '可接取'
+                              : '未解锁'
                     }`}
                   </span>
                   {detail.prestigeLevel != null && (

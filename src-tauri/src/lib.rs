@@ -12,7 +12,7 @@ mod watcher;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod lan;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
@@ -619,6 +619,14 @@ fn get_player_quests(app: tauri::AppHandle) -> Vec<store::PlayerQuest> {
     let binding = app.state::<AppState>();
     let mut out: Vec<store::PlayerQuest> = Vec::new();
     binding.with_view(|md| {
+        // 互斥任务（多选一）：先算出因别人完成而失败的任务，避免它们仍被当成进行中
+        let completed: HashSet<String> = md
+            .quests
+            .iter()
+            .filter(|(_, e)| e.completed_at.is_some())
+            .map(|(k, _)| k.clone())
+            .collect();
+        let failed = data::failed_quests(&completed);
         for (qid, entry) in &md.quests {
             // 只有「目标打勾」记录、既未接取也未完成的条目不算玩家任务：
             // 勾选未接取任务的目标会在 store 里留下条目，不能让它冒到任务列表和地图上
@@ -628,6 +636,8 @@ fn get_player_quests(app: tauri::AppHandle) -> Vec<store::PlayerQuest> {
             let info = data::resolve_accept(qid);
             let status = if entry.completed_at.is_some() {
                 "completed"
+            } else if failed.contains(qid) {
+                "failed"
             } else {
                 "in_progress"
             };
@@ -873,6 +883,14 @@ fn set_quest_status(
     let binding2 = app.state::<AppState>();
     let mut out: Vec<store::PlayerQuest> = Vec::new();
     let unlocked_vec = binding2.with_view(|md| {
+        // 同上：互斥任务已完成时，本任务状态为 failed
+        let completed: HashSet<String> = md
+            .quests
+            .iter()
+            .filter(|(_, e)| e.completed_at.is_some())
+            .map(|(k, _)| k.clone())
+            .collect();
+        let failed = data::failed_quests(&completed);
         for (qid, entry) in &md.quests {
             // 同上：只有目标打勾记录的条目不进入玩家任务列表
             if entry.accepted_at.is_none() && entry.completed_at.is_none() {
@@ -881,6 +899,8 @@ fn set_quest_status(
             let info = data::resolve_accept(qid);
             let status = if entry.completed_at.is_some() {
                 "completed"
+            } else if failed.contains(qid) {
+                "failed"
             } else {
                 "in_progress"
             };

@@ -20,6 +20,7 @@ export function QuestCard({
   onToggleTrack?: () => void
 }) {
   const completed = quest.status === 'completed'
+  const failed = quest.status === 'failed'
   const avatar = traderImage(quest.traderId)
   // 商人统一展示中文名
   const traderLabel = traderDisplayName(quest.traderId, quest.traderName)
@@ -85,10 +86,13 @@ export function QuestCard({
               className={`px-2 py-0.5 rounded-full text-[13px] border ${
                 completed
                   ? 'bg-[#1b1f24] border-done text-muted'
-                  : 'bg-blue-soft border-blue text-blue'
+                  : failed
+                    ? 'bg-[#2b1416] border-[#f85149]/70 text-[#f85149]'
+                    : 'bg-blue-soft border-blue text-blue'
               }`}
+              title={failed ? '互斥任务已提交，本任务已失败' : undefined}
             >
-              {completed ? '已完成' : '进行中'}
+              {completed ? '已完成' : failed ? '已失败' : '进行中'}
             </span>
           )}
           {/* 手动改状态：进行中 → 手动完成；已完成 → 手动重置为未接取（排最右） */}

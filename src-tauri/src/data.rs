@@ -320,6 +320,25 @@ pub fn prereqs_closure(quest_id: &str) -> Vec<String> {
     out
 }
 
+/// 互斥任务（多选一）判定：给定「已完成任务 id 集合」，返回因此失败的任务 id 集合。
+/// 例：海关「大客户」「化学品-4」等三选一，交了其中一个，另外两个即失败。
+/// 自身已完成的任务不算失败（手动同时标记时以完成为准）。
+pub fn failed_quests(completed: &HashSet<String>) -> HashSet<String> {
+    let s = store();
+    let mut out = HashSet::new();
+    for (other, failed_list) in s.fail_map.iter() {
+        if !completed.contains(other) {
+            continue;
+        }
+        for qid in failed_list {
+            if !completed.contains(qid) {
+                out.insert(qid.clone());
+            }
+        }
+    }
+    out
+}
+
 /// 全量任务图谱（不含玩家状态，前端按 id 合并）。
 /// 边取 pvp/pve 两套前置的并集：模式专属边的一端节点会被前端按模式隐藏，绘制时自动跳过。
 pub fn get_graph() -> QuestGraph {
