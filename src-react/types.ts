@@ -90,6 +90,14 @@ export interface ItemRef {
   category?: string | null
 }
 
+/** 物品目录项（物品列表用）：id + 中文名 + 主类型 */
+export interface ItemInfo {
+  id: string
+  name: string
+  /** 物品主类型中文名（如「医疗」「钥匙」）；无数据时为 null */
+  category?: string | null
+}
+
 export interface ObjectiveInfo {
   /** 目标 id（上游 objective id）：用于单独标记该目标是否完成 */
   id: string

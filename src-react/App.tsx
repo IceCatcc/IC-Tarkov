@@ -16,6 +16,7 @@ import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { CollectorPage } from './pages/CollectorPage'
+import { ItemsPage } from './pages/ItemsPage'
 import { MapPage } from './pages/MapPage'
 import SettingsModal from './components/SettingsModal'
 import { HelpModal } from './components/HelpModal'
@@ -68,6 +69,11 @@ export default function App() {
   const [questAlive, setQuestAlive] = useState(false)
   useEffect(() => {
     if (page === 'graph') setQuestAlive(true)
+  }, [page])
+  // 物品页 keepAlive：同上（缓存物品目录与任务需求聚合，切走不销毁）
+  const [itemsAlive, setItemsAlive] = useState(false)
+  useEffect(() => {
+    if (page === 'items') setItemsAlive(true)
   }, [page])
   const showSettings = useStore((s) => s.showSettings)
   const setWatcher = useStore((s) => s.setWatcher)
@@ -238,6 +244,11 @@ export default function App() {
         )}
         {page === 'profile' && <ProfilePage />}
         {page === 'collector' && <CollectorPage />}
+        {itemsAlive && (
+          <div className="h-full" style={{ display: page === 'items' ? 'block' : 'none' }}>
+            <ItemsPage />
+          </div>
+        )}
         {mapAlive && (
           <div className="h-full" style={{ display: page === 'map' ? 'block' : 'none' }}>
             <MapPage />

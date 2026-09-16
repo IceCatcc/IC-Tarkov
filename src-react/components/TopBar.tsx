@@ -15,13 +15,14 @@ import { LanConnectModal } from './LanConnectModal'
 const win = getCurrentWindow()
 
 const NAV_ITEMS: {
-  key: 'monitor' | 'graph' | 'profile' | 'map' | 'collector'
+  key: 'monitor' | 'graph' | 'profile' | 'map' | 'collector' | 'items'
   label: string
 }[] = [
   { key: 'monitor', label: '监控' },
   { key: 'map', label: '地图' },
   { key: 'graph', label: '任务' },
   { key: 'collector', label: '收藏家' },
+  { key: 'items', label: '物品' },
   { key: 'profile', label: '档案' },
 ]
 

@@ -339,6 +339,11 @@ pub fn failed_quests(completed: &HashSet<String>) -> HashSet<String> {
     out
 }
 
+/// 全部物品目录（物品列表用），来自数据集 build 阶段从原始数据构建的索引。
+pub fn get_items() -> Vec<dataset::ItemInfo> {
+    store().items.clone()
+}
+
 /// 全量任务图谱（不含玩家状态，前端按 id 合并）。
 /// 边取 pvp/pve 两套前置的并集：模式专属边的一端节点会被前端按模式隐藏，绘制时自动跳过。
 pub fn get_graph() -> QuestGraph {

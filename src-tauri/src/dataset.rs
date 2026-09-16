@@ -6,6 +6,7 @@
 //! map-bosses.json。数据更新只需替换缓存里的原始 JSON 后重新 build 一次。
 
 use serde_json::{Map, Value};
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -31,6 +32,16 @@ pub struct ItemRef {
     pub count: Option<i64>,
     /// 是否必须在战局内拾取（目标级 foundInRaid，收藏家类任务全为 true）
     pub found_in_raid: bool,
+    /// 物品主类型中文名（如「医疗」「钥匙」）；数据包缺少物品类别文件时为空
+    pub category: Option<String>,
+}
+
+/// 物品目录项（物品列表用）：id + 中文名 + 主类型。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemInfo {
+    pub id: String,
+    pub name: String,
     /// 物品主类型中文名（如「医疗」「钥匙」）；数据包缺少物品类别文件时为空
     pub category: Option<String>,
 }
@@ -103,6 +114,8 @@ pub struct Store {
     pub skeleton: Value,
     /// 反向索引：任务 id -> 「因它完成而失败」的任务 id 列表（互斥任务，由 fail_on_done 反推）
     pub fail_map: HashMap<String, Vec<String>>,
+    /// 物品目录（物品列表用）：全部物品 id -> 中文名 / 主类型
+    pub items: Vec<ItemInfo>,
 }
 
 impl Store {
@@ -116,6 +129,7 @@ impl Store {
             bosses: Value::Object(Map::new()),
             skeleton: Value::Object(Map::new()),
             fail_map: HashMap::new(),
+            items: Vec::new(),
         }
     }
 }
@@ -398,6 +412,26 @@ fn build_item_types(doc: &Value) -> HashMap<String, String> {
         }
     }
     out
+}
+
+/// 从原始数据构建物品目录：zh_items（id -> 中文名）为主，item_types（id -> 主类型）补类别。
+/// key 形如 `{itemId} Name`，去掉 ` Name` 后缀还原物品 id。
+fn build_items(raw: &Raw) -> Vec<ItemInfo> {
+    let mut items: Vec<ItemInfo> = Vec::with_capacity(raw.zh_items.len());
+    for (key, name) in &raw.zh_items {
+        let id = key
+            .strip_suffix(" Name")
+            .unwrap_or(key.as_str())
+            .to_string();
+        let category = raw.item_types.get(&id).cloned();
+        items.push(ItemInfo {
+            id,
+            name: name.clone(),
+            category,
+        });
+    }
+    items.sort_by(|a, b| a.name.cmp(&b.name));
+    items
 }
 
 fn trader_name(raw: &Raw, trader_id: &str) -> String {
@@ -1525,6 +1559,7 @@ pub fn build_from_dir(dir: &Path, skeleton: Option<&Path>) -> Result<Store, Stri
     let zones = build_zones(&raw);
     let bosses = build_bosses(&raw);
     let skeleton = build_skeleton(skeleton, &map_meta);
+    let items = build_items(&raw);
     // 互斥关系反向索引：别人完成了会让谁失败
     let mut fail_map: HashMap<String, Vec<String>> = HashMap::new();
     for (qid, n) in &quests {
@@ -1544,6 +1579,7 @@ pub fn build_from_dir(dir: &Path, skeleton: Option<&Path>) -> Result<Store, Stri
         bosses,
         skeleton,
         fail_map,
+        items,
     })
 }
 

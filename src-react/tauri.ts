@@ -31,6 +31,7 @@ import type {
   MapBossesDoc,
   SkeletonDoc,
   DataStatus,
+  ItemInfo,
 } from './types'
 
 /**
@@ -288,6 +289,11 @@ export async function importDataBytes(bytes: Uint8Array): Promise<void> {
 
 export async function getQuestGraph(): Promise<QuestGraph> {
   return await invoke<QuestGraph>('get_quest_graph')
+}
+
+/** 全部物品目录（物品列表用）：id + 中文名 + 主类型 */
+export async function getItems(): Promise<ItemInfo[]> {
+  return await invoke<ItemInfo[]>('get_items')
 }
 
 export async function getQuestDetail(questId: string): Promise<QuestDetail | null> {
