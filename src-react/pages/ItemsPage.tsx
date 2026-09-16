@@ -324,7 +324,7 @@ export function ItemsPage() {
                     onClick={() => setSelected(it)}
                     className="w-full text-left rounded-lg border border-line bg-ink-800 hover:border-amber/60 transition-colors px-4 py-3 flex flex-col items-stretch gap-2 min-w-0"
                   >
-                    {/* 第一行：图标 + 名称（+ 被任务需要数） */}
+                    {/* 第一行：图标 + 名称 */}
                     <div className="flex items-center gap-3 min-w-0">
                       <span className="shrink-0 w-10 h-10 grid place-items-center rounded bg-ink-900/60 overflow-hidden">
                         <img
@@ -335,9 +335,12 @@ export function ItemsPage() {
                           className="w-10 h-10 object-contain"
                         />
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-[15px] text-[#c9d1d9]">
+                      <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-[#e6edf3]">
                         {it.name}
                       </span>
+                    </div>
+                    {/* 第二行：左任务数 + 右类型 */}
+                    <div className="flex items-center gap-2 min-w-0">
                       {demand > 0 && (
                         <span
                           className="shrink-0 text-[11px] px-1.5 py-[1px] rounded-full bg-amber/15 text-[#d4a174] border border-amber/40"
@@ -346,10 +349,7 @@ export function ItemsPage() {
                           {demand} 任务
                         </span>
                       )}
-                    </div>
-                    {/* 第二行：最右显示类型 */}
-                    <div className="flex items-center justify-end">
-                      <span className="text-[11px] px-1.5 py-[1px] rounded border border-line text-muted/80 truncate max-w-full">
+                      <span className="ml-auto text-[11px] px-1.5 py-[1px] rounded border border-line text-muted/80 truncate max-w-full">
                         {catOf(it)}
                       </span>
                     </div>
