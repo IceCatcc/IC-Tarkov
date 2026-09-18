@@ -318,7 +318,7 @@ function QuestBoardCard({
   const traderLabel = traderDisplayName(n.traderId, n.traderName)
   // 所需物品：详情中跨目标去重；详情未就绪时回退到节点自带的上交物品
   const items = detail
-    ? dedupeItems((detail.objectives ?? []).flatMap((o) => o.items ?? []))
+    ? dedupeItems((detail.objectives ?? []).filter((o) => !o.any).flatMap((o) => o.items ?? []))
     : dedupeItems(n.turnIns ?? [])
   const loyalty = profile?.loyalty ?? {}
 

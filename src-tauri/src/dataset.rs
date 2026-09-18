@@ -52,6 +52,11 @@ pub struct Objective {
     pub id: String,
     pub description: String,
     pub items: Vec<ItemRef>,
+    /// 目标所需数量（上游 count，如「任意物品 50 件」的 50）；无数量时为 None
+    pub count: Option<i64>,
+    /// 是否为「任意物品」目标（上游 item 字段为 null，如「上交任意物品 50 件」）：
+    /// 此类目标不计入具体物品需求，前端也不渲染具体物品
+    pub any: bool,
 }
 
 #[derive(Clone)]
@@ -672,7 +677,7 @@ fn build_one(
         let count = o.get("count").and_then(|v| v.as_i64());
         // 目标级「必须战局内找到」标记（foundInRaid），上传类任务据此提示玩家
         let found_in_raid = o.get("foundInRaid").and_then(|v| v.as_bool()).unwrap_or(false);
-        let items = arr(o, "items")
+        let items: Vec<ItemRef> = arr(o, "items")
             .iter()
             .filter_map(|v| v.as_str())
             .map(|iid| ItemRef {
@@ -683,10 +688,15 @@ fn build_one(
                 category: raw.item_types.get(iid).cloned(),
             })
             .collect();
+        // 「任意物品」目标：上游 item 为 null/缺失，且具体物品列表不是恰好 1 个。
+        // 恰好 1 个为正常单物品上交（需显示）；空为真正任意；>1 为多物品/任意 trader 类（过滤）
+        let any = o.get("item").map(|v| v.is_null()).unwrap_or(true) && items.len() != 1;
         objectives.push(Objective {
             id: oid,
             description: desc,
             items,
+            count,
+            any,
         });
     }
 

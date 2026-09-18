@@ -31,9 +31,10 @@ export function QuestCard({
   // 按设置里的 Wiki 站点生成链接（后端带的是默认站点地址，仅作兜底）
   const url = wikiUrlFor(quest.questId)
 
-  // 所需物品（跨目标去重聚合，与任务图谱详情一致）
+  // 所需物品（跨目标去重聚合，与任务图谱详情一致）；
+  // 「任意物品」目标（o.any）不计具体物品需求
   const items = dedupeItems(
-    (detail?.objectives ?? []).flatMap((o) => o.items ?? []),
+    (detail?.objectives ?? []).filter((o) => !o.any).flatMap((o) => o.items ?? []),
   )
 
   return (

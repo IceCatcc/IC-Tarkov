@@ -1653,6 +1653,7 @@ export function QuestGraphPage() {
     if (!detail) return []
     const arr: ItemRef[] = []
     for (const o of detail.objectives ?? []) {
+      if (o.any) continue
       for (const it of o.items ?? []) arr.push(it)
     }
     return dedupeItems(arr)

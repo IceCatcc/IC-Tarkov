@@ -43,6 +43,10 @@ pub struct ObjectivePayload {
     pub id: String,
     pub description: String,
     pub items: Vec<ItemPayload>,
+    /// 目标所需数量（如「任意物品 50 件」的 50）；无数量时为 null
+    pub count: Option<i64>,
+    /// 是否为「任意物品」目标（上游 item 为 null）：不计具体物品需求、不渲染物品
+    pub any: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -208,6 +212,10 @@ fn trader_reqs_payload(n: &dataset::QuestNode, trader_names: &std::collections::
 fn flatten_turn_ins(n: &dataset::QuestNode) -> Vec<ItemPayload> {
     let mut out = Vec::new();
     for o in &n.objectives {
+        // 「任意物品」目标（item 为 null，如「上交任意物品 50 件」）不计入具体物品需求
+        if o.any {
+            continue;
+        }
         for it in &o.items {
             out.push(ItemPayload {
                 id: it.id.clone(),
@@ -238,6 +246,8 @@ fn objectives_payload(n: &dataset::QuestNode) -> Vec<ObjectivePayload> {
                     category: it.category.clone(),
                 })
                 .collect(),
+            count: o.count,
+            any: o.any,
         })
         .collect()
 }

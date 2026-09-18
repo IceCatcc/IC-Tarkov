@@ -106,6 +106,8 @@ export interface ObjectiveInfo {
   typeZh?: string | null
   count?: number | null
   items: ItemRef[]
+  /** 是否为「任意物品」目标（如「上交任意物品 50 件」）：不计具体物品需求、不渲染物品 */
+  any?: boolean
 }
 
 // 任务图谱
