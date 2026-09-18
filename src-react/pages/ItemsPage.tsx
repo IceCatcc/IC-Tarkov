@@ -94,70 +94,75 @@ function ItemDetailModal({
           </div>
         </div>
 
-        {/* 需求列表 */}
-        <div className="px-5 py-4 overflow-y-auto flex-1 min-h-0">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-[14px] font-medium text-[#e6edf3]">需要的任务</span>
-            <span className="text-[13px] text-muted">
-              {usage.length > 0 ? `共 ${usage.length} 个` : '暂无任何任务需要此物品'}
-            </span>
+        {item.description && (
+          <div className="px-5 py-3 border-b border-line">
+            <div className="text-[13px] text-muted mb-1">物品描述</div>
+            <p className="text-[13px] leading-relaxed text-[#c9d1d9] whitespace-pre-line">
+              {item.description}
+            </p>
           </div>
+        )}
 
-          {sorted.length === 0 ? (
-            <div className="text-[13px] text-muted leading-relaxed">
-              当前数据集中没有任务需要提交或使用此物品。
+        {usage.length > 0 && (
+          <>
+            {/* 需求列表 */}
+            <div className="px-5 py-4 overflow-y-auto flex-1 min-h-0">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-[14px] font-medium text-[#e6edf3]">需要的任务</span>
+                <span className="text-[13px] text-muted">共 {usage.length} 个</span>
+              </div>
+
+              <ul className="space-y-2">
+                {sorted.map((u) => (
+                  <li key={u.questId}>
+                    <button
+                      onClick={() => jumpToQuest(u.questId)}
+                      title="跳转到任务链查看详情"
+                      className="w-full text-left rounded-lg border border-line bg-ink-900/60 hover:border-amber/60 hover:bg-ink-700/60 transition-colors px-3 py-2.5"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="min-w-0 flex-1 truncate text-[14px] text-[#c9d1d9]">
+                          {u.questName}
+                        </span>
+                        <span className="shrink-0 text-[14px] font-medium text-amber">
+                          ×{u.count}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                        {u.traderName && (
+                          <span className="text-[12px] text-muted">{u.traderName}</span>
+                        )}
+                        {u.modes?.map((m) => (
+                          <span
+                            key={m}
+                            className="text-[11px] px-1.5 py-[1px] rounded border border-line text-muted/80 uppercase"
+                          >
+                            {m}
+                          </span>
+                        ))}
+                        {u.foundInRaid && (
+                          <span
+                            className="text-[11px] px-1.5 py-[1px] rounded border border-[#d7dde5]/40 text-[#d7dde5]/80"
+                            title="必须在战局内拾取（Found In Raid）"
+                          >
+                            战局内
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
-          ) : (
-            <ul className="space-y-2">
-              {sorted.map((u) => (
-                <li key={u.questId}>
-                  <button
-                    onClick={() => jumpToQuest(u.questId)}
-                    title="跳转到任务链查看详情"
-                    className="w-full text-left rounded-lg border border-line bg-ink-900/60 hover:border-amber/60 hover:bg-ink-700/60 transition-colors px-3 py-2.5"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="min-w-0 flex-1 truncate text-[14px] text-[#c9d1d9]">
-                        {u.questName}
-                      </span>
-                      <span className="shrink-0 text-[14px] font-medium text-amber">
-                        ×{u.count}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                      {u.traderName && (
-                        <span className="text-[12px] text-muted">{u.traderName}</span>
-                      )}
-                      {u.modes?.map((m) => (
-                        <span
-                          key={m}
-                          className="text-[11px] px-1.5 py-[1px] rounded border border-line text-muted/80 uppercase"
-                        >
-                          {m}
-                        </span>
-                      ))}
-                      {u.foundInRaid && (
-                        <span
-                          className="text-[11px] px-1.5 py-[1px] rounded border border-[#d7dde5]/40 text-[#d7dde5]/80"
-                          title="必须在战局内拾取（Found In Raid）"
-                        >
-                          战局内
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
 
-        {/* 底部提示 */}
-        <div className="px-5 py-3 border-t border-line">
-          <span className="text-[12px] text-muted">
-            数量为当前数据集中该任务对此物品的总需求（已合并同一任务的多个目标）。
-          </span>
-        </div>
+            {/* 底部提示 */}
+            <div className="px-5 py-3 border-t border-line">
+              <span className="text-[12px] text-muted">
+                数量为当前数据集中该任务对此物品的总需求（已合并同一任务的多个目标）。
+              </span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -169,7 +174,7 @@ export function ItemsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
-  const [cat, setCat] = useState<string>('全部')
+  const [cat, setCat] = useState<string>('')
   const [selected, setSelected] = useState<ItemInfo | null>(null)
   // 分页：当前已渲染数量（搜索 / 切换分类时回到首页）
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
@@ -233,10 +238,17 @@ export function ItemsPage() {
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh'))
   }, [items])
 
+  // 类型筛选默认选中第一个分类（不提供「全部」同时显示）
+  useEffect(() => {
+    if (categories.length > 0 && (!cat || !categories.includes(cat))) {
+      setCat(categories[0])
+    }
+  }, [categories, cat])
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return items.filter((it) => {
-      if (cat !== '全部' && catOf(it) !== cat) return false
+      if (cat && catOf(it) !== cat) return false
       if (!q) return true
       return (
         it.name.toLowerCase().includes(q) || it.id.toLowerCase().includes(q)
@@ -266,10 +278,7 @@ export function ItemsPage() {
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-[17px] font-medium">物品</h1>
           <span className="text-[14px] text-muted">
-            共 {items.length} 个
-            {filtered.length !== items.length && (
-              <span className="ml-1">· 筛选 {filtered.length}</span>
-            )}
+            共 {filtered.length} 个
           </span>
         </div>
 
@@ -280,19 +289,25 @@ export function ItemsPage() {
             placeholder="搜索物品名称 / id…"
             className="flex-1 min-w-[180px] bg-ink-700 border border-line rounded px-3 py-1.5 text-[13px] text-[#e6edf3] placeholder:text-muted/60 focus:border-amber/60 outline-none"
           />
-          <select
-            value={cat}
-            onChange={(e) => setCat(e.target.value)}
-            title="按物品类型筛选"
-            className="bg-ink-700 border border-line text-[13px] rounded px-2 py-1.5 text-muted"
-          >
-            <option value="全部">全部类型</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+        </div>
+        {/* 类型筛选：平铺 tab 按钮，默认选中第一个分类，无「全部」选项 */}
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {categories.map((c) => (
+            <button
+              key={c}
+              onClick={() => {
+                setCat(c)
+                setVisibleCount(PAGE_SIZE)
+              }}
+              className={`px-3 py-1.5 rounded-full text-[13px] border transition-colors ${
+                cat === c
+                  ? 'bg-amber/15 text-[#d4a174] border-amber/40'
+                  : 'bg-ink-700 text-muted border-line hover:border-amber/50'
+              }`}
+            >
+              {c}
+            </button>
+          ))}
         </div>
 
         {error && <div className="text-[14px] text-red-400">{error}</div>}
@@ -353,6 +368,11 @@ export function ItemsPage() {
                         {catOf(it)}
                       </span>
                     </div>
+                    {it.description && (
+                      <div className="text-[12px] text-muted/80 leading-snug line-clamp-2 min-w-0">
+                        {it.description}
+                      </div>
+                    )}
                   </button>
                 </li>
               )

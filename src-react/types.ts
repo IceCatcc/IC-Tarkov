@@ -96,6 +96,8 @@ export interface ItemInfo {
   name: string
   /** 物品主类型中文名（如「医疗」「钥匙」）；无数据时为 null */
   category?: string | null
+  /** 中文物品描述（来自 zh_items 的 `{id} Description`）；无数据时为 null */
+  description?: string | null
 }
 
 export interface ObjectiveInfo {

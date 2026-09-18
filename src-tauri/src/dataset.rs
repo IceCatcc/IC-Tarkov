@@ -44,6 +44,8 @@ pub struct ItemInfo {
     pub name: String,
     /// 物品主类型中文名（如「医疗」「钥匙」）；数据包缺少物品类别文件时为空
     pub category: Option<String>,
+    /// 中文物品描述（来自 zh_items 的 `{id} Description`；无数据时为 None）
+    pub description: Option<String>,
 }
 
 #[derive(Clone)]
@@ -429,10 +431,16 @@ fn build_items(raw: &Raw) -> Vec<ItemInfo> {
             .unwrap_or(key.as_str())
             .to_string();
         let category = raw.item_types.get(&id).cloned();
+        let description = raw
+            .zh_items
+            .get(&format!("{id} Description"))
+            .cloned()
+            .filter(|s| !s.trim().is_empty());
         items.push(ItemInfo {
             id,
             name: name.clone(),
             category,
+            description,
         });
     }
     items.sort_by(|a, b| a.name.cmp(&b.name));
