@@ -98,6 +98,14 @@ export interface ItemInfo {
   category?: string | null
   /** 中文物品描述（来自 zh_items 的 `{id} Description`）；无数据时为 null */
   description?: string | null
+  /** 背包/容器内部总格子数（grids 各网格 width*height 之和）；非容器物品为 null */
+  slots?: number | null
+  /** 子弹穿透等级（properties.penetrationPower）；非子弹为 null */
+  penetration?: number | null
+  /** 稀有度颜色标记（tarkov.dev backgroundColor 原值，如 gray/red/yellow）；由前端映射成等级 */
+  rarity?: string | null
+  /** 子弹口径（properties.caliber，如 5.45x39mm）；非子弹为 null */
+  caliber?: string | null
 }
 
 export interface ObjectiveInfo {

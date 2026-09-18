@@ -4,6 +4,26 @@ import { getItems, getQuestGraph } from '../tauri'
 import { isMobile } from '../platform'
 import type { ItemInfo, QuestGraph, ItemRef } from '../types'
 
+/** tarkov.dev 稀有度颜色 (backgroundColor) -> 中文等级 + 展示色 */
+const RARITY_MAP: Record<string, { label: string; color: string }> = {
+  default: { label: '普通', color: '#9aa4b2' },
+  gray: { label: '普通', color: '#9aa4b2' },
+  blue: { label: '精良', color: '#4f9dff' },
+  yellow: { label: '稀有', color: '#e8c34a' },
+  red: { label: '极稀有', color: '#e5534b' },
+  black: { label: '传说', color: '#b07cff' },
+  violet: { label: '传说', color: '#b07cff' },
+}
+
+function rarityOf(it: ItemInfo): { label: string; color: string } | null {
+  if (!it.rarity) return null
+  return RARITY_MAP[it.rarity] ?? { label: it.rarity, color: '#9aa4b2' }
+}
+
+/** 需要按属性自动分档的物品类型：背包按格子（每 5 格）、弹药按穿透（每 10 穿） */
+const BAG_CAT = '背包'
+const AMMO_CAT = '弹药'
+
 /** 某物品被某任务需要的需求条目（同一任务多个目标引用同物品时已合并） */
 interface QuestUsage {
   questId: string
@@ -86,6 +106,17 @@ function ItemDetailModal({
                 <span className="inline-flex items-center h-6 px-2 rounded border border-line bg-ink-700 text-[12px] text-muted">
                   {catOf(item)}
                 </span>
+                {rarityOf(item) && (
+                  <span
+                    className="inline-flex items-center h-6 px-2 rounded border text-[12px]"
+                    style={{
+                      color: rarityOf(item)!.color,
+                      borderColor: `${rarityOf(item)!.color}66`,
+                    }}
+                  >
+                    {rarityOf(item)!.label}
+                  </span>
+                )}
                 <span className="text-[12px] text-muted/70 font-mono break-all">
                   {item.id}
                 </span>
@@ -168,6 +199,63 @@ function ItemDetailModal({
   )
 }
 
+/** 物品卡片（列表项） */
+function ItemCard({
+  it,
+  demand,
+  onSelect,
+}: {
+  it: ItemInfo
+  demand: number
+  onSelect: (it: ItemInfo) => void
+}) {
+  return (
+    <li>
+      <button
+        onClick={() => onSelect(it)}
+        className="relative overflow-hidden w-full text-left rounded-lg border border-line bg-ink-800 hover:border-amber/60 transition-colors px-4 py-3 flex flex-col items-stretch gap-2 min-w-0"
+      >
+        {/* 左侧稀有度描边（卡片左边一小段） */}
+        {rarityOf(it) && (
+          <span
+            className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-1/2 rounded-r"
+            style={{ background: rarityOf(it)!.color }}
+            title={`稀有度：${rarityOf(it)!.label}`}
+          />
+        )}
+        {/* 第一行：图标 + 名称 + 右上角任务数 */}
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="shrink-0 w-10 h-10 grid place-items-center rounded bg-ink-900/60 overflow-hidden">
+            <img
+              src={`/item-icons/${it.id}.webp`}
+              alt=""
+              loading="lazy"
+              onError={(e) => (e.currentTarget.style.display = 'none')}
+              className="w-10 h-10 object-contain"
+            />
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-[#e6edf3]">
+            {it.name}
+          </span>
+          {demand > 0 && (
+            <span
+              className="shrink-0 text-[11px] px-1.5 py-[1px] rounded-full bg-amber/15 text-[#d4a174] border border-amber/40"
+              title={`被 ${demand} 个任务需要`}
+            >
+              {demand} 任务
+            </span>
+          )}
+        </div>
+        {it.description && (
+          <div className="text-[12px] text-muted/80 leading-snug line-clamp-2 min-w-0">
+            {it.description}
+          </div>
+        )}
+      </button>
+    </li>
+  )
+}
+
 export function ItemsPage() {
   const [items, setItems] = useState<ItemInfo[]>([])
   const [graph, setGraph] = useState<QuestGraph | null>(null)
@@ -175,6 +263,7 @@ export function ItemsPage() {
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [cat, setCat] = useState<string>('')
+  const [caliberFilter, setCaliberFilter] = useState('')
   const [selected, setSelected] = useState<ItemInfo | null>(null)
   // 分页：当前已渲染数量（搜索 / 切换分类时回到首页）
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
@@ -245,26 +334,88 @@ export function ItemsPage() {
     }
   }, [categories, cat])
 
+  // 弹药口径选项（仅弹药类型有意义）
+  const caliberOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const it of items) {
+      if (catOf(it) === AMMO_CAT && it.caliber) set.add(it.caliber)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'en'))
+  }, [items])
+
+  // 切换类型时清空口径筛选
+  useEffect(() => {
+    setCaliberFilter('')
+  }, [cat])
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return items.filter((it) => {
       if (cat && catOf(it) !== cat) return false
+      if (cat === AMMO_CAT && caliberFilter && it.caliber !== caliberFilter) return false
       if (!q) return true
       return (
         it.name.toLowerCase().includes(q) || it.id.toLowerCase().includes(q)
       )
     })
-  }, [items, query, cat])
+  }, [items, query, cat, caliberFilter])
 
-  // 搜索词 / 分类变化后回到第一页
+  // 排序：背包按格子降序、弹药按穿透降序、其它按名称
+  const sortedItems = useMemo(() => {
+    const arr = [...filtered]
+    if (cat === BAG_CAT) {
+      arr.sort(
+        (a, b) =>
+          (b.slots ?? -1) - (a.slots ?? -1) || a.name.localeCompare(b.name, 'zh'),
+      )
+    } else if (cat === AMMO_CAT) {
+      arr.sort(
+        (a, b) =>
+          (b.penetration ?? -1) - (a.penetration ?? -1) ||
+          a.name.localeCompare(b.name, 'zh'),
+      )
+    } else {
+      arr.sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+    }
+    return arr
+  }, [filtered, cat])
+
+  // 搜索词 / 分类 / 口径变化后回到第一页
   useEffect(() => {
     setVisibleCount(PAGE_SIZE)
-  }, [query, cat])
+  }, [query, cat, caliberFilter])
 
   const paged = useMemo(
-    () => filtered.slice(0, visibleCount),
-    [filtered, visibleCount],
+    () => sortedItems.slice(0, visibleCount),
+    [sortedItems, visibleCount],
   )
+
+  // 分档：背包按每 5 格、弹药按每 10 穿分组成带标题的段（档从大到小）；其它类型不分组
+  const groups = useMemo(() => {
+    if (cat !== BAG_CAT && cat !== AMMO_CAT) return null
+    const isBag = cat === BAG_CAT
+    const step = isBag ? 5 : 10
+    const map = new Map<number, ItemInfo[]>()
+    for (const it of paged) {
+      const v = isBag ? it.slots : it.penetration
+      const bucket = v == null ? -1 : Math.floor(v / step) * step
+      const arr = map.get(bucket)
+      if (arr) arr.push(it)
+      else map.set(bucket, [it])
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([bucket, list]) => ({
+        key: String(bucket),
+        label:
+          bucket < 0
+            ? '未知'
+            : isBag
+              ? `${bucket}–${bucket + step - 1} 格`
+              : `${bucket}–${bucket + step - 1} 穿`,
+        items: list,
+      }))
+  }, [cat, paged])
 
   const selectedUsage = useMemo(
     () => (selected ? usageMap.get(selected.id) ?? [] : []),
@@ -273,7 +424,7 @@ export function ItemsPage() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* 头部：标题 + 搜索 + 分类筛选 */}
+      {/* 头部：标题 + 搜索 + 类型（弹药另有口径） */}
       <div className="shrink-0 px-4 pt-4 pb-3 space-y-3">
         <div className="flex items-center gap-3 flex-wrap">
           <h1 className="text-[17px] font-medium">物品</h1>
@@ -290,15 +441,13 @@ export function ItemsPage() {
             className="flex-1 min-w-[180px] bg-ink-700 border border-line rounded px-3 py-1.5 text-[13px] text-[#e6edf3] placeholder:text-muted/60 focus:border-amber/60 outline-none"
           />
         </div>
-        {/* 类型筛选：平铺 tab 按钮，默认选中第一个分类，无「全部」选项 */}
+
+        {/* 类型 tab：默认选中第一个分类，无「全部」选项 */}
         <div className="flex flex-wrap gap-1.5 mb-3">
           {categories.map((c) => (
             <button
               key={c}
-              onClick={() => {
-                setCat(c)
-                setVisibleCount(PAGE_SIZE)
-              }}
+              onClick={() => setCat(c)}
               className={`px-3 py-1.5 rounded-full text-[13px] border transition-colors ${
                 cat === c
                   ? 'bg-amber/15 text-[#d4a174] border-amber/40'
@@ -309,6 +458,35 @@ export function ItemsPage() {
             </button>
           ))}
         </div>
+
+        {/* 弹药：口径筛选 */}
+        {cat === AMMO_CAT && caliberOptions.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            <button
+              onClick={() => setCaliberFilter('')}
+              className={`px-3 py-1.5 rounded-full text-[13px] border transition-colors ${
+                caliberFilter === ''
+                  ? 'bg-amber/15 text-[#d4a174] border-amber/40'
+                  : 'bg-ink-700 text-muted border-line hover:border-amber/50'
+              }`}
+            >
+              全部口径
+            </button>
+            {caliberOptions.map((c) => (
+              <button
+                key={c}
+                onClick={() => setCaliberFilter(c)}
+                className={`px-3 py-1.5 rounded-full text-[13px] border transition-colors ${
+                  caliberFilter === c
+                    ? 'bg-amber/15 text-[#d4a174] border-amber/40'
+                    : 'bg-ink-700 text-muted border-line hover:border-amber/50'
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        )}
 
         {error && <div className="text-[14px] text-red-400">{error}</div>}
       </div>
@@ -324,72 +502,67 @@ export function ItemsPage() {
 
         {filtered.length > 0 && (
           <>
-          <ul
-            className={`grid gap-3 ${
-              mobile
-                ? 'grid-cols-1'
-                : 'grid-cols-[repeat(auto-fill,minmax(300px,1fr))]'
-            }`}
-          >
-            {paged.map((it) => {
-              const demand = usageMap.get(it.id)?.length ?? 0
-              return (
-                <li key={it.id}>
-                  <button
-                    onClick={() => setSelected(it)}
-                    className="w-full text-left rounded-lg border border-line bg-ink-800 hover:border-amber/60 transition-colors px-4 py-3 flex flex-col items-stretch gap-2 min-w-0"
-                  >
-                    {/* 第一行：图标 + 名称 */}
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="shrink-0 w-10 h-10 grid place-items-center rounded bg-ink-900/60 overflow-hidden">
-                        <img
-                          src={`/item-icons/${it.id}.webp`}
-                          alt=""
-                          loading="lazy"
-                          onError={(e) => (e.currentTarget.style.display = 'none')}
-                          className="w-10 h-10 object-contain"
+            {groups ? (
+              <div className="space-y-4">
+                {groups.map((g) => (
+                  <div key={g.key}>
+                    {/* 分档标题：吸顶，滚到哪一档都看得见 */}
+                    <div className="sticky top-0 z-10 py-1.5">
+                      <span className="inline-flex items-baseline bg-ink-900/90 backdrop-blur-sm rounded px-2 py-0.5 text-[14px] font-semibold text-[#e6edf3]">
+                        {g.label}
+                        <span className="text-muted font-normal ml-1">· {g.items.length}</span>
+                      </span>
+                    </div>
+                    <ul
+                      className={`grid gap-3 ${
+                        mobile
+                          ? 'grid-cols-1'
+                          : 'grid-cols-[repeat(auto-fill,minmax(300px,1fr))]'
+                      }`}
+                    >
+                      {g.items.map((it) => (
+                        <ItemCard
+                          key={it.id}
+                          it={it}
+                          demand={usageMap.get(it.id)?.length ?? 0}
+                          onSelect={setSelected}
                         />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-[#e6edf3]">
-                        {it.name}
-                      </span>
-                    </div>
-                    {/* 第二行：左任务数 + 右类型 */}
-                    <div className="flex items-center gap-2 min-w-0">
-                      {demand > 0 && (
-                        <span
-                          className="shrink-0 text-[11px] px-1.5 py-[1px] rounded-full bg-amber/15 text-[#d4a174] border border-amber/40"
-                          title={`被 ${demand} 个任务需要`}
-                        >
-                          {demand} 任务
-                        </span>
-                      )}
-                      <span className="ml-auto text-[11px] px-1.5 py-[1px] rounded border border-line text-muted/80 truncate max-w-full">
-                        {catOf(it)}
-                      </span>
-                    </div>
-                    {it.description && (
-                      <div className="text-[12px] text-muted/80 leading-snug line-clamp-2 min-w-0">
-                        {it.description}
-                      </div>
-                    )}
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-          {visibleCount < filtered.length && (
-            <div className="flex justify-center pt-3">
-              <button
-                onClick={() =>
-                  setVisibleCount((c) => Math.min(c + PAGE_SIZE, filtered.length))
-                }
-                className="px-4 py-2 rounded-lg border border-line bg-ink-700 hover:border-amber/60 text-[13px] text-[#c9d1d9] transition-colors"
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ul
+                className={`grid gap-3 ${
+                  mobile
+                    ? 'grid-cols-1'
+                    : 'grid-cols-[repeat(auto-fill,minmax(300px,1fr))]'
+                }`}
               >
-                加载更多（剩余 {filtered.length - visibleCount} 个）
-              </button>
-            </div>
-          )}
+                {paged.map((it) => (
+                  <ItemCard
+                    key={it.id}
+                    it={it}
+                    demand={usageMap.get(it.id)?.length ?? 0}
+                    onSelect={setSelected}
+                  />
+                ))}
+              </ul>
+            )}
+
+            {visibleCount < filtered.length && (
+              <div className="flex justify-center pt-3">
+                <button
+                  onClick={() =>
+                    setVisibleCount((c) => Math.min(c + PAGE_SIZE, filtered.length))
+                  }
+                  className="px-4 py-2 rounded-lg border border-line bg-ink-700 hover:border-amber/60 text-[13px] text-[#c9d1d9] transition-colors"
+                >
+                  加载更多（剩余 {filtered.length - visibleCount} 个）
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>

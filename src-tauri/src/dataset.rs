@@ -46,6 +46,14 @@ pub struct ItemInfo {
     pub category: Option<String>,
     /// 中文物品描述（来自 zh_items 的 `{id} Description`；无数据时为 None）
     pub description: Option<String>,
+    /// 背包/容器内部总格子数（properties.grids 各网格 width*height 之和）；非容器物品为 None
+    pub slots: Option<i64>,
+    /// 子弹穿透等级（properties.penetrationPower）；非子弹为 None
+    pub penetration: Option<i64>,
+    /// 稀有度颜色标记（tarkov.dev 物品 backgroundColor 原值，如 gray/red/yellow）；无数据时为 None
+    pub rarity: Option<String>,
+    /// 子弹口径（properties.caliber，如 5.45x39mm）；非子弹为 None
+    pub caliber: Option<String>,
 }
 
 #[derive(Clone)]
@@ -221,6 +229,9 @@ pub struct Raw {
     pub zh_items: HashMap<String, String>,
     /// 物品 id -> 主类型中文名（来自 items 的 types 字段；数据包缺少该文件时为空）
     pub item_types: HashMap<String, String>,
+    /// 原始物品数据（regular_items.json 的 /data/items）：含 properties（网格/穿透）与
+    /// backgroundColor 等二级属性；老数据包缺该文件时为空
+    pub items_raw: serde_json::Map<String, Value>,
 }
 
 fn read_json(dir: &Path, file: &str) -> Result<Value, String> {
@@ -263,10 +274,15 @@ impl Raw {
         let traders_doc = read_json(dir, "regular_traders.json")?;
         let zh_traders_doc = read_json(dir, "regular_traders_zh.json")?;
         let zh_items_doc = read_json(dir, "regular_items_zh.json")?;
-        // 物品类别：可选数据（老数据包没有该文件时不报错，仅「按类型排序」退化）
-        let item_types = read_json(dir, "regular_items.json")
-            .ok()
-            .map(|doc| build_item_types(&doc))
+        // 物品类别 + 二级属性：可选数据（老数据包没有该文件时不报错，功能自动退化）
+        let items_doc = read_json(dir, "regular_items.json").ok();
+        let item_types = items_doc
+            .as_ref()
+            .map(|doc| build_item_types(doc))
+            .unwrap_or_default();
+        let items_raw = items_doc
+            .as_ref()
+            .and_then(|doc| doc.pointer("/data/items").and_then(|v| v.as_object()).cloned())
             .unwrap_or_default();
 
         let maps_data = maps_doc.get("data").cloned().unwrap_or(Value::Null);
@@ -291,6 +307,7 @@ impl Raw {
             zh_traders: as_str_map(zh_traders_doc.get("data").unwrap_or(&Value::Null)),
             zh_items: as_str_map(zh_items_doc.get("data").unwrap_or(&Value::Null)),
             item_types,
+            items_raw,
         })
     }
 }
@@ -421,6 +438,44 @@ fn build_item_types(doc: &Value) -> HashMap<String, String> {
     out
 }
 
+/// 从原始物品数据提取二级属性：背包格子数、子弹穿透、稀有度颜色。
+/// 老数据包缺 items_raw 时全部返回 None。
+fn item_props(
+    raw: &Raw,
+    id: &str,
+) -> (Option<i64>, Option<i64>, Option<String>, Option<String>) {
+    let Some(it) = raw.items_raw.get(id) else {
+        return (None, None, None, None);
+    };
+    let props = it.get("properties").and_then(|v| v.as_object());
+    // 格子数：所有 grids 的 width*height 之和（背包/胸挂/护甲/武器内部空间）
+    let slots = props
+        .and_then(|p| p.get("grids"))
+        .and_then(|g| g.as_array())
+        .map(|grids| {
+            grids
+                .iter()
+                .filter_map(|gd| {
+                    let w = gd.get("width").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let h = gd.get("height").and_then(|v| v.as_i64()).unwrap_or(0);
+                    Some(w * h)
+                })
+                .sum()
+        });
+    // 子弹穿透
+    let penetration = props
+        .and_then(|p| p.get("penetrationPower"))
+        .and_then(|v| v.as_i64());
+    // 稀有度颜色（tarkov.dev 用 backgroundColor 表示）
+    let rarity = it.get("backgroundColor").and_then(|v| v.as_str()).map(|s| s.to_string());
+    // 子弹口径（如 5.45x39mm）
+    let caliber = props
+        .and_then(|p| p.get("caliber"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    (slots, penetration, rarity, caliber)
+}
+
 /// 从原始数据构建物品目录：zh_items（id -> 中文名）为主，item_types（id -> 主类型）补类别。
 /// key 形如 `{itemId} Name`，去掉 ` Name` 后缀还原物品 id。
 fn build_items(raw: &Raw) -> Vec<ItemInfo> {
@@ -436,11 +491,16 @@ fn build_items(raw: &Raw) -> Vec<ItemInfo> {
             .get(&format!("{id} Description"))
             .cloned()
             .filter(|s| !s.trim().is_empty());
+        let (slots, penetration, rarity, caliber) = item_props(raw, &id);
         items.push(ItemInfo {
             id,
             name: name.clone(),
             category,
             description,
+            slots,
+            penetration,
+            rarity,
+            caliber,
         });
     }
     items.sort_by(|a, b| a.name.cmp(&b.name));
