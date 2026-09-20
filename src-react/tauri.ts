@@ -202,6 +202,23 @@ export async function getStats(): Promise<{ inProgress: number; completed: numbe
   return await invoke('get_stats')
 }
 
+/**
+ * 启动进度（「读取中 xx」）：后端后台加载线程上报的当前步骤。
+ * 事件为 `startup-step`（见 boot.ts），本命令用于挂载时先查一次当前状态。
+ */
+export interface StartupState {
+  /** 步骤键：同一键内只更新文案（如数据集读取的各子阶段） */
+  step: string
+  label: string
+  /** 后台资料读取是否已结束（成功与失败都为 true） */
+  done: boolean
+  error: string | null
+}
+
+export async function getStartupState(): Promise<StartupState> {
+  return await invoke<StartupState>('get_startup_state')
+}
+
 export async function getPlayerQuests(): Promise<PlayerQuest[]> {
   return await invoke<PlayerQuest[]>('get_player_quests')
 }

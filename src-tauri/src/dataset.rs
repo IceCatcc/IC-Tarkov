@@ -263,16 +263,24 @@ fn as_val_map(v: Option<&Value>) -> HashMap<String, Value> {
 }
 
 impl Raw {
-    pub fn from_dir(dir: &Path) -> Result<Raw, String> {
+    /// 读取原始 JSON：每读一个文件前回调一次文案（供启动提示显示「读取中 xx」）
+    pub fn from_dir_with(dir: &Path, progress: ProgressFn) -> Result<Raw, String> {
+        progress("正在读取任务数据（PvP）…");
         let tasks_doc = read_json(dir, "regular_tasks.json")?;
+        progress("正在读取任务数据（PvE）…");
         let pve_doc = read_json(dir, "pve_tasks.json")?;
+        progress("正在读取任务数据（赛季）…");
         let season_doc = read_json(dir, "season_tasks.json")?;
+        progress("正在读取任务中文名…");
         let zh_tasks_doc = read_json(dir, "regular_tasks_zh.json")?;
         let zh_tasks_pve_doc = read_json(dir, "pve_tasks_zh.json")?;
+        progress("正在读取地图数据…");
         let maps_doc = read_json(dir, "regular_maps.json")?;
         let zh_maps_doc = read_json(dir, "regular_maps_zh.json")?;
+        progress("正在读取商人数据…");
         let traders_doc = read_json(dir, "regular_traders.json")?;
         let zh_traders_doc = read_json(dir, "regular_traders_zh.json")?;
+        progress("正在读取物品数据…");
         let zh_items_doc = read_json(dir, "regular_items_zh.json")?;
         // 物品类别 + 二级属性：可选数据（老数据包没有该文件时不报错，功能自动退化）
         let items_doc = read_json(dir, "regular_items.json").ok();
@@ -1622,9 +1630,18 @@ fn build_skeleton(path: Option<&Path>, map_meta: &HashMap<String, MapEntry>) -> 
 
 // ---------------- 入口 ----------------
 
-/// 用指定目录里的原始 JSON 构建全部派生数据（不装载）
-pub fn build_from_dir(dir: &Path, skeleton: Option<&Path>) -> Result<Store, String> {
-    let raw = Raw::from_dir(dir)?;
+/// 进度回调：参数为当前阶段的展示文案
+pub type ProgressFn<'a> = &'a mut dyn FnMut(&str);
+
+/// 用指定目录里的原始 JSON 构建全部派生数据（不装载）；
+/// 各阶段前回调一次文案（供启动提示显示「读取中 xx」）
+pub fn build_from_dir_with(
+    dir: &Path,
+    skeleton: Option<&Path>,
+    progress: ProgressFn,
+) -> Result<Store, String> {
+    let raw = Raw::from_dir_with(dir, progress)?;
+    progress("正在构建任务索引…");
     let map_meta = build_map_meta(&raw);
     let quests = build_quests(&raw, &map_meta);
     let mut trader_names: HashMap<String, String> = HashMap::new();
@@ -1633,11 +1650,16 @@ pub fn build_from_dir(dir: &Path, skeleton: Option<&Path>) -> Result<Store, Stri
             .entry(n.trader_id.clone())
             .or_insert_with(|| n.trader_name.clone());
     }
+    progress("正在构建地图标记…");
     let markers = build_markers(&raw, &map_meta);
+    progress("正在构建任务目标区域…");
     let zones = build_zones(&raw);
     let bosses = build_bosses(&raw);
+    progress("正在读取地图骨架…");
     let skeleton = build_skeleton(skeleton, &map_meta);
+    progress("正在构建物品索引…");
     let items = build_items(&raw);
+    progress("正在整理任务互斥关系…");
     // 互斥关系反向索引：别人完成了会让谁失败
     let mut fail_map: HashMap<String, Vec<String>> = HashMap::new();
     for (qid, n) in &quests {
@@ -1663,6 +1685,14 @@ pub fn build_from_dir(dir: &Path, skeleton: Option<&Path>) -> Result<Store, Stri
 
 /// 从缓存目录重建全部派生数据并装载
 pub fn rebuild(app: &tauri::AppHandle) -> Result<(usize, usize), String> {
+    rebuild_with(app, &mut |_| {})
+}
+
+/// 带进度回调的重建（启动加载用于「读取中 xx」提示；数据刷新走无回调版本）
+pub fn rebuild_with(
+    app: &tauri::AppHandle,
+    progress: ProgressFn,
+) -> Result<(usize, usize), String> {
     let dir = apidata::ensure_cache(app)?;
     // ensure_cache 会把 maps-skeleton.json 物化进缓存目录（Android 走 assets 回退），
     // 这里依次找：随包文件系统 → 缓存目录副本
@@ -1670,7 +1700,7 @@ pub fn rebuild(app: &tauri::AppHandle) -> Result<(usize, usize), String> {
         let p = dir.join("maps-skeleton.json");
         p.is_file().then_some(p)
     });
-    let store = build_from_dir(&dir, skeleton.as_deref())?;
+    let store = build_from_dir_with(&dir, skeleton.as_deref(), progress)?;
     let qn = store.quests.len();
     let mn = store.maps.len();
     install(store);

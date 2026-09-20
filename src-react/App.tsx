@@ -10,8 +10,10 @@ import {
 } from './tauri'
 import { useStore } from './store'
 import { startLanAutoConnect, reloadLocalData } from './lan'
+import { bootReady, bootSnapshot, finishBoot, reportStep, subscribeBoot } from './boot'
 import { isMobile, isAndroid } from './platform'
 import { TopBar } from './components/TopBar'
+import { StartupSplash } from './components/StartupSplash'
 import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -39,6 +41,9 @@ export default function App() {
   const pendingOpenSettings = useRef(false)
   // 屏幕常亮提示：首次启动时帮助窗口会盖住通知，挂起到帮助关闭后再弹
   const pendingKeepOnToast = useRef(false)
+  // 启动遮罩：「读取中 xx」步骤（后端资料读取 + 前端初始化），跑完自动收起
+  const [boot, setBoot] = useState(bootSnapshot)
+  useEffect(() => subscribeBoot(() => setBoot(bootSnapshot())), [])
   const closeHelp = () => {
     try {
       localStorage.setItem('ic-tarkov.helpSeen.v1', '1')
@@ -96,12 +101,16 @@ export default function App() {
 
   useEffect(() => {
     let off: (() => void) | undefined
-    initTauri()
-      .then((un) => {
-        off = un
-        return getSettings()
-      })
-      .then((st) => {
+    let cancelled = false
+    void (async () => {
+      try {
+        // 资料读取与界面进程分离：后端在独立线程里读进度 / 数据集，
+        // 这里先等它就绪（期间遮罩显示「读取中 xx」），再调用依赖数据集的命令
+        await bootReady()
+        if (cancelled) return
+        off = await initTauri()
+        reportStep('settings', '正在读取界面设置…')
+        const st = await getSettings()
         setSettings(st)
         // 后端 settings.json 为 UI 偏好的持久化源（覆盖 localStorage 首帧缓存）
         if (st.uiPrefs && Object.keys(st.uiPrefs).length > 0) {
@@ -120,7 +129,7 @@ export default function App() {
             if (helpSeen) useStore.getState().pushToast(KEEP_ON_TOAST, 'info')
             else pendingKeepOnToast.current = true
           }
-          return undefined
+          return
         }
         if (!st.logDir) {
           const helpSeen =
@@ -128,25 +137,24 @@ export default function App() {
             localStorage.getItem('ic-tarkov.helpSeen.v1') === '1'
           if (helpSeen) useStore.getState().openSettings()
           else pendingOpenSettings.current = true
-          return undefined
+          return
         }
-        return startWatching(st.logDir)
-      })
-      .then(() => getState())
-      .then((wst) => {
-        setWatcher(wst)
-        return getPlayerQuests()
-      })
-      .then((list) => {
+        // 初始扫描较慢，后端已把它放到异步线程执行，界面保持可响应
+        reportStep('watching', '正在扫描日志…')
+        await startWatching(st.logDir)
+        setWatcher(await getState())
+        reportStep('quests', '正在加载任务列表…')
         // 仅加载玩家任务；历史活动默认不读取，由「加载更多」按需拉取
-        seedPlayerQuests(list)
-        return getUnlocked()
-      })
-      .then((list) => {
-        setUnlockedQuests(list)
-      })
-      .catch((e) => console.error('init error', e))
+        seedPlayerQuests(await getPlayerQuests())
+        setUnlockedQuests(await getUnlocked())
+      } catch (e) {
+        console.error('init error', e)
+      } finally {
+        if (!cancelled) finishBoot()
+      }
+    })()
     return () => {
+      cancelled = true
       off?.()
     }
   }, [setWatcher, setSettings, seedPlayerQuests, setUnlockedQuests])
@@ -260,6 +268,8 @@ export default function App() {
       {!mobile && <LanConflictModal />}
       <WikiDrawer />
       <Toasts />
+      {/* 启动遮罩压在最上层：初始化跑完后淡出（帮助 / 设置等浮层都在其下） */}
+      <StartupSplash steps={boot.steps} error={boot.error} visible={!boot.finished} />
     </div>
   )
 }

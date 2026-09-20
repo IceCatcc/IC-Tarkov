@@ -9,14 +9,20 @@ use std::sync::Arc;
 
 use crate::dataset;
 
-/// 启动时装载数据集；返回失败时数据集为空（界面仍可用，只是没有任务名）
-pub fn init(app: &tauri::AppHandle) {
-    match dataset::rebuild(app) {
+/// 启动时装载数据集（带进度回调，供启动线程上报「读取中 xx」）。
+/// 返回失败时数据集为空（界面仍可用，只是没有任务名）；错误同时打印并回传给调用方。
+pub fn init_with(
+    app: &tauri::AppHandle,
+    progress: &mut dyn FnMut(&str),
+) -> Result<(usize, usize), String> {
+    let r = dataset::rebuild_with(app, progress);
+    match &r {
         Ok((quests, maps)) => {
             println!("[data] 数据集已装载：{quests} 个任务 / {maps} 张地图");
         }
         Err(e) => eprintln!("[data] 数据集装载失败：{e}"),
     }
+    r
 }
 
 fn store() -> Arc<dataset::Store> {

@@ -5,6 +5,7 @@ mod keepawake;
 mod parser;
 mod persist;
 mod screenshots;
+mod startup;
 mod store;
 mod sync;
 mod watcher;
@@ -484,8 +485,11 @@ pub struct RewardPayload {
     pub count: i64,
 }
 
+/// 启动日志监控（含一次全量初始扫描，可能耗时数秒）。
+/// 声明为 async：Tauri 会把非 async 命令放在主线程执行，日志目录大时会让整个
+/// 界面在启动阶段卡住，放到异步运行时线程后主线程始终可响应。
 #[tauri::command]
-fn start_watching(app: tauri::AppHandle, dir: Option<String>) -> Result<(), String> {
+async fn start_watching(app: tauri::AppHandle, dir: Option<String>) -> Result<(), String> {
     // 未选择日志目录时：不硬编码默认路径，保持空闲等待用户在设置里选择
     let path = match dir {
         Some(d) if !d.trim().is_empty() => d,
@@ -602,6 +606,12 @@ fn get_state(app: tauri::AppHandle) -> WatcherStatePayload {
         last_scan: wt.last_scan.clone(),
         error: wt.error.clone(),
     }
+}
+
+/// 启动进度（「读取中 xx」）：前端挂载时查一次当前状态，之后靠 startup-step 事件跟进
+#[tauri::command]
+fn get_startup_state(app: tauri::AppHandle) -> startup::StartupState {
+    app.state::<startup::StartupTracker>().snapshot()
 }
 
 #[tauri::command]
@@ -935,18 +945,18 @@ fn set_quest_status(
 /// - merge：保留当前进度（含手动改动），仅清空扫描偏移后重扫，把本地日志里缺失的进度补充进 store（apply_* 幂等）。
 /// 初始扫描 emit=false，仅重建内存与落盘，不会向前端刷历史活动。
 #[tauri::command]
-fn reset_and_rescan(app: tauri::AppHandle, mode: Option<String>) -> Result<(), String> {
+async fn reset_and_rescan(app: tauri::AppHandle, mode: Option<String>) -> Result<(), String> {
     let merge = mode.as_deref() == Some("merge");
-    let binding = app.state::<AppState>();
-    if merge {
-        // 保留进度：清空扫描偏移并落盘（磁盘 offsets 为空、进度完整），
-        // 随后 start_watching 从 0 重读本地日志，把缺失进度补充回来（apply_* 幂等）。
-        binding.with_active(|md| md.offsets.clear());
-        persist::save_all_from(&app);
-    } else {
-        // cover（默认）：清空全部模式的持久化文件与内存进度，全量重扫重置到日志真值
-        persist::remove_all(&app);
-        {
+    {
+        let binding = app.state::<AppState>();
+        if merge {
+            // 保留进度：清空扫描偏移并落盘（磁盘 offsets 为空、进度完整），
+            // 随后 start_watching 从 0 重读本地日志，把缺失进度补充回来（apply_* 幂等）。
+            binding.with_active(|md| md.offsets.clear());
+            persist::save_all_from(&app);
+        } else {
+            // cover（默认）：清空全部模式的持久化文件与内存进度，全量重扫重置到日志真值
+            persist::remove_all(&app);
             let mut g = binding.modes.lock().unwrap();
             for md in g.values_mut() {
                 md.quests.clear();
@@ -958,7 +968,8 @@ fn reset_and_rescan(app: tauri::AppHandle, mode: Option<String>) -> Result<(), S
         }
     }
     let dir = read_settings(&app).log_dir;
-    start_watching(app, Some(dir))
+    // 全量重扫较慢，交给异步线程执行（同 start_watching），避免阻塞界面
+    start_watching(app, Some(dir)).await
 }
 
 /// 导出数据：先把内存态落盘，再把 quest_state / collected / settings 三份 json 打包为 zip。
@@ -1211,6 +1222,29 @@ struct DataStatusPayload {
     map_count: usize,
 }
 
+/// 启动资料加载（后台线程执行，与界面进程分离）：
+/// 游戏数据集 → 数据更新检查，每步写入 StartupTracker 供前端显示「读取中 xx」。
+/// 即使失败也会置 done，避免前端一直停在启动遮罩上。
+fn load_in_background(app: tauri::AppHandle) {
+    let tracker = app.state::<startup::StartupTracker>();
+
+    tracker.step(&app, "dataset", "正在读取游戏数据…");
+    let dataset_err = {
+        let mut report = |label: &str| tracker.step(&app, "dataset", label);
+        data::init_with(&app, &mut report).err()
+    };
+
+    // 仅当缓存里已有部分数据且已过期时才后台静默拉取；缓存为空（没有任何 JSON）时
+    // 不自动联网下载，避免离线/首次启动空转与误报，首次数据由用户在设置页「更新数据」获取。
+    tracker.step(&app, "update", "正在检查数据更新…");
+    let st = apidata::status(&app);
+    if st.stale && st.files.iter().any(|f| f.bytes > 0) {
+        spawn_sync(app.clone(), false);
+    }
+
+    tracker.finish(&app, dataset_err);
+}
+
 /// 后台同步：拉取全部端点 -> 重建派生索引 -> 通知前端刷新
 fn spawn_sync(app: tauri::AppHandle, force: bool) {
     std::thread::spawn(move || match apidata::sync(&app, force) {
@@ -1434,35 +1468,35 @@ pub fn run() {
         .setup(|app| {
             // 数据根目录在每次需要时按「程序目录 data → AppData → 新建程序目录 data」自动探测，
             // 不依赖任何标记文件，此处无需提前设置，直接进入状态初始化。
-            // 三套模式进度（含收藏）在初始化时一次性按模式载入
             let handle = app.handle().clone();
+            // 启动进度：后台加载线程逐步更新，前端据此显示「读取中 xx」
+            app.manage(startup::StartupTracker::new());
+            let tracker = app.state::<startup::StartupTracker>();
+            // 三套模式进度（含收藏）体积很小，仍同步载入：必须早于任何命令与同步写入
+            // （手机端连上后会推快照覆盖进度，异步载入会把快照覆盖回去）。
+            // 真正耗时的是下面的游戏数据集，它被放到后台线程。
+            tracker.step(&handle, "progress", "正在读取任务进度…");
+            let modes = persist::load_all(&handle);
             app.manage(AppState {
-                modes: Mutex::new(persist::load_all(&handle)),
+                modes: Mutex::new(modes),
                 active_mode: Mutex::new("pvp".to_string()),
                 view_mode: Mutex::new("pvp".to_string()),
                 watch: Mutex::new(store::WatchStatus::default()),
                 watcher: Mutex::new(None),
                 screenshot: Mutex::new(None),
             });
-            // 装载 tarkov.dev 原始数据的派生索引。
-            // 仅当缓存里已有部分数据且已过期时才后台静默拉取；
-            // 缓存为空（没有任何 JSON）时不自动联网下载，避免离线/首次启动空转与误报，
-            // 首次数据由用户在设置页点击「更新数据」获取。
-            let handle = app.handle().clone();
             // 移动端：按 settings.json 的 keepScreenOn 应用屏幕常亮
             // （启动即生效；用户在设置里切换时由 set_keep_screen_on 即时同步）
             #[cfg(any(target_os = "android", target_os = "ios"))]
             crate::keepawake::apply(&handle, read_settings(&handle).keep_screen_on);
-            data::init(&handle);
-            let st = apidata::status(&handle);
-            let has_cache = st.files.iter().any(|f| f.bytes > 0);
-            if st.stale && has_cache {
-                spawn_sync(handle, false);
-            }
             // 同步：生成 token + 广播通道，并把现有事件桥接到广播（供手机端 WS 订阅）。
             // 仅电脑端启动服务端；手机端为客户端，无此步骤。
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             crate::lan::setup_lan(app);
+            // 资料读取与界面进程分离：最耗时的数据集构建（约 17MB 原始 JSON 的解析
+            // 与派生索引重建）放到后台线程，setup（Tauri 主线程）立即返回，
+            // 窗口先出首帧并显示「读取中 xx」步骤。
+            std::thread::spawn(move || load_in_background(handle));
             Ok(())
         })
         .invoke_handler({
@@ -1473,6 +1507,7 @@ pub fn run() {
                     start_watching,
                     stop_watching,
                     get_state,
+                    get_startup_state,
                     get_stats,
                     get_player_quests,
                     get_activity,
@@ -1525,6 +1560,7 @@ pub fn run() {
                     start_watching,
                     stop_watching,
                     get_state,
+                    get_startup_state,
                     get_stats,
                     get_player_quests,
                     get_activity,

@@ -60,6 +60,19 @@ body {
     animation: toast-in 0.18s ease-out;
 }
 
+/* 启动遮罩：步骤总数未知，用往复滑动的条表示「读取中」 */
+@keyframes boot-bar {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(420%);
+  }
+}
+.boot-bar {
+  animation: boot-bar 1.2s ease-in-out infinite;
+}
+
 /* 版本说明（markdown 渲染）基础排版 */
 .release-notes h1,
 .release-notes h2,
