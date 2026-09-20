@@ -5,6 +5,7 @@ import { getVersion } from '@tauri-apps/api/app'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../store'
+import type { QuestMode } from '../types'
 import { isMobile } from '../platform'
 import { getLanConnStatus, onLanStatus } from '../lan'
 import { checkLatestRelease, isNewer, RELEASES_PAGE, type ReleaseInfo } from '../updater'
@@ -217,25 +218,19 @@ export function TopBar() {
 
       {/* 右侧：错误提示 + 模式切换 + 设置 + 窗口控制 */}
       <div ref={rightBarRef} className="flex h-10 items-center gap-2 pr-2">
-        {/* 任务模式切换：PVP / PVPS / PVE（三套数据各自独立） */}
-        <div
-          className="flex items-center rounded-full border border-line bg-ink-700 p-0.5 shrink-0"
-          title="任务模式：PVP（正规服务器）/ PVPS（PvP 赛季）/ PVE（PvE 服务器）。三种模式的任务进度与收藏家进度各自独立保存；游戏启动时从日志检测会话模式并自动切换，也可手动点选（会记住选择）。"
+        {/* 任务模式切换：PVP / PVPS / PVE（下拉选单；三套数据各自独立） */}
+        <select
+          value={questMode}
+          onChange={(e) => setQuestMode(e.target.value as QuestMode)}
+          title="任务模式：PVP（正规服务器）/ PVPS（PvP 赛季）/ PVE（PvE 服务器）。三种模式的任务进度与收藏家进度各自独立保存；游戏启动时从日志检测会话模式并自动切换，也可在此手动选择（会记住选择）。"
+          className="shrink-0 h-[26px] rounded border border-line bg-ink-700 pl-2 pr-1.5 text-[12px] text-[#e6edf3] outline-none transition-colors hover:border-amber/50 focus:border-amber/60"
         >
           {(['pvp', 'pvps', 'pve'] as const).map((m) => (
-            <button
-              key={m}
-              onClick={() => setQuestMode(m)}
-              className={`px-2.5 h-[22px] rounded-full text-[12px] leading-none transition-colors ${
-                questMode === m
-                  ? 'bg-amber text-black font-medium'
-                  : 'text-muted hover:text-[#e6edf3]'
-              }`}
-            >
+            <option key={m} value={m}>
               {m.toUpperCase()}
-            </button>
+            </option>
           ))}
-        </div>
+        </select>
         {watcher.error && (
           <span className="text-[11px] text-red-400 truncate max-w-[180px]" title={watcher.error}>
             {watcher.error}
