@@ -249,7 +249,7 @@ export default function SettingsModal() {
     const del = next.del ?? deleteShots
     setError(null)
     try {
-      // 不传 profile：后端按现有设置合并，避免覆盖「角色管理」页的数据
+      // 后端按现有设置合并，只更新目录字段
       const st = await saveSettings(log, shot, del)
       setSettings(st)
       // 用新目录重启监控并重新加载任务（历史活动默认不读取）；移动端不启动监控
@@ -364,7 +364,7 @@ export default function SettingsModal() {
         }
         clearHistorical()
         seedPlayerQuests(await getPlayerQuests())
-        // 导入的 settings.json（含档案/UI 偏好）覆盖了本地，需重新拉取并应用
+        // 导入的 settings.json（含 UI 偏好）覆盖了本地，需重新拉取并应用
         const st = await getSettings()
         setSettings(st)
         if (st.uiPrefs && Object.keys(st.uiPrefs).length > 0) {

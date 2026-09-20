@@ -110,5 +110,6 @@ git push origin v<version>
 
 - **移动端原生定制点**：`src-tauri/gen/android` 已入库并含手工改动（见 `app/src/main/java/com/icecat/ictarkov/MainActivity.kt`：edge-to-edge insets、横屏隐藏状态栏、屏幕常亮 `setKeepScreenOn`），另有 `app/proguard-rules.pro` 里为该方法加的 keep 规则（release 开 R8，不加会因反射失败报 `NoSuchMethodError`）。重跑 `tauri android init` 会覆盖工程文件，改前先备份这几处。
 - **屏幕常亮**：开关持久化在 settings.json 的 `keepScreenOn`（默认 true），Android 生效路径为 `src-tauri/src/keepawake.rs` 经 `WebviewWindow::with_webview` + `jni_handle().exec` 反射调用 MainActivity 方法；iOS 无原生工程、桌面端无对应能力，均只持久化不生效，UI 用 `isAndroid()` 控制开关显隐。
+- **角色档案已移除**：等级 / 商人忠诚等级（loyalty）/ 地图解锁（lockedMaps）不再维护，档案页、`settings.json` 的 `profile` / `profiles` 字段、`save_settings` 的 `profile` 参数、`profile-changed` 事件与 `set-profile` 反向同步指令、同步摘要里的 `level` 均已删除。任务图谱 / 任务板 / 收藏家页里原本的「当前 Lv / 当前 LL + ✓✗ 达标」对照一并降级为只显示任务自带的要求值（要求值来自任务数据，保留）。旧 `settings.json` / 旧快照里残留的 `profile` / `profiles` 会被 serde 忽略（未知字段不报错），无需迁移；新旧版本混用做局域网同步时摘要指纹会不同，会触发一次「两端不一致」确认。
 - `quest_analysis/` 目录已被 `.gitignore` 忽略，README 与提交中均不涉及。
 - 本项目为 Vibe Coding 项目（深度使用 AI 编程），README 与软件内「帮助窗口 → 关于」均已声明。

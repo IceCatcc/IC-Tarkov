@@ -311,7 +311,6 @@ function QuestBoardCard({
     setGraphTab('chain')
     setGraphFocusId(id)
   }
-  const profile = useStore((s) => s.settings.profile)
   const detail = useQuestDetail(n.id)
   const url = wikiUrlFor(n.id)
   const avatar = traderImage(n.traderId)
@@ -320,7 +319,6 @@ function QuestBoardCard({
   const items = detail
     ? dedupeItems((detail.objectives ?? []).filter((o) => !o.any).flatMap((o) => o.items ?? []))
     : dedupeItems(n.turnIns ?? [])
-  const loyalty = profile?.loyalty ?? {}
 
   return (
     <div
@@ -448,23 +446,15 @@ function QuestBoardCard({
       n.legacy ||
       (n.modes && n.modes.length > 0 && n.modes.length < 2) ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {n.traderReqs?.map((r, i) => {
-            const met =
-              r.reqType === 'reputation'
-                ? (loyalty[r.traderId] ?? 1) >= r.value
-                : (loyalty[r.traderId] ?? 1) >= r.value
-            return (
-              <span
-                key={`${r.traderId}-${i}`}
-                className={`px-1.5 py-0.5 rounded border text-[12px] ${
-                  met ? 'border-line/45 text-muted/75' : 'border-line/35 text-muted/55'
-                }`}
-              >
-                {traderDisplayName(r.traderId, r.traderName)}{' '}
-                {r.reqType === 'reputation' ? `好感 ≥ ${r.value}` : `LL${r.value}`}
-              </span>
-            )
-          })}
+          {n.traderReqs?.map((r, i) => (
+            <span
+              key={`${r.traderId}-${i}`}
+              className="px-1.5 py-0.5 rounded border border-line/45 text-[12px] text-muted/75"
+            >
+              {traderDisplayName(r.traderId, r.traderName)}{' '}
+              {r.reqType === 'reputation' ? `好感 ≥ ${r.value}` : `LL${r.value}`}
+            </span>
+          ))}
           {n.prestigeLevel != null && (
             <span className="px-1.5 py-0.5 rounded border border-amber/25 bg-amber/10 text-[#d4a174] text-[12px]">
               转生 {n.prestigeLevel}

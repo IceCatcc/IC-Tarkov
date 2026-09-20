@@ -70,8 +70,8 @@ pub struct TraderReqPayload {
     pub trader_name: String,
     pub req_type: String,
     pub value: i64,
-    /// 比较方式（>= / <= / < / > 等）；缺省按 >= 处理。
-    /// Fence「亡羊补牢」等任务要求好感**低于**阈值，不能用 >= 判定。
+    /// 比较方式（>= / <= / < / > 等）；缺省按 >= 显示。
+    /// Fence「亡羊补牢」等任务要求好感**低于**阈值，展示时不能一律写「≥」。
     pub compare: String,
 }
 

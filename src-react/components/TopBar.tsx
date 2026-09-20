@@ -15,7 +15,7 @@ import { LanConnectModal } from './LanConnectModal'
 const win = getCurrentWindow()
 
 const NAV_ITEMS: {
-  key: 'monitor' | 'graph' | 'profile' | 'map' | 'collector' | 'items'
+  key: 'monitor' | 'graph' | 'map' | 'collector' | 'items'
   label: string
 }[] = [
   { key: 'monitor', label: '监控' },
@@ -23,7 +23,6 @@ const NAV_ITEMS: {
   { key: 'graph', label: '任务' },
   { key: 'collector', label: '收藏家' },
   { key: 'items', label: '物品' },
-  { key: 'profile', label: '档案' },
 ]
 
 function WinButton({
@@ -56,7 +55,7 @@ export function TopBar() {
   const setPage = useStore((s) => s.setPage)
   const watcher = useStore((s) => s.watcher)
   const openSettings = useStore((s) => s.openSettings)
-  // 任务模式：PVP / PVPS / PVE（三套任务进度、收藏、档案各自独立；日志检测到会话模式时自动跟随）
+  // 任务模式：PVP / PVPS / PVE（三套任务进度与收藏各自独立；日志检测到会话模式时自动跟随）
   const questMode = useStore((s) => s.questMode)
   const setQuestMode = useStore((s) => s.setQuestMode)
   const live = watcher.watching && !watcher.error
@@ -221,7 +220,7 @@ export function TopBar() {
         {/* 任务模式切换：PVP / PVPS / PVE（三套数据各自独立） */}
         <div
           className="flex items-center rounded-full border border-line bg-ink-700 p-0.5 shrink-0"
-          title="任务模式：PVP（正规服务器）/ PVPS（PvP 赛季）/ PVE（PvE 服务器）。三种模式的任务进度、收藏家进度与档案各自独立保存；游戏启动时从日志检测会话模式并自动切换，也可手动点选（会记住选择）。"
+          title="任务模式：PVP（正规服务器）/ PVPS（PvP 赛季）/ PVE（PvE 服务器）。三种模式的任务进度与收藏家进度各自独立保存；游戏启动时从日志检测会话模式并自动切换，也可手动点选（会记住选择）。"
         >
           {(['pvp', 'pvps', 'pve'] as const).map((m) => (
             <button

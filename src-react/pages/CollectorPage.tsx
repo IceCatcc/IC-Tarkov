@@ -3,7 +3,7 @@ import { useStore, useQuestDetail, dedupeItems } from '../store'
 import { getCollectorQuestId, getCollectedItems, setItemCollected } from '../tauri'
 import { traderDisplayName } from '../traderMeta'
 import { isMobile } from '../platform'
-import { compareMet, compareLabel, type ItemRef } from '../types'
+import { compareLabel, type ItemRef } from '../types'
 
 /** 卡片网格间距（px） */
 const GAP = 8
@@ -96,7 +96,6 @@ function ItemCard({
 export function CollectorPage() {
   const playerQuests = useStore((s) => s.playerQuests)
   const unlockedQuests = useStore((s) => s.unlockedQuests)
-  const profile = useStore((s) => s.settings.profile)
   const questMode = useStore((s) => s.questMode)
   const collectedItems = useStore((s) => s.collectedItems)
   const setCollectedItems = useStore((s) => s.setCollectedItems)
@@ -303,45 +302,28 @@ export function CollectorPage() {
         <div className="flex flex-wrap gap-1 min-w-0 items-center">
           {detail?.minLevel != null && (
             <span
-              className={`inline-flex items-center h-6 px-1.5 rounded border ${
-                (profile?.level ?? 1) >= detail.minLevel
-                  ? 'border-line/45 text-muted/75'
-                  : 'border-line/35 text-muted/55'
-              }`}
-              title={`角色等级需 Lv${detail.minLevel}+，当前 Lv${profile?.level ?? 1}`}
+              className="inline-flex items-center h-6 px-1.5 rounded border border-line/45 text-muted/75"
+              title={`角色等级需 Lv${detail.minLevel}+`}
             >
-              <span className="mr-1">
-                {(profile?.level ?? 1) >= detail.minLevel ? '✓' : '✗'}
-              </span>
-              Lv{detail.minLevel}+（当前 Lv{profile?.level ?? 1}）
+              Lv{detail.minLevel}+
             </span>
           )}
           {!detail?.traderReqs?.length ? (
             detail?.minLevel == null && <span className="text-muted">无商人要求</span>
           ) : (
             detail.traderReqs.map((r, i) => {
-              const cur = profile?.loyalty?.[r.traderId] ?? 1
-              // 按数据自带的 compareMethod 判定（如好感需 < -1）
-              const met = compareMet(cur, r.value, r.compare)
               const isLv = r.reqType === 'level' || r.reqType === 'variable'
               const text = isLv
-                ? `LL${r.value}（当前 LL${cur}）`
+                ? `LL${r.value}`
                 : r.reqType === 'reputation'
                   ? `好感 ${compareLabel(r.compare)} ${r.value}`
                   : '额外条件'
               return (
                 <span
                   key={`${r.traderId}-${r.reqType}-${r.value}-${i}`}
-                  className={`inline-flex items-center h-6 px-1.5 rounded border ${
-                    met || (!isLv && r.reqType !== 'reputation')
-                      ? 'border-line/45 text-muted/75'
-                      : 'border-line/35 text-muted/55'
-                  }`}
+                  className="inline-flex items-center h-6 px-1.5 rounded border border-line/45 text-muted/75"
                 >
                   {traderDisplayName(r.traderId, r.traderName)} {text}
-                  {(isLv || r.reqType === 'reputation') && (
-                    <span className="ml-1">{met ? '✓' : '✗'}</span>
-                  )}
                 </span>
               )
             })

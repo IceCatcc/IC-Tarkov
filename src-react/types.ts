@@ -53,16 +53,7 @@ export interface WatcherState {
 // 后端 watcher-state 事件载荷（字段与 WatcherState 一致）
 export type WatcherStatePayload = WatcherState
 
-// 角色档案（好感度日志无法获取，用户手动填写）
-export interface PlayerProfile {
-  level: number
-  /** traderId -> 忠诚等级 LL(1..4)，未填写视为 1 */
-  loyalty: Record<string, number>
-  /** 已锁定的地图 id 列表（玩家尚未解锁的地图）；为空表示全部地图可用 */
-  lockedMaps: string[]
-}
-
-/** 地图列表项（角色页管理地图解锁用） */
+/** 地图列表项（id + 展示名） */
 export interface MapInfo {
   id: string
   name: string
@@ -71,7 +62,6 @@ export interface MapInfo {
 export interface AppSettings {
   logDir: string
   screenshotDir: string
-  profile: PlayerProfile
   /** 读取坐标后是否删除截图（开启时启动后产生的不含坐标截图也会被清理） */
   deleteScreenshots: boolean
   /** 移动端屏幕常亮（Android FLAG_KEEP_SCREEN_ON）；桌面端不生效，仅持久化 */
@@ -132,25 +122,6 @@ export interface TraderReq {
   compare: string
 }
 
-/** 按 compare 比较：缺省视为 >= */
-export function compareMet(cur: number, value: number, compare: string): boolean {
-  switch (compare) {
-    case '<':
-      return cur < value
-    case '<=':
-      return cur <= value
-    case '>':
-      return cur > value
-    case '>=':
-      return cur >= value
-    case '==':
-    case '=':
-      return cur === value
-    default:
-      return cur >= value
-  }
-}
-
 /**
  * 任务的忠诚等级（LL）需求：traderReqs 中 level 与 variable 的最大值；0 = 无要求。
  * variable 是源数据用「商人全局变量」表达的等级条件（详情面板同样按「忠诚等级 LLn」展示），
@@ -170,7 +141,7 @@ export function llLabel(ll: number): string {
   return ll >= 1 ? `LL${ll}+` : '无 LL 要求'
 }
 
-/** 任务模式：PVP（常驻）/ PVPS（PvP 赛季）/ PVE —— 三种模式进度、收藏、档案各自独立 */
+/** 任务模式：PVP（常驻）/ PVPS（PvP 赛季）/ PVE —— 三种模式的进度与收藏各自独立 */
 export type QuestMode = 'pvp' | 'pvps' | 'pve'
 
 /** 模式展示名 */

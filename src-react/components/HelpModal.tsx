@@ -46,10 +46,6 @@ export function HelpModal({
               t: '2. 配置截图目录',
               d: '配置截图目录，指向「文档\\Escape from Tarkov\\Screenshots\\」。若该目录不存在，请进入游戏后按 PrintScreen 键（默认）进行截图后再配置。',
             },
-            {
-              t: '3. 设置游戏档',
-              d: '在「档案」页面设置当前游戏档的角色等级、商人好感与地图解锁情况。',
-            },
           ].map((s) => (
             <div
               key={s.t}

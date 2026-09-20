@@ -29,7 +29,7 @@ import { buildWikiUrl, type WikiSite } from './wiki'
 import { ICON_DEFAULTS, migrateChips } from './mapIconGroups'
 
 interface AppState {
-  page: 'monitor' | 'graph' | 'map' | 'profile' | 'collector' | 'items'
+  page: 'monitor' | 'graph' | 'map' | 'collector' | 'items'
   setPage: (p: AppState['page']) => void
 
   /** 当前游戏所在地图（游戏内部 location id，如 factory4_day），由全局 map-changed 事件写入，任何页面生效 */
@@ -172,15 +172,6 @@ interface AppState {
 
   hideLegacyGraph: boolean
   setHideLegacyGraph: (v: boolean) => void
-  /** 仅显示商人忠诚等级达标的任务（搜索时忽略） */
-  repMetGraph: boolean
-  setRepMetGraph: (v: boolean) => void
-  /** 仅显示玩家等级足够的任务（搜索时忽略） */
-  lvlMetGraph: boolean
-  setLvlMetGraph: (v: boolean) => void
-  /** 仅显示地图已解锁（未锁定）的任务 */
-  mapUnlockedGraph: boolean
-  setMapUnlockedGraph: (v: boolean) => void
   /** 转生任务（Prestige）的显示开关：勾选显示、不勾选排除 */
   showPrestigeGraph: boolean
   setShowPrestigeGraph: (v: boolean) => void
@@ -228,7 +219,7 @@ export function normQuestMode(m: unknown): QuestMode {
 
 /**
  * 切换到某个任务模式：通知后端把「查看模式」切过去，再把该模式的任务进度、
- * 解锁集合、收藏家进度、档案重新拉一遍（三套数据在后端各自独立）。
+ * 解锁集合与收藏家进度重新拉一遍（三套数据在后端各自独立）。
  */
 async function switchBackendMode(m: QuestMode): Promise<void> {
   try {
@@ -271,9 +262,6 @@ const DEFAULT_DISABLED_TRADERS = [
 ]
 
 interface GraphPrefs {
-  repMet: boolean
-  lvlMet: boolean
-  mapUnlocked: boolean
   /** 任务板是否显示已完成任务 */
   showCompletedBoard: boolean
   /** 详情面板是否跟随节点卡片 */
@@ -286,9 +274,6 @@ interface GraphPrefs {
 
 function loadGraphPrefs(): GraphPrefs {
   const fallback: GraphPrefs = {
-    repMet: true,
-    lvlMet: false,
-    mapUnlocked: false,
     showCompletedBoard: true, // 任务板默认显示已完成任务
     followDetail: false, // 详情面板默认是自由拖动的浮层
     hideLegacy: false,
@@ -302,10 +287,6 @@ function loadGraphPrefs(): GraphPrefs {
     if (!raw) return fallback
     const p = JSON.parse(raw) as Partial<GraphPrefs>
     return {
-      // 这几项不再提供设置入口，固定为下列值（忽略历史偏好）
-      repMet: false,
-      lvlMet: false,
-      mapUnlocked: false,
       // 任务板「显示已完成」：首次升级时没有该字段，按默认「显示」处理
       showCompletedBoard:
         typeof p.showCompletedBoard === 'boolean' ? p.showCompletedBoard : true,
@@ -323,9 +304,6 @@ function loadGraphPrefs(): GraphPrefs {
 function persistGraphPrefs() {
   const s = useStore.getState()
   const data: GraphPrefs = {
-    repMet: s.repMetGraph,
-    lvlMet: s.lvlMetGraph,
-    mapUnlocked: s.mapUnlockedGraph,
     showCompletedBoard: s.showCompletedBoard,
     followDetail: s.followDetail,
     hideLegacy: s.hideLegacyGraph,
@@ -348,9 +326,6 @@ export function collectUiPrefs(): Record<string, unknown> {
   const s = useStore.getState()
   return {
     graphPrefs: {
-      repMet: s.repMetGraph,
-      lvlMet: s.lvlMetGraph,
-      mapUnlocked: s.mapUnlockedGraph,
       showCompletedBoard: s.showCompletedBoard,
       followDetail: s.followDetail,
       hideLegacy: s.hideLegacyGraph,
@@ -405,7 +380,6 @@ export const useStore = create<AppState>((set, get) => ({
   settings: {
     logDir: '',
     screenshotDir: '',
-    profile: { level: 1, loyalty: {}, lockedMaps: [] },
     deleteScreenshots: true,
     keepScreenOn: true,
   },
@@ -708,21 +682,6 @@ export const useStore = create<AppState>((set, get) => ({
 
   hideLegacyGraph: prefs0.hideLegacy,
   setHideLegacyGraph: (v) => set({ hideLegacyGraph: v }),
-  repMetGraph: prefs0.repMet,
-  setRepMetGraph: (v) => {
-    set({ repMetGraph: v })
-    persistGraphPrefs()
-  },
-  lvlMetGraph: prefs0.lvlMet,
-  setLvlMetGraph: (v) => {
-    set({ lvlMetGraph: v })
-    persistGraphPrefs()
-  },
-  mapUnlockedGraph: prefs0.mapUnlocked,
-  setMapUnlockedGraph: (v) => {
-    set({ mapUnlockedGraph: v })
-    persistGraphPrefs()
-  },
   showPrestigeGraph: prefs0.showPrestige,
   setShowPrestigeGraph: (v) => {
     set({ showPrestigeGraph: v })
@@ -761,9 +720,6 @@ export const useStore = create<AppState>((set, get) => ({
     const patch: Partial<AppState> = {}
     const g = u.graphPrefs
     if (g && typeof g === 'object') {
-      if (typeof g.repMet === 'boolean') patch.repMetGraph = g.repMet
-      if (typeof g.lvlMet === 'boolean') patch.lvlMetGraph = g.lvlMet
-      if (typeof g.mapUnlocked === 'boolean') patch.mapUnlockedGraph = g.mapUnlocked
       if (typeof g.showCompletedBoard === 'boolean') {
         patch.showCompletedBoard = g.showCompletedBoard
       }

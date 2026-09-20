@@ -21,7 +21,6 @@ import { ObjectiveChecklist } from '../components/ObjectiveChecklist'
 import { traderDisplayName } from '../traderMeta'
 import type { GraphEdge, GraphNode, ItemRef, MapInfo } from '../types'
 import {
-  compareMet,
   compareLabel,
   questLoyaltyLevel,
   llLabel,
@@ -383,13 +382,6 @@ export function QuestGraphPage() {
   const wikiUrlFor = useStore((s) => s.wikiUrlFor)
   const hideLegacy = useStore((s) => s.hideLegacyGraph)
   const setHideLegacy = useStore((s) => s.setHideLegacyGraph)
-  const repMet = useStore((s) => s.repMetGraph)
-  const setRepMet = useStore((s) => s.setRepMetGraph)
-  const lvlMet = useStore((s) => s.lvlMetGraph)
-  const setLvlMet = useStore((s) => s.setLvlMetGraph)
-  const mapUnlocked = useStore((s) => s.mapUnlockedGraph)
-  const setMapUnlocked = useStore((s) => s.setMapUnlockedGraph)
-  const profile = useStore((s) => s.settings.profile)
   // 「转生任务」显示开关：转生（Prestige）门槛任务，默认显示
   const showPrestige = useStore((s) => s.showPrestigeGraph)
   const setShowPrestige = useStore((s) => s.setShowPrestigeGraph)
@@ -657,38 +649,12 @@ export function QuestGraphPage() {
     for (const n of graph.nodes) nodeMap[n.id] = n
 
     const q = search.trim().toLowerCase()
-    // 地图可用过滤：开启时，任务涉及的任一地图被锁定即不显示；无地图任务恒可用。
-    // lockedMaps 为空表示全部地图可用（用户在「角色」页未管理过）。
-    const lockedMaps = profile?.lockedMaps
-    const hasLockedMap = (maps: string[] | null | undefined): boolean => {
-      if (!mapUnlocked) return false
-      if (!maps || maps.length === 0) return false
-      if (!lockedMaps || lockedMaps.length === 0) return false
-      return maps.some((m) => lockedMaps.includes(m))
-    }
-    // 专注于「需求过滤」（好感 / 等级 / 地图 / 商人 / 赛季任务 / 地区），不含搜索。
-    const effRepMet = repMet
-    const effLvlMet = lvlMet
+    // 专注于「需求过滤」（赛季任务 / 模式），不含搜索。
     const reqFails = (n: GraphNode): boolean => {
       if (hideLegacy && n.legacy) return true
       if (!showPrestige && n.prestigeLevel != null) return true
-      // 商人筛选与地区筛选均已移除，不再参与链条隐藏传播
-      if (hasLockedMap(n.maps)) return true
       // 模式过滤（pvp/pve）：不属于当前模式的任务视为隐藏，并参与任务链传播
       if (!modeOk(n)) return true
-      const ll = profile?.loyalty?.[n.traderId] ?? 1
-      if (effRepMet && ll === 0) return true
-      if (effLvlMet && (n.minLevel ?? 1) > Math.max(1, profile?.level ?? 1)) return true
-      if (effRepMet) {
-        for (const r of n.traderReqs ?? []) {
-          if (r.reqType === 'reputation') continue
-          if (
-            !compareMet(profile?.loyalty?.[r.traderId] ?? 1, r.value, r.compare)
-          ) {
-            return true
-          }
-        }
-      }
       return false
     }
     const vis = new Set<string>()
@@ -696,8 +662,6 @@ export function QuestGraphPage() {
       if (!modeOk(n)) continue
       if (hideLegacy && n.legacy) continue
       if (!showPrestige && n.prestigeLevel != null) continue
-      // 地图可用过滤：涉及未解锁地图的任务不显示
-      if (hasLockedMap(n.maps)) continue
       // 搜索不再剔除节点：只记录命中集合，未命中项在绘制时淡化，保留上下文与布局稳定
       vis.add(n.id)
     }
@@ -708,33 +672,6 @@ export function QuestGraphPage() {
       matches = new Set<string>()
       for (const n of graph.nodes) {
         if (n.name.toLowerCase().includes(q)) matches.add(n.id)
-      }
-    }
-
-    // 按名称搜索时无视好感和等级、前置筛选
-    if (!q && (lvlMet || repMet)) {
-      for (const n of graph.nodes) {
-        if (!vis.has(n.id)) continue
-        const ll = profile?.loyalty?.[n.traderId] ?? 1
-        if (repMet && ll === 0) {
-          vis.delete(n.id)
-          continue
-        }
-        if (lvlMet && (n.minLevel ?? 1) > Math.max(1, profile?.level ?? 1)) {
-          vis.delete(n.id)
-          continue
-        }
-        if (repMet) {
-          for (const r of n.traderReqs ?? []) {
-            if (r.reqType === 'reputation') continue
-            if (
-              !compareMet(profile?.loyalty?.[r.traderId] ?? 1, r.value, r.compare)
-            ) {
-              vis.delete(n.id)
-              break
-            }
-          }
-        }
       }
     }
 
@@ -1357,7 +1294,7 @@ export function QuestGraphPage() {
       chainRows,
       matches,
     }
-  }, [graph, search, hideLegacy, repMet, lvlMet, mapUnlocked, profile, statusMap, completedSet, unlockedSet, questMode, showPrestige, graphTab])
+  }, [graph, search, hideLegacy, statusMap, completedSet, unlockedSet, questMode, showPrestige, graphTab])
 
   // 搜索唯一命中项：命中数恰好为 1 时自动把视图居中过去（不改变缩放）
   const soleMatchId = useMemo(() => {
@@ -1915,7 +1852,6 @@ export function QuestGraphPage() {
       cv.height = ph
     }
     const ctx = cv.getContext('2d')!
-    const loyalty = profile?.loyalty ?? {}
 
     // ===== 主画布 =====
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -2338,20 +2274,14 @@ export function QuestGraphPage() {
           r.traderId === n.traderId
         )
           continue
-        // 用数据自带的 compareMethod 判定：Fence「亡羊补牢」要求好感小于阈值
-        const met = compareMet(loyalty[r.traderId] ?? 1, r.value, r.compare)
+        // 需求文案：level = 忠诚等级；reputation = 好感（用数据自带的比较符号），
+        // 如 Fence「亡羊补牢」要求好感小于阈值
         const label =
           r.reqType === 'level' || r.reqType === 'variable'
             ? `${traderDisplayName(r.traderId, r.traderName)} LL${r.value}`
             : `好感${compareLabel(r.compare)}${r.value}`
-        // 条件 chip 一律中性灰（未满足的再淡一档）：图谱的重点是「进行到哪一步」，
-        // 而不是后续任务里哪个条件还没满足，不该用彩色抢注意力
-        drawChip(
-          label,
-          met ? '#8b949e' : '#6e7681',
-          met ? '#30363d' : '#262c33',
-          'rgba(255,255,255,0.03)',
-        )
+        // 条件 chip 一律中性灰：图谱的重点是「进行到哪一步」，条件本身不该抢注意力
+        drawChip(label, '#8b949e', '#30363d', 'rgba(255,255,255,0.03)')
       }
       // 转生（Prestige）门槛任务：同名任务靠这个标记区分是第几转（低饱和琥珀）
       if (n.prestigeLevel != null) drawChip(`转生${n.prestigeLevel}`, '#d4a174', '#5a4a2f', 'rgba(239,159,39,0.10)')
@@ -2361,8 +2291,6 @@ export function QuestGraphPage() {
         drawChip('仅PvP', '#8b949e', '#30363d', 'rgba(255,255,255,0.03)')
       if (n.modes && n.modes.length > 0 && !n.modes.includes('pvp'))
         drawChip('仅PvE', '#8b949e', '#30363d', 'rgba(255,255,255,0.03)')
-      if ((loyalty[n.traderId] ?? 1) === 0)
-        drawChip('商人未解锁', '#8b949e', '#30363d', 'rgba(255,255,255,0.03)')
       ctx.textBaseline = 'alphabetic'
       ctx.globalAlpha = 1
     }
@@ -2869,17 +2797,14 @@ export function QuestGraphPage() {
                     <div className="text-[13px] text-muted mb-1">贸易条件</div>
                     <div className="space-y-1 text-[14px]">
                       {detail.traderReqs.map((r, i) => {
-                        const cur = profile?.loyalty?.[r.traderId] ?? 1
-                        // 按数据自带的 compareMethod 判定（如好感需 < -1）
-                        const met = compareMet(cur, r.value, r.compare)
                         // 需求文案：level = 忠诚等级（权威的 traderRequirements）；
                         // reputation = 好感；variable = 仅知存在额外商人条件，
                         // 源数据只给全局变量阈值，不等于等级/好感数字，故不展示具体数值
                         const isLv = r.reqType === 'level' || r.reqType === 'variable'
                         const text = isLv
-                          ? `忠诚等级 LL${r.value}（当前 LL${cur}）`
+                          ? `忠诚等级 LL${r.value}`
                           : r.reqType === 'reputation'
-                            ? `好感 ${compareLabel(r.compare)} ${r.value}（当前 ${cur}）`
+                            ? `好感 ${compareLabel(r.compare)} ${r.value}`
                             : '额外条件（需达成商人要求）'
                         return (
                           <div
@@ -2889,12 +2814,6 @@ export function QuestGraphPage() {
                             <span className="text-[#c9d1d9] truncate">
                               {traderDisplayName(r.traderId, r.traderName)} {text}
                             </span>
-                            {(isLv || r.reqType === 'reputation') &&
-                              (met ? (
-                                <span className="text-muted/80 shrink-0">✓ 已达标</span>
-                              ) : (
-                                <span className="text-muted/55 shrink-0">✗ 未达标</span>
-                              ))}
                           </div>
                         )
                       })}

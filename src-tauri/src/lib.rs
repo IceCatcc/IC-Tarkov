@@ -63,61 +63,19 @@ impl AppState {
 
 // ---------------- 应用设置（持久化） ----------------
 
-/// 角色档案（日志无法提供好感度，由用户手动填写）
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct PlayerProfile {
-    /// 玩家等级
-    pub level: u32,
-    /// 商人忠诚等级表：trader_id -> LL（1..4），未填写按 1 处理
-    pub loyalty: std::collections::HashMap<String, u32>,
-    /// 已锁定的地图 id 列表（玩家尚未解锁的地图）；为空表示全部地图可用
-    #[serde(default)]
-    pub locked_maps: Vec<String>,
-}
-
-impl Default for PlayerProfile {
-    fn default() -> Self {
-        Self {
-            level: 1,
-            loyalty: std::collections::HashMap::new(),
-            locked_maps: Vec::new(),
-        }
-    }
-}
-
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub log_dir: String,
     pub screenshot_dir: String,
-    pub profile: PlayerProfile,
     /// 读取坐标后是否删除截图（默认 true，保留原有行为）；
     /// 开启时启动之后产生的不含坐标截图也会被一并清理
     pub delete_screenshots: bool,
     /// 移动端屏幕常亮（Android FLAG_KEEP_SCREEN_ON，默认 true）；桌面端不生效，仅持久化
     pub keep_screen_on: bool,
-    /// 各任务模式（pvp / pvps / pve）的档案真值源
-    #[serde(default)]
-    pub profiles: HashMap<String, PlayerProfile>,
     /// UI 偏好（图谱筛选/模式切换/侧边栏等），宽松 schema：前端自行定义键值
     #[serde(default)]
     pub ui_prefs: std::collections::HashMap<String, serde_json::Value>,
-}
-
-impl AppSettings {
-    /// 读取某个模式的档案（不存在则返回默认）
-    pub fn profile_of(&self, mode: &str) -> PlayerProfile {
-        self.profiles
-            .get(&store::norm_mode(mode))
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// 写回某个模式的档案
-    pub fn set_profile_of(&mut self, mode: &str, p: PlayerProfile) {
-        self.profiles.insert(store::norm_mode(mode), p);
-    }
 }
 
 impl Default for AppSettings {
@@ -132,8 +90,6 @@ impl Default for AppSettings {
         Self {
             log_dir: String::new(),
             screenshot_dir: screenshots,
-            profile: PlayerProfile::default(),
-            profiles: HashMap::new(),
             delete_screenshots: true,
             // 手机端常作第二屏：默认常亮；旧版 settings.json 无该字段时按 true 处理
             keep_screen_on: true,
@@ -346,32 +302,16 @@ fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(data_root(app)?.join("settings.json"))
 }
 
-/// 当前界面查看的任务模式（AppState 尚未初始化时回退 pvp）
-pub(crate) fn view_mode_of(app: &tauri::AppHandle) -> String {
-    app.try_state::<AppState>()
-        .map(|s| s.view())
-        .unwrap_or_else(|| "pvp".to_string())
-}
-
 fn read_settings(app: &tauri::AppHandle) -> AppSettings {
-    let mut s = match settings_path(app) {
+    match settings_path(app) {
         Ok(p) => std::fs::read_to_string(p)
             .ok()
             .and_then(|t| serde_json::from_str::<AppSettings>(&t).ok())
+            // 旧 settings.json 里的 profile / profiles 字段已被移除，
+            // serde 默认忽略未知字段，读到旧文件不会报错
             .unwrap_or_default(),
         Err(_) => AppSettings::default(),
-    };
-    // 旧版单档案迁移：只有 profile 没有 profiles 时，把旧档案归入 PVP
-    if s.profiles.is_empty()
-        && (s.profile.level > 1
-            || !s.profile.loyalty.is_empty()
-            || !s.profile.locked_maps.is_empty())
-    {
-        s.profiles.insert("pvp".to_string(), s.profile.clone());
     }
-    // 镜像：profile 始终等于「当前查看模式」的档案，旧前端与旧逻辑无需感知 profiles
-    s.profile = s.profile_of(&view_mode_of(app));
-    s
 }
 
 #[tauri::command]
@@ -385,13 +325,12 @@ fn save_settings(
     log_dir: String,
     screenshot_dir: String,
     delete_screenshots: Option<bool>,
-    profile: Option<PlayerProfile>,
     ui_prefs: Option<std::collections::HashMap<String, serde_json::Value>>,
 ) -> Result<AppSettings, String> {
     // 以现有设置为基底合并，未传字段保持原值
     let mut s = read_settings(&app);
-    // 目录字段语义：空 = 不修改原值（仅改角色/UI 偏好时不破坏目录配置）；
-    // 非空 = 必须是存在的目录。这样好感度/UI 偏好的保存永远不会因目录问题失败。
+    // 目录字段语义：空 = 不修改原值（仅改 UI 偏好时不破坏目录配置）；
+    // 非空 = 必须是存在的目录。这样 UI 偏好的保存永远不会因目录问题失败。
     if !log_dir.is_empty() {
         if !Path::new(&log_dir).is_dir() {
             return Err(format!("日志目录不存在：{log_dir}"));
@@ -404,23 +343,12 @@ fn save_settings(
     if let Some(d) = delete_screenshots {
         s.delete_screenshots = d;
     }
-    let profile_changed = profile.is_some();
-    if let Some(p) = profile {
-        s.profile = p;
-    }
     if let Some(u) = ui_prefs {
         // 合并而非整表替换：UI 偏好只回传 graphPrefs/mapPrefs/uiScale，
         // 保留后端写入的内部字段（如数据位置记录 dataLocation）。
         s.ui_prefs.extend(u);
     }
     write_settings(&app, &s)?;
-    // 档案变化广播给同步的手机端（带模式标识：档案按模式独立，对端只在查看同一模式时采用）
-    if profile_changed {
-        let _ = app.emit(
-            "profile-changed",
-            serde_json::json!({ "profile": s.profile, "mode": view_mode_of(&app) }),
-        );
-    }
     Ok(s)
 }
 
@@ -1141,16 +1069,11 @@ fn restart_watcher_after_import(app: &tauri::AppHandle) {
 
 /// 写设置到 settings.json（save_settings 与局域网快照应用共用）
 pub(crate) fn write_settings(app: &tauri::AppHandle, s: &AppSettings) -> Result<(), String> {
-    let mut s = s.clone();
-    // 前端提交的 profile 视为「当前查看模式」的档案，写回真值源后再落盘
-    let mode = view_mode_of(app);
-    s.set_profile_of(&mode, s.profile.clone());
-    s.profile = s.profile_of(&mode);
     let p = settings_path(app)?;
     if let Some(parent) = p.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let json = serde_json::to_string_pretty(&s).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
     std::fs::write(&p, json).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1198,7 +1121,7 @@ fn set_view_mode(app: tauri::AppHandle, mode: String) -> Result<(), String> {
             true
         }
     };
-    // 切换后立即落盘一次，避免刚编辑的档案 / 进度丢失
+    // 切换后立即落盘一次，避免刚编辑的进度丢失
     if changed {
         persist::save_all_from(&app);
         emit_state(&app);

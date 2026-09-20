@@ -6,7 +6,7 @@ import { traderDisplayName } from './traderMeta'
 
 /**
  * 事件自带的任务模式与当前档位不同时自动跟随切换。
- * 手机端没有本地日志，全靠电脑端推来的事件（quest-event / profile-changed 等都带 mode）
+ * 手机端没有本地日志，全靠电脑端推来的事件（quest-event / session-mode 等都带 mode）
  * 或同步快照来对齐档位；桌面端则由日志的 session-mode 事件对齐。
  */
 function followEventMode(mode?: string): void {
@@ -23,7 +23,6 @@ import type {
   QuestGraph,
   QuestDetail,
   AppSettings,
-  PlayerProfile,
   PlayerPositionPayload,
   MapInfo,
   MapMarkersDoc,
@@ -67,7 +66,7 @@ export async function initTauri(): Promise<UnlistenFn> {
       setWatcher(e.payload)
     }),
   )
-  // 同步：电脑端的收藏进度 / 档案变化（本机操作的后端事件回声为同值，无害）
+  // 同步：电脑端的收藏进度变化（本机操作的后端事件回声为同值，无害）
   track(
     await listen<string[]>('collected-changed', (e) => {
       useStore.getState().setCollectedItems(e.payload)
@@ -80,19 +79,6 @@ export async function initTauri(): Promise<UnlistenFn> {
       if (p?.questId) useStore.getState().setObjectivesDone(p.questId, p.objectivesDone ?? [])
     }),
   )
-  track(
-    await listen<{ profile: PlayerProfile; mode?: string }>('profile-changed', (e) => {
-      const p = e.payload
-      if (!p?.profile) return
-      // 事件带的是对端「当前模式」的档案：档位不同则先跟随切换，再（切换后）写入档案
-      followEventMode(p.mode)
-      const s = useStore.getState()
-      const m = normQuestMode(p.mode)
-      if (p.mode && m !== s.questMode) return
-      s.setSettings({ ...s.settings, profile: p.profile })
-    }),
-  )
-
   // 全局监听当前地图变化：任何页面（含非地图页）收到 map-changed 都写入 store，
   // 保证在别的页面进入某张地图时全局当前地图被更新，切回地图页即默认切换到对应地图。
   const { setCurrentMapId, setMapNames } = useStore.getState()
@@ -139,9 +125,6 @@ export async function initTauri(): Promise<UnlistenFn> {
   // 这里订阅偏好字段变化，防抖写回后端。
   let prefTimer: number | undefined
   const prefFields = [
-    'repMetGraph',
-    'lvlMetGraph',
-    'mapUnlockedGraph',
     'showCompletedBoard',
     'followDetail',
     'hideLegacyGraph',
@@ -171,7 +154,6 @@ export async function initTauri(): Promise<UnlistenFn> {
         s.settings.logDir,
         s.settings.screenshotDir,
         s.settings.deleteScreenshots,
-        undefined,
         collectUiPrefs(),
       ).catch(() => {})
     }, 400)
@@ -325,16 +307,12 @@ export async function saveSettings(
   logDir: string,
   screenshotDir: string,
   deleteScreenshots?: boolean,
-  profile?: PlayerProfile,
   uiPrefs?: Record<string, unknown>,
 ): Promise<AppSettings> {
-  // 档案变化反向同步到电脑端（仅显式携带 profile 时；先发，不依赖本机保存成功）
-  if (profile) sendLanMsg({ type: 'set-profile', profile })
   return await invoke<AppSettings>('save_settings', {
     logDir,
     screenshotDir,
     deleteScreenshots,
-    profile,
     uiPrefs,
   })
 }
@@ -513,8 +491,6 @@ export interface SyncSummary {
   collectedCount: number
   /** 手动解锁的任务数 */
   unlockedCount: number
-  /** 档案等级 */
-  level: number
   /** 内容指纹：两端一致即代表数据相同 */
   hash: string
   /** 是否为空数据（全新安装 / 从未记录进度） */

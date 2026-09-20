@@ -53,7 +53,6 @@ export function LanConflictModal() {
     { label: '已完成的任务', get: (s) => s.completedCount },
     { label: '收藏家已收集', get: (s) => s.collectedCount },
     { label: '手动解锁任务', get: (s) => s.unlockedCount },
-    { label: '角色等级', get: (s) => s.level },
   ]
 
   return (

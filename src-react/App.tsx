@@ -16,7 +16,6 @@ import { TopBar } from './components/TopBar'
 import { StartupSplash } from './components/StartupSplash'
 import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
-import { ProfilePage } from './pages/ProfilePage'
 import { CollectorPage } from './pages/CollectorPage'
 import { ItemsPage } from './pages/ItemsPage'
 import { MapPage } from './pages/MapPage'
@@ -250,7 +249,6 @@ export default function App() {
             <QuestGraphPage />
           </div>
         )}
-        {page === 'profile' && <ProfilePage />}
         {page === 'collector' && <CollectorPage />}
         {itemsAlive && (
           <div className="h-full" style={{ display: page === 'items' ? 'block' : 'none' }}>

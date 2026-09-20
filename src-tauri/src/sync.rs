@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::store::{norm_mode, ModeData, MODES};
+use crate::store::{ModeData, MODES};
 
 /// 快照结构（settings + 三种模式的进度）。导出时各模式的 offsets 已被清空。
 #[derive(Serialize, Deserialize)]
@@ -39,8 +39,6 @@ pub struct SyncSummary {
     pub collected_count: usize,
     /// 手动解锁的任务数（三套合计）
     pub unlocked_count: usize,
-    /// 档案等级（当前查看模式）
-    pub level: u32,
     /// 内容指纹（FNV-1a 64 位十六进制）：两端一致即代表用户数据相同
     pub hash: String,
     /// 是否为空数据（全新安装 / 从未记录任何进度）
@@ -89,7 +87,6 @@ pub fn build_snapshot(app: &AppHandle) -> Result<String, String> {
 /// 生成数据摘要：三套进度的规范化指纹 + 便于展示的计数
 pub fn build_summary(app: &AppHandle) -> SyncSummary {
     let modes = collect_modes(app);
-    let settings = crate::read_settings(app);
 
     let mut buf = String::new();
     let mut quest_count = 0usize;
@@ -157,19 +154,6 @@ pub fn build_summary(app: &AppHandle) -> SyncSummary {
             buf.push_str(id);
             buf.push('\n');
         }
-
-        let p = settings.profile_of(m);
-        buf.push_str(&format!("#profile level={}\n", p.level));
-        let mut loyalty: Vec<(String, u32)> = p.loyalty.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        loyalty.sort();
-        for (k, v) in &loyalty {
-            buf.push_str(&format!("{k}={v}\n"));
-        }
-        let mut locked_maps: Vec<String> = p.locked_maps.clone();
-        locked_maps.sort();
-        for x in &locked_maps {
-            buf.push_str(&format!("lock={x}\n"));
-        }
     }
 
     SyncSummary {
@@ -177,7 +161,6 @@ pub fn build_summary(app: &AppHandle) -> SyncSummary {
         completed_count,
         collected_count,
         unlocked_count,
-        level: settings.profile.level,
         hash: format!("{:016x}", fnv1a64(buf.as_bytes())),
         empty: quest_count == 0
             && completed_count == 0
@@ -199,9 +182,6 @@ pub fn apply_snapshot_internal(app: &AppHandle, json: &str) -> Result<(), String
         parsed.settings.log_dir.clear();
         parsed.settings.screenshot_dir.clear();
     }
-    // profile 是「当前查看模式」的镜像，以 profiles 真值源为准，避免覆盖错模式
-    let vm = norm_mode(&crate::view_mode_of(app));
-    parsed.settings.profile = parsed.settings.profile_of(&vm);
     crate::write_settings(app, &parsed.settings)?;
 
     // 三套进度写回内存（offsets 清空）
