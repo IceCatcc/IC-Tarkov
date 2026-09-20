@@ -5,12 +5,11 @@
  * 这样切换站点即时生效，不必重建后端数据集。
  */
 
-export type WikiSite = 'eftarkov' | 'tarkovbox' | 'custom'
+export type WikiSite = 'eftarkov' | 'custom'
 
 /** 预设模板：`{taskid}` 处替换为任务 id（大小写不敏感） */
 export const WIKI_TEMPLATES: Record<Exclude<WikiSite, 'custom'>, string> = {
   eftarkov: 'https://www.eftarkov.com/news/id/{taskid}.html',
-  tarkovbox: 'https://www.tarkovbox.com/gamewiki/tasks/{taskid}',
 }
 
 /**

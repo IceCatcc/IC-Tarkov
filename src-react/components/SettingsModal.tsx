@@ -134,11 +134,6 @@ export default function SettingsModal() {
       desc: WIKI_TEMPLATES.eftarkov,
     },
     {
-      site: 'tarkovbox',
-      name: 'TarkovBox',
-      desc: WIKI_TEMPLATES.tarkovbox,
-    },
-    {
       site: 'custom',
       name: '自定义',
       desc: '填写自己的地址模板，用 {taskid} 表示任务 id 的位置',
@@ -157,6 +152,13 @@ export default function SettingsModal() {
       desc: '数据放在程序安装目录旁的 data 里，整包拷贝即可带走',
     },
   ]
+
+  /** 位置选项的展示名（确认框里用） */
+  const locLabel = (kind: DataLocation['kind'] | null): string =>
+    LOC_OPTIONS.find((o) => o.kind === kind)?.name ?? ''
+
+  // 选了「另一个位置」即认为在等确认（取消会把 selLoc 清掉，于是自动恢复）
+  const locConfirm = !!selLoc && !!dataLoc && selLoc !== dataLoc.kind
 
   useEffect(() => {
     getDataLocation()
@@ -306,10 +308,23 @@ export default function SettingsModal() {
           : '数据已迁移到系统目录（AppData），设置与缓存均已一并搬走',
       )
     } catch (e) {
+      // 失败：关掉确认框并把原因显示在设置里（迁移未发生，选中状态一并回到当前位置）
+      setSelLoc(null)
       setError(String(e))
     } finally {
       setMigrating(false)
     }
+  }
+
+  // 点位置按钮：当前项无动作；另一项先高亮并弹确认框，取消即恢复高亮到当前位置
+  const onPickLoc = (kind: DataLocation['kind']) => {
+    setError(null)
+    setSelLoc(dataLoc && kind === dataLoc.kind ? null : kind)
+  }
+
+  const cancelMigrate = () => {
+    if (migrating) return
+    setSelLoc(null)
   }
 
   const onExport = async () => {
@@ -471,7 +486,8 @@ export default function SettingsModal() {
           {/* Wiki 站点：任务资料链接的地址模板 */}
           <div className="border-t border-line pt-4">
             <div className={`${TITLE_CLS} mb-2`}>Wiki 站点</div>
-            <div className="space-y-1.5">
+            {/* 站点并排展示（卡片样式与数据目录位置一致） */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {WIKI_OPTIONS.map((o) => {
                 const active = wikiSite === o.site
                 return (
@@ -479,7 +495,7 @@ export default function SettingsModal() {
                     key={o.site}
                     type="button"
                     onClick={() => setWikiSite(o.site)}
-                    className={`w-full text-left flex items-start gap-2.5 px-3 py-2 rounded border transition-colors ${
+                    className={`text-left flex items-start gap-2.5 px-3 py-2 rounded border transition-colors ${
                       active ? 'border-amber bg-ink-700' : 'border-line hover:bg-ink-700'
                     }`}
                   >
@@ -487,7 +503,7 @@ export default function SettingsModal() {
                       type="radio"
                       readOnly
                       checked={active}
-                      className="w-4 h-4 mt-0.5 accent-amber pointer-events-none"
+                      className="w-4 h-4 mt-0.5 accent-amber pointer-events-none shrink-0"
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block text-[14px] text-[#e6edf3]">{o.name}</span>
@@ -563,18 +579,59 @@ export default function SettingsModal() {
             )}
           </div>
 
-          {/* 数据管理 */}
+          {/* 数据管理（含数据目录位置） */}
           <div className="border-t border-line pt-4">
             <div className={`${TITLE_CLS} mb-2`}>数据管理</div>
-            <div className="flex flex-wrap gap-2">
+
+            {/* 数据目录位置：两个位置并排（卡片样式与 Wiki 站点一致）；
+                点另一个位置直接弹确认框，确认才迁移、取消即回到当前位置 */}
+            {!mobile && dataLoc && (
+              <>
+                <div className={`${TITLE_CLS} mb-1.5`}>数据目录位置</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {LOC_OPTIONS.map((o) => {
+                    const active = (selLoc ?? dataLoc.kind) === o.kind
+                    return (
+                      <button
+                        key={o.kind}
+                        type="button"
+                        onClick={() => onPickLoc(o.kind)}
+                        disabled={migrating}
+                        className={`text-left flex items-start gap-2.5 px-3 py-2 rounded border transition-colors disabled:opacity-60 ${
+                          active ? 'border-amber bg-ink-700' : 'border-line hover:bg-ink-700'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          readOnly
+                          checked={active}
+                          className="w-4 h-4 mt-0.5 accent-amber pointer-events-none shrink-0"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[14px] text-[#e6edf3]">{o.name}</span>
+                          <span className="block text-[13px] text-muted mt-0.5">{o.desc}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* 数据操作：与上面的目录位置分组用分隔线隔开（移动端没有位置选择，不显示分隔线） */}
+            <div
+              className={`flex flex-wrap gap-2 ${
+                !mobile && dataLoc ? 'border-t border-line mt-3 pt-3' : ''
+              }`}
+            >
               {!mobile && (
-              <button
-                onClick={() => setRescanMenu(true)}
-                disabled={busy !== null}
-                className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
-              >
-                {busy === 'rescan' ? '读取中…' : '重新读取日志'}
-              </button>
+                <button
+                  onClick={() => setRescanMenu(true)}
+                  disabled={busy !== null}
+                  className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
+                >
+                  {busy === 'rescan' ? '读取中…' : '重新读取日志'}
+                </button>
               )}
               <button
                 onClick={onExport}
@@ -600,58 +657,8 @@ export default function SettingsModal() {
                 </button>
               )}
             </div>
-            {feedback && (
-              <div className="text-[14px] text-ok mt-2">{feedback}</div>
-            )}
-            {!mobile && dataLoc && (
-              <div className="border-t border-line pt-3 mt-3">
-                <div className={`${TITLE_CLS} mb-1.5`}>数据目录位置</div>
-                <div className="space-y-1.5">
-                  {LOC_OPTIONS.map((o) => {
-                    const active = (selLoc ?? dataLoc.kind) === o.kind
-                    return (
-                      <button
-                        key={o.kind}
-                        type="button"
-                        onClick={() => setSelLoc(o.kind)}
-                        disabled={migrating}
-                        className={`w-full text-left flex items-start gap-2.5 px-3 py-2 rounded border transition-colors disabled:opacity-60 ${
-                          active
-                            ? 'border-amber bg-ink-700'
-                            : 'border-line hover:bg-ink-700'
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          readOnly
-                          checked={active}
-                          className="w-4 h-4 mt-0.5 accent-amber pointer-events-none"
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-[14px] text-[#e6edf3]">
-                            {o.name}
-                          </span>
-                          <span className="block text-[13px] text-muted mt-0.5">
-                            {o.desc}
-                          </span>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-                <div className="mt-2 flex items-center justify-end">
-                  <button
-                    onClick={onMigrateLoc}
-                    disabled={
-                      !selLoc || selLoc === dataLoc.kind || migrating
-                    }
-                    className="px-3 py-1.5 rounded bg-amber text-black text-[14px] font-medium hover:opacity-90 disabled:opacity-40"
-                  >
-                    {migrating ? '迁移中…' : '迁移'}
-                  </button>
-                </div>
-              </div>
-            )}
+
+            {feedback && <div className="text-[14px] text-ok mt-2">{feedback}</div>}
           </div>
         </div>
 
@@ -685,6 +692,41 @@ export default function SettingsModal() {
       {/* 层级需高于设置窗口本身（z-2000），否则会被盖住 */}
       <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} z={2100} />
       {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} z={2200} />}
+
+      {/* 迁移确认：点位置卡片即弹（卡片已高亮为目标位置），取消则恢复原位置 */}
+      {locConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={cancelMigrate}
+        >
+          <div
+            className="w-[380px] max-w-[calc((100vw-32px)/var(--ui-scale,1))] rounded-lg border border-line bg-ink-800 p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-[15px] font-semibold text-[#e6edf3] mb-1">迁移数据目录</div>
+            <div className={`${DESC_CLS} mb-4`}>
+              将把设置、任务进度与数据缓存整体从「{locLabel(dataLoc?.kind ?? null)}」搬到「
+              {locLabel(selLoc)}」，迁移完成后原位置的内容会被清空。确定继续吗？
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={cancelMigrate}
+                disabled={migrating}
+                className="px-3 py-1.5 rounded border border-line text-[14px] text-muted hover:text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={onMigrateLoc}
+                disabled={migrating}
+                className="px-3 py-1.5 rounded bg-amber text-black text-[14px] font-medium hover:opacity-90 disabled:opacity-40"
+              >
+                {migrating ? '迁移中…' : '确认迁移'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {rescanMenu && (
         <div

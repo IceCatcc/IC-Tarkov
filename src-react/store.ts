@@ -191,7 +191,7 @@ interface AppState {
   /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2，作用于根节点 CSS zoom */
   uiScale: number
   setUiScale: (v: number) => void
-  /** Wiki 站点：eftarkov（默认）/ tarkovbox / custom（持久化于 uiPrefs） */
+  /** Wiki 站点：eftarkov（默认）/ custom（持久化于 uiPrefs） */
   wikiSite: WikiSite
   setWikiSite: (v: WikiSite) => void
   /** 自定义 Wiki 模板（含 {taskid} 占位），仅 wikiSite = custom 时生效 */
@@ -363,7 +363,7 @@ interface UiPrefsShape {
   uiScale?: number
   /** Wiki 抽屉宽度（右侧占比 %） */
   wikiWidth?: number
-  /** Wiki 站点：eftarkov / tarkovbox / custom */
+  /** Wiki 站点：eftarkov / custom */
   wikiSite?: WikiSite
   /** 自定义 Wiki 模板（含 {taskid} 占位） */
   wikiCustom?: string
@@ -769,7 +769,8 @@ export const useStore = create<AppState>((set, get) => ({
     if (typeof u.wikiWidth === 'number') {
       patch.wikiWidth = Math.round(Math.min(92, Math.max(30, u.wikiWidth)))
     }
-    if (u.wikiSite === 'eftarkov' || u.wikiSite === 'tarkovbox' || u.wikiSite === 'custom') {
+    // 旧偏好里的 tarkovbox 已下线：不认识的值直接忽略，回落到默认 eftarkov
+    if (u.wikiSite === 'eftarkov' || u.wikiSite === 'custom') {
       patch.wikiSite = u.wikiSite
     }
     if (typeof u.wikiCustom === 'string') patch.wikiCustom = u.wikiCustom
