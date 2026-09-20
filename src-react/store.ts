@@ -98,7 +98,8 @@ interface AppState {
   graph: QuestGraph | null
   setGraph: (g: QuestGraph) => void
 
-  /** 手动解锁的任务集合（前置未达成但已解锁为可接取），来自后端持久化 */
+  /** 手动解锁的任务集合，来自后端持久化。
+   *  状态显示已不区分「待接取 / 未解锁」，现仅收藏家页用于标注前置已解锁 */
   unlockedQuests: string[]
   setUnlockedQuests: (list: string[]) => void
 
@@ -157,7 +158,9 @@ interface AppState {
   showCompletedBoard: boolean
   setShowCompletedBoard: (v: boolean) => void
 
-  /** 从任务列表跳到任务链时要聚焦的任务 id：图谱把视图居中到该节点后清空 */
+  /** 任务页的「定位任务」信号（外部跳转 / 列表跳任务链都用它）。
+   *  列表视图：切到该任务的商人 + 放开挡路的筛选 + 滚动高亮；
+   *  任务链视图：画布平移到该节点并打开详情。消费者处理完自行清空。 */
   graphFocusId: string | null
   setGraphFocusId: (id: string | null) => void
 

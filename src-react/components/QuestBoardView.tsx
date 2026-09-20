@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useStore, useQuestDetail } from '../store'
 import { ObjectiveChecklist } from './ObjectiveChecklist'
 import { traderImage } from '../traderImages'
 import { TRADERS, TRADER_ZH, traderDisplayName } from '../traderMeta'
 import { llLabel, questLoyaltyLevel, type GraphNode, type ItemRef } from '../types'
 
-type ItemState = 'completed' | 'failed' | 'in_progress' | 'available' | 'locked'
+type ItemState = 'completed' | 'failed' | 'in_progress' | 'not_accepted'
 
 interface BoardItem {
   n: GraphNode
@@ -19,15 +19,14 @@ const STATE_CHIP: Record<ItemState, string> = {
   failed: 'bg-[#2b1416]/60 border-[#f85149]/60 text-[#f85149]',
   in_progress:
     'bg-blue border-blue text-black font-medium animate-pill-ring motion-reduce:animate-none',
-  available: 'bg-amber/20 border-amber/60 text-[#d4a174]',
-  locked: 'bg-ink-700/40 border-line/40 text-muted',
+  // 未接取（原「待接取」与「未解锁」已合并）：最常见的状态，用中性色
+  not_accepted: 'bg-ink-700/40 border-line/40 text-muted',
 }
 const STATE_TEXT: Record<ItemState, string> = {
   completed: '已完成',
   failed: '已失败',
   in_progress: '进行中',
-  available: '待接取',
-  locked: '未解锁',
+  not_accepted: '未接取',
 }
 
 function dedupeItems(items: ItemRef[]): ItemRef[] {
@@ -47,7 +46,6 @@ function dedupeItems(items: ItemRef[]): ItemRef[] {
 export function QuestBoardView() {
   const graph = useStore((s) => s.graph)
   const playerQuests = useStore((s) => s.playerQuests)
-  const unlockedQuests = useStore((s) => s.unlockedQuests)
   const questMode = useStore((s) => s.questMode)
   const search = useStore((s) => s.searchGraph)
   const hideLegacy = useStore((s) => s.hideLegacyGraph)
@@ -56,8 +54,14 @@ export function QuestBoardView() {
   const [trader, setTrader] = useState<string | null>(null)
   // 地图筛选：'' = 全部；由顶部工具栏（与搜索同一栏）控制，无地图信息的任务保留显示
   const mapFilter = useStore((s) => s.boardMapFilter)
+  const setMapFilter = useStore((s) => s.setBoardMapFilter)
+  const setSearch = useStore((s) => s.setSearchGraph)
+  // 外部（物品页的任务需求弹窗）跳进来时的定位信号，如图谱页的聚焦信号
+  const graphFocusId = useStore((s) => s.graphFocusId)
+  const setGraphFocusId = useStore((s) => s.setGraphFocusId)
   // 是否显示已完成任务（顶部工具栏开关，默认显示）
   const showCompleted = useStore((s) => s.showCompletedBoard)
+  const setShowCompleted = useStore((s) => s.setShowCompletedBoard)
   // 分页：每张卡会按需拉取任务详情，一次铺开全部（500+）会瞬间发出大量请求
   const [limit, setLimit] = useState(60)
 
@@ -74,7 +78,6 @@ export function QuestBoardView() {
       statusOf.set(q.questId, q.status)
       if (q.status === 'completed') completed.add(q.questId)
     }
-    const unlocked = new Set<string>(unlockedQuests)
     // 模式感知前置：pve 模式下优先用 prereqsPve
     const prereqsOf = (n: GraphNode): string[] =>
       questMode === 'pve' && n.prereqsPve?.length ? n.prereqsPve : n.prereqs ?? []
@@ -95,12 +98,8 @@ export function QuestBoardView() {
         const ms = n.maps ?? []
         if (ms.length > 0 && !ms.includes(mapFilter)) continue
       }
-      const st = statusOf.get(n.id)
-      let state: ItemState = 'locked'
-      if (st === 'completed') state = 'completed'
-      else if (st === 'failed') state = 'failed'
-      else if (st === 'in_progress') state = 'in_progress'
-      else if (unlocked.has(n.id) || prereqsOf(n).every((p) => completed.has(p))) state = 'available'
+      // 无玩家记录的一律是「未接取」（前置是否达成不再影响状态）
+      const state: ItemState = statusOf.get(n.id) ?? 'not_accepted'
       const preReqs = prereqsOf(n).map((p) => ({
         id: p,
         name: nodeName.get(p) ?? p,
@@ -112,7 +111,6 @@ export function QuestBoardView() {
   }, [
     graph,
     playerQuests,
-    unlockedQuests,
     questMode,
     search,
     hideLegacy,
@@ -141,21 +139,77 @@ export function QuestBoardView() {
 
   // 点击卡片上的前置任务名：定位到那个任务（它可能挂在别的商人名下，先切过去）
   const [focusId, setFocusId] = useState<string | null>(null)
-  const jumpTo = (id: string) => {
-    const target = items.find((x) => x.n.id === id)
-    const tid = target ? target.n.traderId || 'unknown' : null
-    if (tid && tid !== activeTrader) {
-      setTrader(tid)
-      setLimit(300) // 目标可能排在分页之外，放大上限保证能渲染到
-    }
-    setFocusId(id)
-  }
+  // 待滚动的目标：卡片还没渲染出来时（切商人 / 放大分页后会重渲染）保留，渲染出来再滚
+  const [pendingScroll, setPendingScroll] = useState<string | null>(null)
+  const jumpTo = useCallback(
+    (id: string) => {
+      const target = items.find((x) => x.n.id === id)
+      const tid = target ? target.n.traderId || 'unknown' : null
+      if (tid && tid !== activeTrader) setTrader(tid)
+      // 目标可能排在分页之外，放大上限保证能渲染到
+      setLimit((v) => Math.max(v, 300))
+      setFocusId(id)
+      setPendingScroll(id)
+    },
+    [items, activeTrader],
+  )
   useEffect(() => {
-    if (!focusId) return
-    document
-      .getElementById(`qb-${focusId}`)
-      ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [focusId, trader, limit])
+    if (!pendingScroll) return
+    const el = document.getElementById(`qb-${pendingScroll}`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setPendingScroll(null)
+  }, [pendingScroll, items, trader, limit])
+
+  // 从别的页面（物品页的任务需求弹窗）跳进来：先放开会挡住目标的列表筛选，
+  // 再切到该任务的商人、放大分页，交给上面的 effect 滚动 + 高亮。
+  // 信号消费完立刻清掉，避免后续筛选变化时反复定位。
+  useEffect(() => {
+    if (!graphFocusId || !graph) return
+    const id = graphFocusId
+    if (!items.some((x) => x.n.id === id)) {
+      // 被列表筛选挡住：逐项放宽（搜索 → 地图 → 显示已完成），下一轮再定位
+      if (search) {
+        setSearch('')
+        return
+      }
+      if (mapFilter) {
+        setMapFilter('')
+        return
+      }
+      if (!showCompleted) {
+        setShowCompleted(true)
+        return
+      }
+      // 放到最宽仍不在列表：任务不属于当前模式（或数据里没有），提示一句，避免点了没反应
+      const node = graph.nodes.find((n) => n.id === id)
+      if (node?.modes?.length && !node.modes.includes(questMode)) {
+        useStore
+          .getState()
+          .pushToast(
+            `「${node.name}」不属于当前模式（${questMode.toUpperCase()}），未在任务列表中显示`,
+            'info',
+          )
+      }
+      setGraphFocusId(null)
+      return
+    }
+    jumpTo(id)
+    setGraphFocusId(null)
+  }, [
+    graphFocusId,
+    graph,
+    items,
+    search,
+    mapFilter,
+    showCompleted,
+    questMode,
+    jumpTo,
+    setSearch,
+    setMapFilter,
+    setShowCompleted,
+    setGraphFocusId,
+  ])
 
   // 选中商人 -> 按 LL 分组 -> 组内按需求等级（玩家等级）-> 名称
   const groups = useMemo(() => {
@@ -328,11 +382,9 @@ function QuestBoardCard({
           ? 'border-amber ring-2 ring-amber/40'
           : state === 'in_progress'
             ? 'border-blue/45 bg-blue-soft/50'
-            : state === 'available'
-              ? 'border-amber/30 border-l-[3px] border-l-amber/70'
-              : state === 'completed'
-                ? 'border-line/50 bg-ink-800/40'
-                : 'border-line/40 bg-ink-800/25'
+            : state === 'completed'
+              ? 'border-line/50 bg-ink-800/40'
+              : 'border-line/40 bg-ink-800/25'
       } ${url ? 'cursor-pointer hover:border-amber/60' : ''}`}
       onClick={() => url && openWiki(url)}
       title={url ? '点击查看资料' : undefined}
@@ -351,17 +403,13 @@ function QuestBoardCard({
             src={avatar}
             alt={traderLabel}
             className={`w-6 h-6 rounded-full object-cover border shrink-0 ${
-              state === 'completed' || state === 'locked'
-                ? 'border-line/40 opacity-60'
-                : 'border-line'
+              state === 'completed' ? 'border-line/40 opacity-60' : 'border-line'
             }`}
           />
         )}
         <span
           className={`text-[18px] truncate min-w-0 flex-1 ${
-            state === 'completed' || state === 'locked'
-              ? 'font-medium text-muted'
-              : 'font-semibold text-[#e6edf3]'
+            state === 'completed' ? 'font-medium text-muted' : 'font-semibold text-[#e6edf3]'
           }`}
         >
           {n.name}
@@ -421,21 +469,33 @@ function QuestBoardCard({
           <span className={`px-2 py-0.5 rounded-full text-[13px] border ${STATE_CHIP[state]}`}>
             {STATE_TEXT[state]}
           </span>
-          {/* 手动改状态：已完成 → 手动重置；其余 → 手动完成（后端会补上接取时间）；排最右 */}
+          {/* 手动改状态：未接取 → 接取（连同前置）、进行中 / 已失败 → 完成、
+              已完成 → 重置为未接取。与任务链详情面板的操作保持一致 */}
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation()
-              void manualSetStatus(n.id, state === 'completed' ? 'reset' : 'complete')
+              void manualSetStatus(
+                n.id,
+                state === 'completed' ? 'reset' : state === 'not_accepted' ? 'accept' : 'complete',
+              )
             }}
-            title={state === 'completed' ? '重置为未接取（清除接取与完成记录）' : '手动标记该任务为已完成'}
+            title={
+              state === 'completed'
+                ? '重置为未接取（清除接取与完成记录）'
+                : state === 'not_accepted'
+                  ? '手动标记该任务为已接取（同时把前置任务标记为已完成）'
+                  : '手动标记该任务为已完成'
+            }
             className={`text-[12px] hover:underline shrink-0 transition-colors ${
               state === 'completed'
                 ? 'text-muted hover:text-[#e6edf3]'
-                : 'text-[#2ea043] hover:text-[#3fb950]'
+                : state === 'not_accepted'
+                  ? 'text-[#58a6ff] hover:text-[#79b8ff]'
+                  : 'text-[#2ea043] hover:text-[#3fb950]'
             }`}
           >
-            {state === 'completed' ? '手动重置' : '手动完成'}
+            {state === 'completed' ? '手动重置' : state === 'not_accepted' ? '手动接取' : '手动完成'}
           </button>
         </span>
       </div>

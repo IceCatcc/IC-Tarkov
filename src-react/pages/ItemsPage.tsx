@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store'
-import { getItems, getQuestGraph } from '../tauri'
+import { getItems, getQuestGraph, getCollectorQuestId } from '../tauri'
 import { isMobile } from '../platform'
 import type { ItemInfo, QuestGraph, ItemRef } from '../types'
 
@@ -44,6 +44,18 @@ function catOf(it: ItemInfo): string {
   return it.category && it.category.trim() ? it.category : UNCATEGORIZED
 }
 
+/**
+ * 是否为收藏家（Kappa）任务：id 由后端给出（与收藏家页同源）；
+ * 数据集里找不到该任务时回退按中文名判定。
+ */
+function isCollectorQuest(
+  questId: string,
+  questName: string,
+  collectorId: string | null,
+): boolean {
+  return collectorId ? questId === collectorId : questName.includes('收藏家')
+}
+
 /** 任务需求弹窗 */
 function ItemDetailModal({
   item,
@@ -64,8 +76,10 @@ function ItemDetailModal({
     [usage],
   )
 
+  // 跳到任务页定位该任务：走「任务列表」而不是任务链——任务链只画有依赖关系的任务，
+  // 独立任务 / 收藏家任务等在里面找不到；列表视图负责切商人、放宽筛选、滚动并高亮
   const jumpToQuest = (questId: string) => {
-    setGraphTab('chain')
+    setGraphTab('list')
     setGraphFocusId(questId)
     setPage('graph')
     onClose()
@@ -246,11 +260,11 @@ function ItemCard({
             </span>
           )}
         </div>
-        {it.description && (
-          <div className="text-[12px] text-muted/80 leading-snug line-clamp-2 min-w-0">
-            {it.description}
-          </div>
-        )}
+        {/* 描述固定 2 行高：超出截断，不足也占满（12px × leading-snug 1.375 × 2 = 33px），
+            否则同一行的卡片会因描述长短不一而参差不齐 */}
+        <div className="min-w-0 h-[33px] text-[12px] leading-snug text-muted/80 line-clamp-2">
+          {it.description}
+        </div>
       </button>
     </li>
   )
@@ -264,6 +278,10 @@ export function ItemsPage() {
   const [query, setQuery] = useState('')
   const [cat, setCat] = useState<string>('')
   const [caliberFilter, setCaliberFilter] = useState('')
+  // 只显示被任务需要的物品（任务上交 / 任务目标物品；不含收藏家任务）
+  const [questOnly, setQuestOnly] = useState(false)
+  // 收藏家（Kappa）任务 id：由后端定位，用于把它排除在「任务所需」之外
+  const [collectorId, setCollectorId] = useState<string | null>(null)
   const [selected, setSelected] = useState<ItemInfo | null>(null)
   // 分页：当前已渲染数量（搜索 / 切换分类时回到首页）
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
@@ -274,12 +292,13 @@ export function ItemsPage() {
   useEffect(() => {
     let alive = true
     setLoading(true)
-    Promise.all([getItems(), getQuestGraph()])
-      .then(([it, g]) => {
+    Promise.all([getItems(), getQuestGraph(), getCollectorQuestId()])
+      .then(([it, g, cid]) => {
         if (!alive) return
         // 全局过滤掉未分类物品（游戏中正常获取不到的）
         setItems(it.filter((x) => catOf(x) !== UNCATEGORIZED))
         setGraph(g)
+        setCollectorId(cid)
         setLoading(false)
       })
       .catch((e) => {
@@ -320,6 +339,18 @@ export function ItemsPage() {
     return map
   }, [graph])
 
+  // 「仅任务所需」用的物品集合：排除收藏家（Kappa）任务——它要上百种物品，
+  // 混进来会把列表淹掉，收藏家需求由「收藏家」页专门管理
+  const questUsageIds = useMemo(() => {
+    const set = new Set<string>()
+    if (!graph) return set
+    for (const node of graph.nodes) {
+      if (isCollectorQuest(node.id, node.name, collectorId)) continue
+      for (const it of node.turnIns as ItemRef[]) set.add(it.id)
+    }
+    return set
+  }, [graph, collectorId])
+
   // 分类下拉选项
   const categories = useMemo(() => {
     const set = new Set<string>()
@@ -351,6 +382,7 @@ export function ItemsPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return items.filter((it) => {
+      if (questOnly && !questUsageIds.has(it.id)) return false
       if (cat && catOf(it) !== cat) return false
       if (cat === AMMO_CAT && caliberFilter && it.caliber !== caliberFilter) return false
       if (!q) return true
@@ -358,7 +390,7 @@ export function ItemsPage() {
         it.name.toLowerCase().includes(q) || it.id.toLowerCase().includes(q)
       )
     })
-  }, [items, query, cat, caliberFilter])
+  }, [items, query, cat, caliberFilter, questOnly, questUsageIds])
 
   // 排序：背包按格子降序、弹药按穿透降序、其它按名称
   const sortedItems = useMemo(() => {
@@ -380,10 +412,10 @@ export function ItemsPage() {
     return arr
   }, [filtered, cat])
 
-  // 搜索词 / 分类 / 口径变化后回到第一页
+  // 搜索词 / 分类 / 口径 / 任务所需开关变化后回到第一页
   useEffect(() => {
     setVisibleCount(PAGE_SIZE)
-  }, [query, cat, caliberFilter])
+  }, [query, cat, caliberFilter, questOnly])
 
   const paged = useMemo(
     () => sortedItems.slice(0, visibleCount),
@@ -440,6 +472,37 @@ export function ItemsPage() {
             placeholder="搜索物品名称 / id…"
             className="flex-1 min-w-[180px] bg-ink-700 border border-line rounded px-3 py-1.5 text-[13px] text-[#e6edf3] placeholder:text-muted/60 focus:border-amber/60 outline-none"
           />
+          {/* 只看被任务需要的物品（任务上交 / 目标物品；不含收藏家任务） */}
+          <button
+            onClick={() => setQuestOnly((v) => !v)}
+            role="switch"
+            aria-checked={questOnly}
+            title="只显示被任务需要的物品（任务上交与任务目标物品）。不含收藏家（Kappa）任务：它要上百种物品，会淹没列表，其需求见「收藏家」页。"
+            className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded border text-[13px] transition-colors ${
+              questOnly
+                ? 'bg-amber/15 text-[#d4a174] border-amber/40'
+                : 'bg-ink-700 text-muted border-line hover:border-amber/50'
+            }`}
+          >
+            <span
+              className={`w-3.5 h-3.5 shrink-0 grid place-items-center rounded-[3px] border ${
+                questOnly ? 'border-amber/80 bg-amber/25' : 'border-line'
+              }`}
+            >
+              {questOnly && (
+                <svg
+                  viewBox="0 0 16 16"
+                  className="w-2.5 h-2.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                >
+                  <path d="M3 8.5 6.2 11.7 13 5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </span>
+            仅任务所需（除 Kappa）
+          </button>
         </div>
 
         {/* 类型 tab：默认选中第一个分类，无「全部」选项 */}
@@ -497,7 +560,11 @@ export function ItemsPage() {
           <div className="text-[14px] text-muted py-6">加载物品与任务需求…</div>
         )}
         {!loading && filtered.length === 0 && !error && (
-          <div className="text-[14px] text-muted py-6">没有匹配的物品。</div>
+          <div className="text-[14px] text-muted py-6">
+            {questOnly
+              ? '当前类型下没有任务所需的物品（不含收藏家任务），可切换类型或关闭「仅任务所需（除 Kappa）」。'
+              : '没有匹配的物品。'}
+          </div>
         )}
 
         {filtered.length > 0 && (

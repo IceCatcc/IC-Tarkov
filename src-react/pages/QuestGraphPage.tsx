@@ -48,7 +48,7 @@ const BAND_X = 78 // 网格整体右移量：左侧为外置商人头像的固�
 const TOP_GAP = 14 // 泳道顶边到第一行卡片的间距
 const CHAIN_MARGIN = 168 // 左区（独立任务）与右侧任务链区之间的间距：留给链行标签
 
-type NodeState = 'completed' | 'failed' | 'in_progress' | 'available' | 'locked'
+type NodeState = 'completed' | 'failed' | 'in_progress' | 'not_accepted'
 
 
 // 视口边界留白（屏幕像素）
@@ -87,10 +87,9 @@ const STATE_STYLE: Record<NodeState, { bg: string; border: string; text: string 
   // 已失败：互斥任务（多选一）已提交，本任务无法再交——暗红描边区分于已完成
   failed: { bg: '#1a1113', border: '#7d3238', text: '#e08b90' },
   in_progress: { bg: '#0e2438', border: '#58a6ff', text: '#a8d1ff' },
-  // 待接取：底色与文字保持黄色系，描边改用中性浅灰——
-  // 黄色描边会与「任务链高亮」的琥珀色撞色，难以区分
-  available: { bg: '#231b0d', border: '#9aa5b1', text: '#e6c089' },
-  locked: { bg: '#1f2730', border: '#6b7682', text: '#c2cad3' },
+  // 未接取（原「待接取」与「未解锁」已合并）：中性灰蓝。
+  // 这是画布上最常见的状态，不抢注意力，只把「进行中」衬出来
+  not_accepted: { bg: '#1f2730', border: '#6b7682', text: '#c2cad3' },
 }
 const SPECIAL_BORDER = '#c4a7ff'
 
@@ -360,7 +359,6 @@ export function QuestGraphPage() {
   const graph = useStore((s) => s.graph)
   const setGraph = useStore((s) => s.setGraph)
   const playerQuests = useStore((s) => s.playerQuests)
-  const unlockedQuests = useStore((s) => s.unlockedQuests)
   const seedPlayerQuests = useStore((s) => s.seedPlayerQuests)
   const setUnlockedQuests = useStore((s) => s.setUnlockedQuests)
   const selectedId = useStore((s) => s.selectedId)
@@ -562,17 +560,17 @@ export function QuestGraphPage() {
     }
   }, [page, graph, setGraph])
 
-  // 玩家状态
-  const { statusMap, completedSet, unlockedSet } = useMemo(() => {
+  // 玩家状态：statusMap 决定卡片状态（只有玩家有记录的任务才不是「未接取」），
+  // completedSet 供前置列表打勾（详情面板）
+  const { statusMap, completedSet } = useMemo(() => {
     const sm: Record<string, 'in_progress' | 'completed' | 'failed'> = {}
     const cs = new Set<string>()
-    const us = new Set<string>(unlockedQuests)
     for (const q of playerQuests) {
       sm[q.questId] = q.status
       if (q.status === 'completed') cs.add(q.questId)
     }
-    return { statusMap: sm, completedSet: cs, unlockedSet: us }
-  }, [playerQuests, unlockedQuests])
+    return { statusMap: sm, completedSet: cs }
+  }, [playerQuests])
 
   // 任务在该模式下是否可用（无 modes 字段的旧数据视为全部可用）
   const modeOk = (n: GraphNode): boolean =>
@@ -581,24 +579,17 @@ export function QuestGraphPage() {
   const prereqsOf = (n: GraphNode): string[] =>
     questMode === 'pve' && n.prereqsPve && n.prereqsPve.length > 0 ? n.prereqsPve : n.prereqs ?? []
 
-  const classify = (n: GraphNode): NodeState => {
-    const st = statusMap[n.id]
-    if (st === 'completed') return 'completed'
-    if (st === 'failed') return 'failed'
-    if (st === 'in_progress') return 'in_progress'
-    if (unlockedSet.has(n.id) || prereqsOf(n).every((p) => completedSet.has(p)))
-      return 'available'
-    return 'locked'
-  }
+  /// 任务状态：无玩家记录的一律是「未接取」（前置是否达成不再影响状态显示）
+  const classify = (n: GraphNode): NodeState => statusMap[n.id] ?? 'not_accepted'
 
   // 当前选中任务的状态（用于详情弹窗的状态标识与操作按钮）
   const selStatus: NodeState = useMemo(() => {
-    if (!detail) return 'locked'
+    if (!detail) return 'not_accepted'
     const node = graph?.nodes.find((n) => n.id === detail.id)
-    return node ? classify(node) : 'locked'
-  }, [detail, graph, statusMap, completedSet, unlockedSet])
+    return node ? classify(node) : 'not_accepted'
+  }, [detail, graph, statusMap])
 
-  // 手动修改任务状态：接取/完成/解锁（含任务链前置处理，由后端执行）
+  // 手动修改任务状态：接取 / 完成 / 重置（含任务链前置处理，由后端执行）
   const onSetStatus = async (
     id: string,
     action: 'accept' | 'complete' | 'unlock' | 'reset',
@@ -1294,7 +1285,7 @@ export function QuestGraphPage() {
       chainRows,
       matches,
     }
-  }, [graph, search, hideLegacy, statusMap, completedSet, unlockedSet, questMode, showPrestige, graphTab])
+  }, [graph, search, hideLegacy, statusMap, questMode, showPrestige, graphTab])
 
   // 搜索唯一命中项：命中数恰好为 1 时自动把视图居中过去（不改变缩放）
   const soleMatchId = useMemo(() => {
@@ -1373,6 +1364,9 @@ export function QuestGraphPage() {
   }
   useEffect(() => {
     if (!graphFocusId) return
+    // 只在任务链视图消费：列表视图的定位由 QuestBoardView 负责（它会把信号清掉），
+    // 否则切到列表后本 effect 会拿旧 csize 播一次看不见的平移动画
+    if (graphTab !== 'chain') return
     const id = graphFocusId
     const p = positions[id]
     // 节点被当前筛选隐藏：无法居中，清掉信号
@@ -1414,7 +1408,7 @@ export function QuestGraphPage() {
         focusRafRef.current = null
       }
     }
-  }, [graphFocusId, positions, csize.w, csize.h, setGraphFocusId])
+  }, [graphFocusId, graphTab, positions, csize.w, csize.h, setGraphFocusId])
 
   // —— 详情跟随：面板贴在选中节点卡片下方（左对齐），随画布一起移动 ——
   // 每帧直接写 DOM 的 left/top，避免 setState 触发整页重渲染；面板在画布容器内，
@@ -1573,7 +1567,7 @@ export function QuestGraphPage() {
     }
     return m
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, visible, positions, statusMap, completedSet, unlockedSet, questMode])
+  }, [graph, visible, positions, statusMap])
 
   const select = useCallback(
     (id: string) => {
@@ -2032,7 +2026,7 @@ export function QuestGraphPage() {
       if (!visible.has(n.id)) continue
       const p = positions[n.id]
       if (!p) continue
-      const st = nodeStates[n.id] ?? 'locked'
+      const st = nodeStates[n.id] ?? 'not_accepted'
       const stl = STATE_STYLE[st]
       // 搜索未命中：整张卡片（含高亮环与物品图标）压暗
       ctx.globalAlpha = alphaOf(n.id)
@@ -2149,7 +2143,7 @@ export function QuestGraphPage() {
       if (!visible.has(n.id)) continue
       const p = positions[n.id]
       if (!p) continue
-      const st = nodeStates[n.id] ?? 'locked'
+      const st = nodeStates[n.id] ?? 'not_accepted'
       const stl = STATE_STYLE[st]
       const sx = w2sx(p.x)
       const sy = w2sy(p.y)
@@ -2241,13 +2235,13 @@ export function QuestGraphPage() {
       const titleX = sx + 12 * TS + avatarR * 2 + 6 * TS
       ctx.font = `600 ${Math.max(9, Math.round(14.5 * TS))}px "Segoe UI", system-ui, sans-serif`
       ctx.fillStyle = stl.text
-      const glyph = st === 'completed' ? '✓ ' : st === 'available' ? '● ' : st === 'in_progress' ? '▶ ' : ''
+      const glyph = st === 'completed' ? '✓ ' : st === 'in_progress' ? '▶ ' : ''
       const rightReserve = (n.special ? 19 * TS : 5 * TS) + lvReserve
       const titleMax = Math.max(24, sw - (18 * TS + avatarR * 2) - rightReserve)
       const title = truncateText(ctx, glyph + n.name, titleMax)
       ctx.fillText(title, Math.round(titleX), Math.round(sy + 19 * TS))
 
-      // 元信息 chips（贸易条件 / 旧 / 仅PvP / 未解锁）
+      // 元信息 chips（贸易条件 / 转生 / 赛季 / 仅PvP）
       let bx = sx + 12 * TS
       const by = sy + 34 * TS
       ctx.font = `${Math.max(8, Math.round(12 * TS))}px "Segoe UI", system-ui, sans-serif`
@@ -2431,7 +2425,7 @@ export function QuestGraphPage() {
         if (!visible.has(n.id)) continue
         const p = positions[n.id]
         if (!p) continue
-        const st = nodeStates[n.id] ?? 'locked'
+        const st = nodeStates[n.id] ?? 'not_accepted'
         // 已完成用弱化后的浅淡绿，与主画面对齐；搜索未命中同样淡化
         mctx.globalAlpha = matches && !matches.has(n.id) ? DIM_ALPHA : 1
         mctx.fillStyle =
@@ -2441,9 +2435,7 @@ export function QuestGraphPage() {
               ? '#7d3238'
               : st === 'in_progress'
                 ? '#58a6ff'
-                : st === 'available'
-                  ? '#ef9f27'
-                  : '#3d444d'
+                : '#3d444d'
         mctx.fillRect(p.x * k, p.y * k, Math.max(2, NODE_W * k), Math.max(1.5, NODE_H * k * 0.55))
       }
       mctx.globalAlpha = 1
@@ -2576,8 +2568,7 @@ export function QuestGraphPage() {
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#12161a] border border-[#2a3a31]" />已完成</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#1a1113] border border-[#7d3238]" />已失败</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#0e2438] border border-[#58a6ff]" />进行中</span>
-          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#231b0d] border border-[#9aa5b1]" />待接取</span>
-          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#1f2730] border border-[#6b7682]" />后续解锁</span>
+          <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-[#1f2730] border border-[#6b7682]" />未接取</span>
           <span className="flex items-center gap-1.5 whitespace-nowrap"><span className="w-3 h-3 rounded-sm bg-ink-800 border border-dashed border-[#c4a7ff]" />特殊✦</span>
         </div>
 
@@ -2681,14 +2672,14 @@ export function QuestGraphPage() {
               <>
                 <div className="flex items-start gap-2 pr-6 flex-wrap">
                   <span className="text-[19px] font-medium leading-snug">{detail.name}</span>
-                  {selStatus === 'available' && (
+                  {selStatus === 'not_accepted' && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
                         onSetStatus(detail.id, 'accept')
                       }}
                       className="text-[12px] text-[#58a6ff] hover:underline mt-1.5 shrink-0"
-                      title="手动标记该任务为已接取"
+                      title="手动标记该任务为已接取（同时把前置任务标记为已完成）"
                     >
                       手动接取
                     </button>
@@ -2703,18 +2694,6 @@ export function QuestGraphPage() {
                       title="手动标记该任务为已完成"
                     >
                       手动完成
-                    </button>
-                  )}
-                  {selStatus === 'locked' && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onSetStatus(detail.id, 'unlock')
-                      }}
-                      className="text-[12px] text-muted hover:text-[#e6edf3] hover:underline mt-1.5 shrink-0"
-                      title="手动解锁该任务（连同其前置）"
-                    >
-                      手动解锁
                     </button>
                   )}
                   {selStatus === 'completed' && (
@@ -2760,9 +2739,7 @@ export function QuestGraphPage() {
                           ? '已失败（互斥任务已提交）'
                           : selStatus === 'in_progress'
                             ? '进行中'
-                            : selStatus === 'available'
-                              ? '可接取'
-                              : '未解锁'
+                            : '未接取'
                     }`}
                   </span>
                   {detail.prestigeLevel != null && (
