@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store'
-import { getItems, getQuestGraph, getCollectorQuestId } from '../tauri'
+import { getItems, getQuestGraph, getCollectorQuestId, getMapMarkers, getMapsSkeleton } from '../tauri'
 import { isMobile } from '../platform'
+import { LOCK_TYPE_ZH } from '../mapIconGroups'
 import type { ItemInfo, QuestGraph, ItemRef } from '../types'
 
 /** tarkov.dev 稀有度颜色 (backgroundColor) -> 中文等级 + 展示色 */
@@ -38,6 +39,99 @@ interface QuestUsage {
 const UNCATEGORIZED = '未分类'
 /** 单次最多渲染的物品数（其余点「加载更多」） */
 const PAGE_SIZE = 40
+/** 带口径的类别（弹药 / 武器…）：收起时先显示前几个口径，其余点「展开全部」 */
+const CALIBER_LIMIT = 8
+/** 钥匙类别（只有这类物品才有「使用位置」） */
+const KEY_CAT = '钥匙'
+/** 锁类型中文名（上游 locks 的 lockType） */
+
+/** 钥匙的使用位置（地图上的一处锁）：点击可跳转到地图对应位置 */
+interface KeyUsage {
+  /** 目标地图 normalizedName（地图页的 selected 用它） */
+  map: string
+  mapName: string
+  lockType: string
+  x: number
+  z: number
+  /** 该地图是否有可交互地图（没有则无法跳转定位） */
+  interactive: boolean
+  /** 同一把钥匙在同一地图、同一锁类型下有多处时的序号（1 起）与总数 */
+  seq: number
+  total: number
+}
+
+/**
+ * itemId -> 该钥匙的全部使用位置。
+ * 地图标记与地图骨架都不小，只在首次打开钥匙详情时拉一次并缓存（失败则清缓存以便重试）。
+ */
+let keyUsagePromise: Promise<Map<string, KeyUsage[]>> | null = null
+function loadKeyUsages(): Promise<Map<string, KeyUsage[]>> {
+  if (!keyUsagePromise) {
+    keyUsagePromise = Promise.all([getMapMarkers(), getMapsSkeleton()])
+      .then(([markers, skeleton]) => {
+        // normalizedName -> 地图中文名（骨架里带；标记文档本身只有 normalizedName），
+        // 同时记下哪些地图有可交互地图（地图页只能定位到这些）
+        const nameByNn = new Map<string, string>()
+        const jumpable = new Set<string>()
+        for (const g of skeleton.groups ?? []) {
+          nameByNn.set(g.normalizedName, g.nameZh || g.normalizedName)
+          if (g.maps?.some((m) => m.projection === 'interactive')) jumpable.add(g.normalizedName)
+        }
+        type Row = KeyUsage & { keyId: string }
+        const rows: Row[] = []
+        const seen = new Set<string>()
+        for (const [nn, cats] of Object.entries(markers.maps ?? {})) {
+          for (const en of cats.locks ?? []) {
+            const keyId = en.keyName
+            const p = en.position
+            if (!keyId || !p) continue
+            // 上游偶有完全重复的锁条目：按「钥匙 + 地图 + 类型 + 坐标」去重
+            const sig = `${keyId}|${nn}|${en.lockType ?? ''}|${p.x}|${p.z}`
+            if (seen.has(sig)) continue
+            seen.add(sig)
+            rows.push({
+              keyId,
+              map: nn,
+              mapName: nameByNn.get(nn) ?? nn,
+              lockType: en.lockType ?? '',
+              x: p.x,
+              z: p.z,
+              interactive: jumpable.has(nn),
+              seq: 0,
+              total: 0,
+            })
+          }
+        }
+        // 同一把钥匙在同一地图、同一类型下有多处时补序号，便于区分（如「门 2/3」）
+        const groups = new Map<string, Row[]>()
+        for (const r of rows) {
+          const k = `${r.keyId}|${r.map}|${r.lockType}`
+          const arr = groups.get(k)
+          if (arr) arr.push(r)
+          else groups.set(k, [r])
+        }
+        for (const arr of groups.values()) {
+          arr.forEach((r, i) => {
+            r.seq = i + 1
+            r.total = arr.length
+          })
+        }
+        const byItem = new Map<string, KeyUsage[]>()
+        for (const r of rows) {
+          const { keyId, ...usage } = r
+          const arr = byItem.get(keyId)
+          if (arr) arr.push(usage)
+          else byItem.set(keyId, [usage])
+        }
+        return byItem
+      })
+      .catch(() => {
+        keyUsagePromise = null
+        return new Map<string, KeyUsage[]>()
+      })
+  }
+  return keyUsagePromise
+}
 
 /** 把物品类别归一：null / undefined -> 未分类 */
 function catOf(it: ItemInfo): string {
@@ -82,6 +176,30 @@ function ItemDetailModal({
     setGraphTab('list')
     setGraphFocusId(questId)
     setPage('graph')
+    onClose()
+  }
+
+  // 钥匙：地图上的使用位置（懒加载，只在打开钥匙详情时才拉地图数据）
+  const [keyUsages, setKeyUsages] = useState<KeyUsage[] | null>(null)
+  const isKey = catOf(item) === KEY_CAT
+  useEffect(() => {
+    if (!isKey) {
+      setKeyUsages(null)
+      return
+    }
+    let alive = true
+    loadKeyUsages().then((m) => {
+      if (alive) setKeyUsages(m.get(item.id) ?? [])
+    })
+    return () => {
+      alive = false
+    }
+  }, [isKey, item.id])
+
+  // 跳到地图页并定位到该处：信号交给 MapPage 消费（切图 + 视图居中）
+  const jumpToMap = (u: KeyUsage) => {
+    useStore.getState().setMapFocus({ map: u.map, x: u.x, z: u.z })
+    setPage('map')
     onClose()
   }
 
@@ -145,6 +263,49 @@ function ItemDetailModal({
             <p className="text-[13px] leading-relaxed text-[#c9d1d9] whitespace-pre-line">
               {item.description}
             </p>
+          </div>
+        )}
+
+        {/* 钥匙：地图上的使用位置（可直接跳到地图对应位置） */}
+        {keyUsages && keyUsages.length > 0 && (
+          <div className="px-5 py-3 border-b border-line">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[13px] text-muted">使用位置</span>
+              <span className="text-[13px] text-muted/70">
+                共 {keyUsages.length} 处 · 点击跳转到地图
+              </span>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {keyUsages.map((u, i) => (
+                <button
+                  key={`${u.map}|${u.lockType}|${u.x}|${u.z}|${i}`}
+                  onClick={() => u.interactive && jumpToMap(u)}
+                  disabled={!u.interactive}
+                  title={u.interactive ? '在地图上定位到该处' : '该地图暂无可交互地图，无法定位'}
+                  className={`w-full text-left rounded-lg border px-3 py-2 flex items-center gap-2 transition-colors ${
+                    u.interactive
+                      ? 'border-line bg-ink-900/60 hover:border-amber/60 hover:bg-ink-700/60'
+                      : 'border-line/40 bg-ink-900/30 cursor-default'
+                  }`}
+                >
+                  <span
+                    className={`min-w-0 flex-1 truncate text-[14px] ${
+                      u.interactive ? 'text-[#c9d1d9]' : 'text-muted'
+                    }`}
+                  >
+                    {u.mapName}
+                    <span className="text-muted">
+                      {' · '}
+                      {u.lockType ? LOCK_TYPE_ZH[u.lockType] ?? u.lockType : '锁'}
+                      {u.total > 1 ? ` ${u.seq}/${u.total}` : ''}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[12px] text-muted">
+                    {u.interactive ? '跳转 →' : '不可定位'}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -278,6 +439,8 @@ export function ItemsPage() {
   const [query, setQuery] = useState('')
   const [cat, setCat] = useState<string>('')
   const [caliberFilter, setCaliberFilter] = useState('')
+  // 口径列表默认收起（只铺一行），点「展开全部」看全部口径
+  const [caliberExpanded, setCaliberExpanded] = useState(false)
   // 只显示被任务需要的物品（任务上交 / 任务目标物品；不含收藏家任务）
   const [questOnly, setQuestOnly] = useState(false)
   // 收藏家（Kappa）任务 id：由后端定位，用于把它排除在「任务所需」之外
@@ -365,18 +528,31 @@ export function ItemsPage() {
     }
   }, [categories, cat])
 
-  // 弹药口径选项（仅弹药类型有意义）
+  // 口径选项：从当前分类里带口径的物品收集（弹药、武器、弹匣等都可能带）。
+  // 上游同一口径的字符串一致（如弹药与枪械都写 545x39mm），所以各类别的口径能互相对应。
   const caliberOptions = useMemo(() => {
     const set = new Set<string>()
     for (const it of items) {
-      if (catOf(it) === AMMO_CAT && it.caliber) set.add(it.caliber)
+      if (catOf(it) === cat && it.caliber) set.add(it.caliber)
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'en'))
-  }, [items])
+  }, [items, cat])
 
-  // 切换类型时清空口径筛选
+  // 该分类有口径数据才显示口径筛选（无口径的类别如「医疗」不显示）
+  const catHasCaliber = caliberOptions.length > 0
+
+  // 收起时只显示前 CALIBER_LIMIT 个；已选中的口径始终显示，否则看不到当前筛选的是什么
+  const shownCalibers = useMemo(() => {
+    if (caliberExpanded) return caliberOptions
+    const head = caliberOptions.slice(0, CALIBER_LIMIT)
+    if (caliberFilter && !head.includes(caliberFilter)) return [...head, caliberFilter]
+    return head
+  }, [caliberOptions, caliberExpanded, caliberFilter])
+
+  // 切换类型时清空口径筛选并收起口径列表
   useEffect(() => {
     setCaliberFilter('')
+    setCaliberExpanded(false)
   }, [cat])
 
   const filtered = useMemo(() => {
@@ -384,13 +560,13 @@ export function ItemsPage() {
     return items.filter((it) => {
       if (questOnly && !questUsageIds.has(it.id)) return false
       if (cat && catOf(it) !== cat) return false
-      if (cat === AMMO_CAT && caliberFilter && it.caliber !== caliberFilter) return false
+      if (catHasCaliber && caliberFilter && it.caliber !== caliberFilter) return false
       if (!q) return true
       return (
         it.name.toLowerCase().includes(q) || it.id.toLowerCase().includes(q)
       )
     })
-  }, [items, query, cat, caliberFilter, questOnly, questUsageIds])
+  }, [items, query, cat, caliberFilter, catHasCaliber, questOnly, questUsageIds])
 
   // 排序：背包按格子降序、弹药按穿透降序、其它按名称
   const sortedItems = useMemo(() => {
@@ -522,8 +698,8 @@ export function ItemsPage() {
           ))}
         </div>
 
-        {/* 弹药：口径筛选 */}
-        {cat === AMMO_CAT && caliberOptions.length > 0 && (
+        {/* 口径筛选（弹药 / 武器等带口径的类别；口径多，默认收起成一行，可展开全部） */}
+        {catHasCaliber && (
           <div className="flex flex-wrap gap-1.5 mb-3">
             <button
               onClick={() => setCaliberFilter('')}
@@ -535,7 +711,7 @@ export function ItemsPage() {
             >
               全部口径
             </button>
-            {caliberOptions.map((c) => (
+            {shownCalibers.map((c) => (
               <button
                 key={c}
                 onClick={() => setCaliberFilter(c)}
@@ -548,6 +724,19 @@ export function ItemsPage() {
                 {c}
               </button>
             ))}
+            {caliberOptions.length > CALIBER_LIMIT && (
+              <button
+                onClick={() => setCaliberExpanded((v) => !v)}
+                title={
+                  caliberExpanded
+                    ? '收起口径列表'
+                    : `展开全部 ${caliberOptions.length} 个口径`
+                }
+                className="px-3 py-1.5 rounded-full text-[13px] border border-dashed border-line text-muted transition-colors hover:border-amber/50 hover:text-[#e6edf3]"
+              >
+                {caliberExpanded ? '收起' : `展开全部（${caliberOptions.length}）`}
+              </button>
+            )}
           </div>
         )}
 

@@ -476,11 +476,19 @@ fn item_props(
         .and_then(|v| v.as_i64());
     // 稀有度颜色（tarkov.dev 用 backgroundColor 表示）
     let rarity = it.get("backgroundColor").and_then(|v| v.as_str()).map(|s| s.to_string());
-    // 子弹口径（如 5.45x39mm）
+    // 子弹口径：tarkov.dev 原值带 "Caliber" 前缀（如 Caliber9x19mm），
+    // 统一去掉前缀只留口径本身（如 9x19mm）——前端按此值展示与筛选口径选项
     let caliber = props
         .and_then(|p| p.get("caliber"))
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(|s| {
+            let t = s.trim();
+            match t.get(..7) {
+                Some(p) if p.eq_ignore_ascii_case("caliber") => t[7..].trim().to_string(),
+                _ => t.to_string(),
+            }
+        })
+        .filter(|s| !s.is_empty());
     (slots, penetration, rarity, caliber)
 }
 

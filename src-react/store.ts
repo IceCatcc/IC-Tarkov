@@ -164,6 +164,11 @@ interface AppState {
   graphFocusId: string | null
   setGraphFocusId: (id: string | null) => void
 
+  /** 地图页的「定位」信号（物品页钥匙「使用位置」跳转用）：
+   *  MapPage 切到该地图（normalizedName）并把视图居中到 (x, z)，消费后清空 */
+  mapFocus: { map: string; x: number; z: number } | null
+  setMapFocus: (f: { map: string; x: number; z: number } | null) => void
+
   /** 详情跟随：选中任务时详情面板贴在节点卡片下方左对齐，并随画布一起移动
    *  （移出视口即被裁剪不可见）。关闭时为可自由拖动的浮层 */
   followDetail: boolean
@@ -674,6 +679,8 @@ export const useStore = create<AppState>((set, get) => ({
   },
   graphFocusId: null,
   setGraphFocusId: (id) => set({ graphFocusId: id }),
+  mapFocus: null,
+  setMapFocus: (f) => set({ mapFocus: f }),
   followDetail: prefs0.followDetail,
   setFollowDetail: (v) => {
     set({ followDetail: v })

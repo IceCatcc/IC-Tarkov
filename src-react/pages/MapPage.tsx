@@ -408,6 +408,9 @@ export function MapPage() {
   const setFocusZoom = useStore((s) => s.setFocusZoom)
   const untrackedQuests = useStore((s) => s.untrackedQuests)
   const toggleQuestTracked = useStore((s) => s.toggleQuestTracked)
+  // 外部定位请求（物品页钥匙「使用位置」跳转过来）：切图 + 居中到坐标，消费后清空
+  const mapFocus = useStore((s) => s.mapFocus)
+  const setMapFocus = useStore((s) => s.setMapFocus)
   // 图标显隐存于 store（随 mapPrefs 持久化到 settings.json），跨启动保留
   const chips = useStore((s) => s.mapChips)
   const [floorSel, setFloorSel] = useState(-1) // -1 = 默认主层
@@ -534,6 +537,10 @@ export function MapPage() {
   const pageRef = useRef(page)
   pageRef.current = page
   const rawBoundsRef = useRef<L.LatLngBounds | null>(null)
+  // 定位请求的「保持期」：外部跳转定位后的一小段时间内，不要让玩家位置刷新把视图拉回去
+  const focusHoldRef = useRef(0)
+  const mapFocusRef = useRef(mapFocus)
+  mapFocusRef.current = mapFocus
 
   // 点击浮窗外部自动关闭（容器内 onMouseDown 已 stopPropagation，不会误触发）
   // 注意：「地图信息」面板不在此列——它只由按钮点击切换显隐，点外部不关闭
@@ -568,6 +575,8 @@ export function MapPage() {
   chipsRef.current = chips
   const syncFnsRef = useRef<(() => void)[]>([])
   const floorApplyRef = useRef<((idx: number) => void) | null>(null)
+  // 子图层键（sub:...）-> LayerGroup：跳转定位时用它找到目标标记并打开 popup
+  const subLayersRef = useRef<Map<string, L.LayerGroup> | null>(null)
 
   useEffect(() => {
     if (!imap || !markers) return
@@ -1035,6 +1044,8 @@ export function MapPage() {
 
     syncAll()
     syncFnsRef.current = [syncAll]
+    // 暴露给「跳转定位」：按子图层键拿 LayerGroup，才能找到目标标记并打开 popup
+    subLayersRef.current = new Map([...subLayers].map(([k, v]) => [k, v.lg]))
 
     return () => {
       cancelled = true
@@ -1044,6 +1055,7 @@ export function MapPage() {
       playerMarkerRef.current = null
       questLayerRef.current = null
       syncFnsRef.current = []
+      subLayersRef.current = null
       floorApplyRef.current = null
     }
   }, [imap, markers])
@@ -1060,6 +1072,11 @@ export function MapPage() {
   /* ---------- keepAlive：切回地图页（或从隐藏恢复）时重算尺寸并复位视图 ---------- */
   useEffect(() => {
     if (page !== 'map') return
+    // 带着定位请求进来时不要复位视图：复位会把刚定位到的位置又拉回整张地图。
+    // 这里必须读 ref 而不是依赖 mapFocus：定位完成后会把信号清空，若依赖它，
+    // 清空这一刻本 effect 会再跑一次，复位恰好把刚做好的居中与缩放一起抹掉。
+    if (focusHoldRef.current > Date.now()) return
+    if (mapFocusRef.current) return
     requestAnimationFrame(() => {
       const m = mapRef.current
       if (m) {
@@ -1117,6 +1134,8 @@ export function MapPage() {
     }
     // 自动居中关闭：完全不跟随（用户自由浏览地图），只更新箭头方向
     if (!autoCenterRef.current) return
+    // 刚做过外部定位（如跳到钥匙使用位置）：保持期内只更新箭头，不把视图拉回玩家处
+    if (focusHoldRef.current > Date.now()) return
     // 目标缩放级别来自工具栏「自动聚焦」进度条；自动缩放开启时每次定位都缩到该级别，
     // 关闭时保持用户当前缩放。animate:false——无平移动画，截图一到立即到位
     const targetZoom = Math.max(
@@ -1128,6 +1147,74 @@ export function MapPage() {
     // 任何例外都会表现为「没勾自动缩放却还是缩放了」。
     map.setView(ll, autoZoomRef.current ? targetZoom : map.getZoom(), { animate: false })
   }, [shotPos, imap])
+
+  /* ---------- 外部定位（物品页钥匙「使用位置」）：切到目标地图并居中到该坐标 ---------- */
+
+  useEffect(() => {
+    if (!mapFocus) return
+    // 地图骨架 / 标记还没到时不能判定「地图不存在」——首次从别的页面跳进来时它们必然为空，
+    // 提前清信号会让跳转彻底失效；等数据到了（本 effect 会重跑）再判定
+    if (!skeleton || !markers) return
+    const target = mapFocus
+    // 目标地图不在可交互地图列表里（数据缺失 / 非交互地图）：清掉信号，避免一直挂着
+    if (!selectable.some((g) => g.normalizedName === target.map)) {
+      setMapFocus(null)
+      return
+    }
+    // 先切到目标地图：切图会重建地图与图层，等下一轮 effect 再定位
+    if (selected !== target.map) {
+      setSelected(target.map)
+      setFloorSel(-1)
+      return
+    }
+    const map = mapRef.current
+    if (!map || !imap) return
+    // 目标缩放沿用工具栏「聚焦缩放」（与玩家定位同一套偏好），并夹到该地图的缩放范围
+    const zoom = Math.max(imap.minZoom ?? 1, Math.min(imap.maxZoom ?? 6, focusZoomRef.current))
+    // keepAlive 下容器尺寸可能刚变化：先让 Leaflet 重算尺寸再居中，否则居中有偏差
+    map.invalidateSize()
+    const ll = L.latLng(pos({ x: target.x, z: target.z }))
+    map.setView(ll, zoom, { animate: false })
+    // 目标处的锁：钥匙锁图层默认不勾选，这里强制显示对应子图层，并「选中」它
+    // （打开 popup + 图标放大发光），配合波纹让落点一眼可见
+    const lock = (markers.maps[imap.key]?.locks ?? []).find(
+      (en) =>
+        en.position &&
+        Math.abs(en.position.x - target.x) <= 0.01 &&
+        Math.abs(en.position.z - target.z) <= 0.01,
+    )
+    if (lock) {
+      const key = subKey(`locks:${lock.nameZh || lock.name || '未命名'}`)
+      // 强制勾上该子项：即使原先（或用户显式）关掉了「钥匙锁」分类 / 这一子项也照勾，
+      // 面板里会同步显示为勾选，并随 uiPrefs 持久化
+      useStore.getState().setMapChip(key, true)
+      // 本 effect 里紧接着就要找标记、弹 popup，等不到下一次 render 的 syncAll，
+      // 因此先就地更新 chips 快照再同步一次图层
+      chipsRef.current = { ...chipsRef.current, [key]: true }
+      syncFnsRef.current.forEach((fn) => fn())
+      const mk = subLayersRef.current
+        ?.get(key)
+        ?.getLayers()
+        .find((l): l is L.Marker => {
+          const p = (l as L.Marker).getLatLng?.()
+          return !!p && Math.abs(p.lat - ll.lat) < 0.01 && Math.abs(p.lng - ll.lng) < 0.01
+        })
+      if (mk) {
+        // autoPan 关掉：不要为了 popup 再把刚定位好的视图挪走
+        const popup = mk.getPopup()
+        if (popup) popup.options.autoPan = false
+        mk.openPopup()
+        const el = mk.getElement()
+        if (el) {
+          el.classList.add('map-lock-focus')
+          window.setTimeout(() => el.classList.remove('map-lock-focus'), 2000)
+        }
+      }
+    }
+    // 保持期内忽略玩家位置刷新，避免刚跳过去就被拉回玩家处（1.5s 后恢复正常跟随）
+    focusHoldRef.current = Date.now() + 1500
+    setMapFocus(null)
+  }, [mapFocus, skeleton, markers, selectable, selected, imap, setMapFocus])
 
   // 地图弹窗标题 → 任务浮窗：展开后滚动到对应任务卡片（等一帧让列表渲染出来）。
   // 必须放在条件 return 之前，否则违反 Hooks 规则（首次渲染 hook 数不一致而崩溃）

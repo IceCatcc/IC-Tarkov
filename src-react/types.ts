@@ -328,6 +328,10 @@ export interface MarkerEntry {
   toMap?: string | null
   /** 转移点专用：目标地图中文名 */
   toMapZh?: string | null
+  /** 锁（locks）专用：开这把锁的钥匙物品 id（据此把「同一把钥匙的几扇门」归为一组） */
+  keyName?: string | null
+  /** 锁专用：door / trunk / container / switch */
+  lockType?: string | null
 }
 
 export interface MapMarkersDoc {

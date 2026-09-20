@@ -12,6 +12,14 @@
 import type { MarkerEntry } from './types'
 
 /** 当前地图的标记集合（后端 `markers.maps[mapKey]`） */
+/** 锁类型中文名（上游 locks 的 lockType）；物品页的钥匙「使用位置」也用它 */
+export const LOCK_TYPE_ZH: Record<string, string> = {
+  door: '门',
+  trunk: '载具后备箱',
+  container: '容器',
+  switch: '开关',
+}
+
 export type MapMarkers = Record<string, MarkerEntry[]>
 
 /* ---------------- 图标文件名（与 public/maps/interactive 下的文件对应） ---------------- */
@@ -260,7 +268,18 @@ export function buildIconGroups(mm: MapMarkers): IconGroup[] {
     'locks',
     '钥匙锁',
     [...locks.entries()]
-      .map(([nm, list]) => ({ key: `locks:${nm}`, label: nm, list, icon: () => 'lock' }))
+      .map(([nm, list]) => ({
+        key: `locks:${nm}`,
+        label: nm,
+        list,
+        icon: () => 'lock',
+        // 锁本身没有名称（标题就是钥匙名），补一行锁类型让弹窗能区分「门 / 容器 / 后备箱」
+        meta: (en: MarkerEntry) => [
+          en.lockType
+            ? LOCK_TYPE_ZH[en.lockType] ?? `锁（${en.lockType}）`
+            : '锁',
+        ],
+      }))
       .sort(byLabel),
   )
 
