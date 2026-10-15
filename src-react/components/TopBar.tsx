@@ -7,17 +7,12 @@ import { isMobile, isWeb } from '../platform'
 import { getLanConnStatus, onLanStatus } from '../lan'
 import { checkLatestRelease, isNewer, RELEASES_PAGE, type ReleaseInfo } from '../updater'
 import { openUrl, getLanStatus } from '../tauri'
-import {
-  appVersion,
-  closeWindow,
-  listenEvent,
-  minimizeWindow,
-  toggleMaximizeWindow,
-} from '../api/shell'
+import { appVersion, listenEvent } from '../api/shell'
 import { logout } from '../api/web-account'
 import { ImportDataModal } from './ImportDataModal'
 import { LanSyncModal } from './LanSyncModal'
 import { LanConnectModal } from './LanConnectModal'
+import { WinControls } from './WinControls'
 
 const NAV_ITEMS: {
   key: 'monitor' | 'graph' | 'map' | 'collector' | 'items'
@@ -29,30 +24,6 @@ const NAV_ITEMS: {
   { key: 'collector', label: '收藏家' },
   { key: 'items', label: '物品' },
 ]
-
-function WinButton({
-  onClick,
-  label,
-  danger,
-  title,
-}: {
-  onClick: () => void
-  label: string
-  danger?: boolean
-  title: string
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className={`h-full w-12 grid place-items-center text-[13px] text-muted transition-colors ${
-        danger ? 'hover:bg-[#e81123] hover:text-white' : 'hover:bg-ink-600 hover:text-[#e6edf3]'
-      }`}
-    >
-      {label}
-    </button>
-  )
-}
 
 // 顶部栏不再放帮助按钮：帮助入口统一在设置页左下角（另有首次启动自动弹出）
 export function TopBar() {
@@ -325,14 +296,7 @@ export function TopBar() {
       </div>
 
       {/* 窗口控制按钮（仅 Tauri 桌面端；浏览器没有窗口控制概念） */}
-      {!mobile && !web && (
-        <>
-          <div className="w-px self-stretch bg-line mx-1" />
-          <WinButton onClick={() => void minimizeWindow()} label="─" title="最小化" />
-          <WinButton onClick={() => void toggleMaximizeWindow()} label="▢" title="最大化 / 还原" />
-          <WinButton onClick={() => void closeWindow()} label="✕" title="关闭" danger />
-        </>
-      )}
+      {!mobile && !web && <WinControls />}
       </header>
       )}
 

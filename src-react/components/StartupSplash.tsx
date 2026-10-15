@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { BootStep } from '../boot'
+import { isMobile, isWeb } from '../platform'
+import { WinControls } from './WinControls'
 
 /**
  * 启动遮罩：展示「读取中 xx」步骤时间线。
  * 已完成的步骤打勾，当前步骤转圈；后端步骤与前端步骤共用同一条时间线。
  * `visible` 转为 false 时淡出，淡出期间保持挂载避免闪烁。
+ *
+ * 遮罩盖在最上层，界面尚未渲染出顶部栏，因此遮罩自己带一条标题栏
+ * （品牌 + 拖动区 + 窗口控制按钮，复用 WinControls），启动期间窗口依旧可拖可关。
  */
 export function StartupSplash({
   steps,
@@ -35,8 +40,24 @@ export function StartupSplash({
         visible ? 'opacity-100' : 'opacity-0'
       }`}
     >
-      {/* 顶栏高度（40px）留出：窗口拖动区与关闭按钮压在遮罩下仍可用，
-          其余区域拦截事件，避免误触看不见的界面 */}
+      {/* 标题栏（仅 Tauri 桌面端）：遮罩盖住顶部栏期间仍可拖动窗口 / 最小化 / 关闭 */}
+      {!isMobile() && !isWeb() && (
+        <div
+          data-tauri-drag-region
+          className={`absolute inset-x-0 top-0 flex h-10 items-stretch bg-ink-800 border-b border-line shrink-0 select-none ${
+            visible ? 'pointer-events-auto' : ''
+          }`}
+        >
+          <div className="flex items-center gap-2 pl-3 shrink-0">
+            <img src="/icons/icon.png" alt="" className="w-5 h-5 rounded shrink-0" />
+            <span className="font-medium text-[15px]">IC Tarkov</span>
+          </div>
+          <div data-tauri-drag-region className="flex-1 self-stretch min-w-0" />
+          <WinControls />
+        </div>
+      )}
+
+      {/* 标题栏以下区域拦截事件，避免误触看不见的界面 */}
       <div
         className={`absolute inset-x-0 bottom-0 top-10 ${visible ? 'pointer-events-auto' : ''}`}
       />
