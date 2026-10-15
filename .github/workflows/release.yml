@@ -32,6 +32,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      # 种子数据不入库（见 .gitignore）：打包前抓一份最新的，build.rs 会 gzip 内嵌进
+      # 二进制、tauri 同时把 resources/api 作为资源打进安装包。
+      - name: Fetch seed data
+        run: npm run data:fetch
+
       # 读取 RELEASE_NOTES.md 作为 Release 说明（发布前在本地维护好该文件）。
       # 文件不存在或为空时，说明留空，不会中断构建。
       - name: Read release notes
@@ -79,6 +84,23 @@ jobs:
           generateReleaseNotes: false
           uploadWorkflowArtifacts: true
 
+      # 无内置数据版安装包：不内嵌种子、不带 resources/api，数据由用户首次启动时下载；
+      # 产物为 ...-setup_lite.exe，与完整版并存追加到同一个 Release。
+      - name: Build lite installer (no bundled data)
+        run: npm run tauri:build:lite
+
+      - name: Upload lite installer to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          files=(src-tauri/target/release/bundle/nsis/*_lite.exe)
+          if [ ! -e "${files[0]}" ]; then
+            echo "::error::未找到 lite 安装包（*-setup_lite.exe）"
+            exit 1
+          fi
+          gh release upload "${{ steps.version.outputs.tag }}" "${files[@]}" --clobber
+
   # Android APK（仅 arm64）。needs 串行：Release 由 build-windows 的 tauri-action 创建，
   # 本 job 只追加 APK 资产（gh release upload --clobber），避免竞争创建。
   # 签名：复用本地 debug.keystore（base64 存于 Secret ANDROID_KEYSTORE_BASE64），
@@ -117,6 +139,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      # 种子数据不入库：打包前抓一份（Android 上由 build.rs 内嵌进 .so）
+      - name: Fetch seed data
+        run: npm run data:fetch
+
       # GitHub runner 预装 Android SDK 与 NDK，但 NDK_HOME 未显式设置，这里解析出来
       - name: Resolve Android NDK
         shell: bash
@@ -153,3 +179,18 @@ jobs:
         run: |
           cp apks/IC-Tarkov-arm64.apk "IC-Tarkov_v${{ steps.version.outputs.version }}_android_arm64.apk"
           gh release upload "${{ steps.version.outputs.tag }}" "IC-Tarkov_v${{ steps.version.outputs.version }}_android_arm64.apk" --clobber
+
+      # 无内置数据版 APK（不内嵌种子，数据由用户首次启动时下载），与完整版一并上传
+      - name: Build and sign lite APK (no bundled data)
+        env:
+          ANDROID_KEYSTORE_PATH: keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: android
+          ANDROID_KEY_ALIAS: androiddebugkey
+        run: npm run tauri:android:lite
+
+      - name: Upload lite APK to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp apks/IC-Tarkov-arm64-lite.apk "IC-Tarkov_v${{ steps.version.outputs.version }}_android_arm64_lite.apk"
+          gh release upload "${{ steps.version.outputs.tag }}" "IC-Tarkov_v${{ steps.version.outputs.version }}_android_arm64_lite.apk" --clobber
