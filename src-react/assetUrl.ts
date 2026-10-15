@@ -101,7 +101,8 @@ export function assetUrl(rel: string): string {
  *
  * 模板没法按「这个文件是否存在」判断，因此改为看**该模板所在的目录**在运行时资源里
  * 有没有内容：有（说明瓦片已被「更新图片资源」下载或本就由接口下发）就用资源目录，
- * 否则回退随包路径——于是「数据里给了瓦片就用瓦片、没有就回退 SVG」在两种分发形态下都成立。
+ * 否则回退随包路径——于是「用瓦片的地图 / 楼层」在两种分发形态下都成立
+ * （用不用瓦片由 MapPage 决定：有 SVG 线稿的地图与楼层不用卫星图）。
  */
 export function assetUrlTemplate(tpl: string): string {
   if (!tpl) return tpl

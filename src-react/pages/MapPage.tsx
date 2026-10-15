@@ -549,6 +549,9 @@ export function MapPage() {
   const focusHoldRef = useRef(0)
   const mapFocusRef = useRef(mapFocus)
   mapFocusRef.current = mapFocus
+  // 当前楼层选择：构建闭包内在 SVG 异步加载完成后要按它复位（不能读渲染期捕获的旧值）
+  const floorSelRef = useRef(floorSel)
+  floorSelRef.current = floorSel
 
   // 点击浮窗外部自动关闭（容器内 onMouseDown 已 stopPropagation，不会误触发）
   // 注意：「地图信息」面板不在此列——它只由按钮点击切换显隐，点外部不关闭
@@ -684,8 +687,8 @@ export function MapPage() {
     /**
      * 统一切换 SVG 组显隐。
      * @param layerName 目标楼层组 id；null = 主层
-     * @param dim 切到其它楼层时压暗 base（off-level）
-     * @param hideBase base 也隐藏（tile 楼层：瓦片为底图，SVG 主层不能盖住它）
+     * @param dim 压暗 base（off-level：主层线稿作底、选中的楼层保持全亮）
+     * @param hideBase base 也隐藏（纯瓦片楼层：线稿会盖住瓦片）
      */
     const applySvgLayer = (
       layerName: string | null,
@@ -771,21 +774,16 @@ export function MapPage() {
       noWrap: true,
     }
 
-    // 主层：数据里给了瓦片模板就用瓦片（缩放更清晰、可按需加载），否则回退单张 SVG 抽象图。
-    // 两者同时存在时瓦片作底图、SVG 作为该层线稿叠加（下面的 svgPath 分支负责叠加）。
-    let mainTileLayer: L.TileLayer | null = null
-    if (imap.tilePath) {
-      mainTileLayer = L.tileLayer(assetUrlTemplate(imap.tilePath), tileOpts).addTo(container)
-    }
-    // 瓦片是唯一主层（没有 SVG 线稿）时，它跟随楼层开关显隐；有 SVG 时显隐交给 SVG 组
+    // 主层底图：**地图有 SVG 线稿就只用线稿，不显示卫星图**（瓦片只留给没有线稿的地图：
+    // 实验室 / 破冰船 / 迷宫）。有 SVG 时显隐交给 SVG 组，取不到 SVG 则在下面的 catch 里回退瓦片。
     if (imap.tilePath && !imap.svgPath) {
+      const tl = L.tileLayer(assetUrlTemplate(imap.tilePath), tileOpts).addTo(container)
       defaultHandle = {
         show: () => {
-          if (mainTileLayer && !container.hasLayer(mainTileLayer)) mainTileLayer.addTo(container)
+          if (!container.hasLayer(tl)) tl.addTo(container)
         },
         hide: () => {
-          if (mainTileLayer && container.hasLayer(mainTileLayer))
-            container.removeLayer(mainTileLayer)
+          if (container.hasLayer(tl)) container.removeLayer(tl)
         },
       }
     }
@@ -793,7 +791,11 @@ export function MapPage() {
     if (imap.svgPath) {
       // 底图 SVG 也走统一入口：运行时若有下载的新版本优先用它（lite 版完全依赖下载）
       fetch(assetUrl(imap.svgPath))
-        .then((r) => r.text())
+        .then((r) => {
+          // 资源没下下来时前端会拿到 404 的 HTML，必须显式判失败才能走下面的瓦片兜底
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          return r.text()
+        })
         .then((svgText) => {
           if (cancelled) return
           const outer = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
@@ -824,29 +826,55 @@ export function MapPage() {
             show: () => showSvgMain(),
             hide: () => {},
           }
-          showSvgMain()
+          // 按**当前**楼层复位（不能用渲染期捕获的 floorSel：SVG 是异步加载的，
+          // 期间用户可能已经切过楼层；直接 showSvgMain 会把用户选的楼层顶掉）
+          applyFloor(floorSelRef.current)
           // 必须 addTo：Layer 构造后元素才会真正插入 overlay-pane
           L.svgOverlay(outer, rawBounds, { interactive: false }).addTo(container)
         })
-        .catch((err) => console.error('svg load failed', err))
+        .catch((err) => {
+          console.error('svg load failed', err)
+          // 线稿取不到（lite 版资源尚未下载 / 文件缺失）时回退瓦片，别让地图整片空着
+          if (cancelled || !imap.tilePath) return
+          const tl = L.tileLayer(assetUrlTemplate(imap.tilePath), tileOpts).addTo(container)
+          defaultHandle = {
+            show: () => {
+              if (!container.hasLayer(tl)) tl.addTo(container)
+            },
+            hide: () => {
+              if (container.hasLayer(tl)) container.removeLayer(tl)
+            },
+          }
+        })
     }
 
-    // tile 楼层（可能同时带 svgLayer：瓦片作底图 + SVG 该层结构线稿叠加）
+    // 楼层底图：该层在 SVG 里有对应线稿组就**只用线稿**（主层线稿压暗作底，不加载卫星图）；
+    // 没有线稿组的楼层才用瓦片（如海关 4 楼、储备站 2~5 楼，上游没给这些层的线稿）。
     ;(imap.layers ?? []).forEach((lyr, i) => {
-      if (!lyr.tilePath) return
-      const tl = L.tileLayer(assetUrlTemplate(lyr.tilePath), tileOpts)
+      let tl: L.TileLayer | null = null
+      const ensureTiles = () => (tl ??= L.tileLayer(assetUrlTemplate(lyr.tilePath!), tileOpts))
       floorHandles.set(i, {
         show: () => {
-          if (!container.hasLayer(tl)) tl.addTo(container)
+          // SVG 还没加载完时先按没有线稿处理（此时 map 上多半还没切过楼层）
+          const useSvg = !!lyr.svgLayer && svgGroups.some((g) => g.id === lyr.svgLayer)
+          if (useSvg) {
+            // 曾因线稿不可用而回退过瓦片：这里补一次清理，避免卫星图留在线上
+            if (tl && container.hasLayer(tl)) container.removeLayer(tl)
+            applySvgLayer(lyr.svgLayer as string, true, false)
+            return
+          }
+          if (!lyr.tilePath) return
+          const layer = ensureTiles()
+          if (!container.hasLayer(layer)) layer.addTo(container)
           if (lyr.svgLayer) {
-            // 显示该层 SVG 结构组并隐藏 SVG 主层（否则主层图形盖住 tile 楼层）
+            // 有线稿组但没在 SVG 里找到（数据/文件版本不一致）：只能靠瓦片，隐藏整个线稿
             applySvgLayer(lyr.svgLayer, true, true)
           } else if (svgRoot) {
             svgRoot.style.display = 'none' // 无对应 SVG 组：隐藏整个线稿
           }
         },
         hide: () => {
-          if (container.hasLayer(tl)) container.removeLayer(tl)
+          if (tl && container.hasLayer(tl)) container.removeLayer(tl)
         },
       })
     })

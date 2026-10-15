@@ -123,7 +123,11 @@ git push origin v<version>
   - 前端一律经 `src-react/assetUrl.ts` 的 `assetUrl()` / `assetUrlTemplate()` 取图，**不要再写 `/item-icons/...` 这类硬编码路径**：运行时目录里有就用 Tauri `asset:` 协议（`protocol-asset` feature + `tauri.conf.json` 的 `assetProtocol.enable`，`setup` 里 `allow_directory` 放行资源目录；Android CSP 需允许 `asset:` / `http://asset.localhost`），没有就回退随包路径 —— 离线可用与在线更新因此并存。启动时 `assetUrl.ts::refreshAssetIndex()` 取一次索引（`get_asset_index`），`assets-synced`（兜底还挂了 `data-synced`）后再刷一次（注意别与 api 层的 `refreshAssets()`（触发图片更新）混淆）。
   - 「随包已带的图片」由 `build.rs` 扫描 `public/{item-icons,trader-icons,boss-icons,maps}` 生成 `bundled_assets.rs`（`IC_NO_ASSETS=1` 时为空）。它只服务于**清单不可达时的兜底**（清单没列出的图标，随包已有就不再下）；清单可用时一律按清单里的版本标记逐条比对，因此**首次同步（本地记录为空）会把清单列出的图各取一次**（完整版约十几 MB、图标约 5400 张），之后才全部命中跳过。
   - **lite 版**（`--lite` → `IC_NO_SEED=1 IC_NO_ASSETS=1`）：`build.rs` 不内嵌种子与图片清单，且 `vite.config.ts` 的插件在构建后把 `item-icons` / `trader-icons` / `boss-icons` / `maps` 从产物里剔除（必须赶在 cargo 打包前，故挂在 Vite 构建尾上），图片全部由首次启动下载。商人 / Boss 图因此在 `public/` 下（不再走 Vite 静态 import，那会带 hash 无法剔除）。
-  - 地图底图「瓦片优先」：数据里给了 `tilePath` 就用真瓦片（`assetUrlTemplate` 解析含 `{z}/{x}/{y}` 的模板），没有才回退单张 SVG；两者同时存在时瓦片作底图、SVG 作该层线稿叠加。
+  - **地图底图：有 SVG 线稿就不用卫星图**（`MapPage`，用户偏好线稿）：
+    - 主层：数据里同时给了 `svgPath` 与 `tilePath` 时**只加载 SVG**（`tilePath` 仅在**没有** `svgPath` 的地图上用：实验室 / 破冰船 / 迷宫）；
+    - 楼层：该层在 SVG 里有对应线稿组（`layers[].svgLayer` 且该 `id` 确实存在于 SVG 里）就只用线稿——主层线稿**压暗 20%** 作底（`applySvgLayer(id, true, false)`，CSS 的 `.off-level g.base-layer`）、选中层全亮，不加载该层瓦片；没有线稿组的楼层（海关 4 楼、储备站 2~5 楼，上游没给线稿）才用瓦片，此时整张线稿隐藏（`hideBase=true` / `svgRoot.style.display='none'`）；
+    - 瓦片图层**懒创建**（切到该层才建），线稿可用时会把它移除，避免「SVG 尚未加载完成时先按瓦片处理」留下的卫星图残留；
+    - SVG 取不到时（lite 版资源尚未下载 / 文件缺失，`fetch` 非 2xx 会显式抛错）**回退瓦片**，不让地图空着。SVG 异步加载完成后按 `floorSelRef.current` 复位当前楼层（不能直接 `showSvgMain()`，会把用户已选的楼层顶掉）。
 
 ## 其他
 
