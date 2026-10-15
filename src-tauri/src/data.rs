@@ -297,7 +297,7 @@ pub fn resolve_accept(quest_id: &str) -> AcceptInfo {
             trader_id: String::new(),
             trader_name: String::new(),
             objectives: vec![],
-            wiki: format!("https://www.eftarkov.com/news/id/{quest_id}.html"),
+            wiki: format!("https://www.eftarkov.com/task/{quest_id}"),
             min_level: None,
         },
     }

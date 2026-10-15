@@ -853,7 +853,7 @@ fn build_one(
         min_level: t.get("minPlayerLevel").and_then(|v| v.as_u64()).map(|v| v as u32),
         map: main_map,
         maps: maps_found,
-        wiki: format!("https://www.eftarkov.com/news/id/{qid}.html"),
+        wiki: format!("https://www.eftarkov.com/task/{qid}"),
         objectives,
         rewards,
         // 转生（Prestige）任务不算「往期赛季任务」：上游 pvp-season 列表并未收录全部转生任务
@@ -1530,7 +1530,7 @@ fn build_zones(raw: &Raw) -> Value {
             serde_json::json!({
                 "name": name_key,
                 "nameZh": raw.zh_tasks.get(name_key).cloned().unwrap_or_else(|| name_key.to_string()),
-                "wiki": format!("https://www.eftarkov.com/news/id/{}.html", tid),
+                "wiki": format!("https://www.eftarkov.com/task/{}", tid),
                 "objectives": Value::Array(objs_out),
             }),
         );
