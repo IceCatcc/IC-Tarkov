@@ -97,6 +97,7 @@ git push origin v<version>
 - **帮助与关于入口**：两者都在设置页左下角（帮助另有首次启动自动弹出这一入口）。帮助窗口内**不再**放「关于」按钮；「去设置」按钮仅在首次启动引导时显示（由 `onGoSettings` 是否传入决定）。
 - **浮层互斥**：首次启动时若帮助窗口正在展示，缺日志目录的「打开设置」要挂起到帮助关闭后再执行，避免设置盖住帮助（见 `src-react/App.tsx` 的 `pendingOpenSettings`）。
 - 顶部栏（`src-react/components/TopBar.tsx`）右侧依次是：错误提示、（电脑端）「连接」状态按钮、「⚙ 设置」按钮、窗口控制按钮。**不再**有 `?` 帮助按钮。
+- **「收藏家」页签默认隐藏**：由任务视图（`QuestGraphPage` 工具栏，两个子视图下都显示）的「收藏家追踪」开关控制，开启后顶栏导航与移动端底部 Tab 才出现「收藏家」页签。开关存 `store.collectorTrack`（随 `graphPrefs` 持久化：localStorage + settings.json 的 `uiPrefs.graphPrefs.collectorTrack`，局域网/Web 同步沿用同一路径；旧偏好无该字段时按 `false` 处理）。关闭时若正停留在收藏家页（手动关闭、或从设置/同步恢复出关闭态），由 `App.tsx` 的 effect 踢回监控页，避免出现没有页签可点的死角。
 - 窗口为无边框自定义标题栏，中部空白区域带 `data-tauri-drag-region` 可拖动。
 - **移动端不自动弹连接窗口**：启动只做已保存连接的自动重连（`startLanAutoConnect`），未保存过配置时不弹 `LanConnectModal`（首次启动弹窗会打断使用），入口是顶部栏常驻的「连接 / 连接中 / 已连接」按钮（见 `TopBar.tsx`）。
 - **地图「钥匙锁」的名称**：上游 `locks` 只有 `lockType` + `key`（钥匙物品 id），没有名称字段，`dataset::build_markers` 用 `item_name`（`zh_items` 的 `{id} Name`）把钥匙中文名填进 `name` / `nameZh`，前端据此把「同一把钥匙的几扇门」归为一组；同时下发 `keyName`（钥匙 id）与 `lockType`（door / trunk / container / switch）。

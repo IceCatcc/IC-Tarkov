@@ -386,6 +386,9 @@ export function QuestGraphPage() {
   // 一级视图 tab：'list' 任务列表 / 'chain' 任务链图谱
   const graphTab = useStore((s) => s.graphTab)
   const setGraphTab = useStore((s) => s.setGraphTab)
+  // 收藏家追踪开关：开启后顶部/底部导航才显示「收藏家」页签
+  const collectorTrack = useStore((s) => s.collectorTrack)
+  const setCollectorTrack = useStore((s) => s.setCollectorTrack)
   // 任务模式过滤（pvp/pve，localStorage 持久化；日志检测到会话模式时自动跟随）
   const questMode = useStore((s) => s.questMode)
   // 侧边栏折叠时，顶部工具栏为左上角浮动按钮预留空位
@@ -2480,6 +2483,19 @@ export function QuestGraphPage() {
 
         {/* 搜索 + 地图筛选 + 缩略图：整体靠右 */}
         <div className="ml-auto shrink-0 flex items-center gap-2">
+          {/* 收藏家追踪：开启后导航才显示「收藏家」页签（默认关闭） */}
+          <label
+            title="收藏家追踪：开启后顶部导航（移动端为底部 Tab）才会显示「收藏家」页签"
+            className="flex items-center gap-1.5 shrink-0 text-[14px] text-muted cursor-pointer select-none hover:text-[#e6edf3]"
+          >
+            <input
+              type="checkbox"
+              checked={collectorTrack}
+              onChange={(e) => setCollectorTrack(e.target.checked)}
+              className="accent-[#ef9f27]"
+            />
+            收藏家追踪
+          </label>
           {/* 任务板：是否显示已完成任务（默认显示） */}
           {graphTab === 'list' && (
             <label

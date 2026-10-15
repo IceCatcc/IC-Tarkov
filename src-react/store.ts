@@ -190,6 +190,9 @@ interface AppState {
   detailPanelPos: { x: number; y: number } | null
   setDetailPanelPos: (p: { x: number; y: number } | null) => void
   setGraphTab: (v: 'list' | 'chain') => void
+  /** 收藏家追踪开关（任务视图工具栏）：开启后导航才显示「收藏家」页签；持久化于 graphPrefs */
+  collectorTrack: boolean
+  setCollectorTrack: (v: boolean) => void
   /** 任务模式：pvp / pvps / pve（三套数据独立；持久化，日志检测到会话模式时自动跟随） */
   questMode: QuestMode
   setQuestMode: (v: QuestMode) => void
@@ -278,6 +281,8 @@ interface GraphPrefs {
   showPrestige: boolean
   disabledTraders: Record<string, boolean>
   questMode: QuestMode
+  /** 收藏家追踪开关：关闭时顶部/底部导航不显示「收藏家」页签（默认关闭） */
+  collectorTrack: boolean
 }
 
 function loadGraphPrefs(): GraphPrefs {
@@ -288,6 +293,7 @@ function loadGraphPrefs(): GraphPrefs {
     showPrestige: true, // 默认显示转生任务（「转生任务」不勾选才隐藏）
     disabledTraders: Object.fromEntries(DEFAULT_DISABLED_TRADERS.map((id) => [id, true])),
     questMode: 'pvp',
+    collectorTrack: false, // 收藏家页签默认隐藏，需在任务视图手动开启
   }
   try {
     // 优先读 v2；没有时回退 v1（沿用已保存的偏好）
@@ -303,6 +309,8 @@ function loadGraphPrefs(): GraphPrefs {
       showPrestige: true,
       disabledTraders: { ...fallback.disabledTraders, ...(p.disabledTraders ?? {}) },
       questMode: normQuestMode(p.questMode),
+      // 旧版偏好没有该字段：按默认「关闭」（不显示收藏家页签）处理
+      collectorTrack: p.collectorTrack === true,
     }
   } catch {
     return fallback
@@ -318,6 +326,7 @@ function persistGraphPrefs() {
     showPrestige: s.showPrestigeGraph,
     disabledTraders: s.disabledTradersGraph,
     questMode: s.questMode,
+    collectorTrack: s.collectorTrack,
   }
   try {
     localStorage.setItem(GRAPH_PREFS_KEY, JSON.stringify(data))
@@ -340,6 +349,7 @@ export function collectUiPrefs(): Record<string, unknown> {
       showPrestige: s.showPrestigeGraph,
       disabledTraders: s.disabledTradersGraph,
       questMode: s.questMode,
+      collectorTrack: s.collectorTrack,
     } satisfies GraphPrefs,
     mapPrefs: {
       autoZoom: s.autoZoomMap,
@@ -700,6 +710,13 @@ export const useStore = create<AppState>((set, get) => ({
   // 任务页默认打开「任务列表」（任务板）；任务链图谱需手动切换
   graphTab: 'list',
   setGraphTab: (v) => set({ graphTab: v }),
+  // 收藏家追踪：默认关闭（导航不显示「收藏家」页签）；关闭时若正停留在收藏家页，
+  // 由 App.tsx 的 effect 负责踢回监控页
+  collectorTrack: prefs0.collectorTrack,
+  setCollectorTrack: (v) => {
+    set({ collectorTrack: v })
+    persistGraphPrefs()
+  },
   detailPanelPos: null,
   setDetailPanelPos: (p) => set({ detailPanelPos: p }),
   questMode: prefs0.questMode,
@@ -736,6 +753,7 @@ export const useStore = create<AppState>((set, get) => ({
       if (typeof g.followDetail === 'boolean') patch.followDetail = g.followDetail
       if (typeof g.hideLegacy === 'boolean') patch.hideLegacyGraph = g.hideLegacy
       if (typeof g.showPrestige === 'boolean') patch.showPrestigeGraph = g.showPrestige
+      if (typeof g.collectorTrack === 'boolean') patch.collectorTrack = g.collectorTrack
       if (g.questMode === 'pve' || g.questMode === 'pvp' || g.questMode === 'pvps') {
         patch.questMode = normQuestMode(g.questMode)
       }

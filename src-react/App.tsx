@@ -30,6 +30,7 @@ const KEEP_ON_TOAST = '屏幕常亮已开启（可在设置中关闭）'
 
 export default function App() {
   const page = useStore((s) => s.page)
+  const setPage = useStore((s) => s.setPage)
   const openSettings = useStore((s) => s.openSettings)
   // 首次启动帮助弹窗（仅未看过时显示，看过写入 localStorage 不再弹）
   const [showHelp, setShowHelp] = useState(
@@ -79,6 +80,12 @@ export default function App() {
   useEffect(() => {
     if (page === 'items') setItemsAlive(true)
   }, [page])
+  // 收藏家追踪关闭时导航不再显示「收藏家」页签；若正停留在该页（开关被关掉 /
+  // 从设置或局域网同步恢复了关闭态），踢回监控页，避免出现无页签可点的死角
+  const collectorTrack = useStore((s) => s.collectorTrack)
+  useEffect(() => {
+    if (page === 'collector' && !collectorTrack) setPage('monitor')
+  }, [page, collectorTrack, setPage])
   const showSettings = useStore((s) => s.showSettings)
   const setWatcher = useStore((s) => s.setWatcher)
   const setSettings = useStore((s) => s.setSettings)

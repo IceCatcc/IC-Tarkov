@@ -54,6 +54,8 @@ function WinButton({
 export function TopBar() {
   const page = useStore((s) => s.page)
   const setPage = useStore((s) => s.setPage)
+  // 收藏家追踪开关：关闭时导航不显示「收藏家」页签（开关在任务视图工具栏）
+  const collectorTrack = useStore((s) => s.collectorTrack)
   const watcher = useStore((s) => s.watcher)
   const openSettings = useStore((s) => s.openSettings)
   // 任务模式：PVP / PVPS / PVE（三套任务进度与收藏各自独立；日志检测到会话模式时自动跟随）
@@ -94,6 +96,8 @@ export function TopBar() {
   }, [])
 
   const mobile = isMobile()
+  // 导航项：未开启「收藏家追踪」时隐藏收藏家页签（桌面顶栏与移动端底部 Tab 共用）
+  const navItems = NAV_ITEMS.filter((it) => it.key !== 'collector' || collectorTrack)
   // 电脑端：是否有手机端已连上本机的同步服务（顶部「连接」按钮据此显示「已连接」）
   const [pcConnected, setPcConnected] = useState(false)
   // 横屏检测：移动端横屏 + 地图页时隐藏顶部工具栏（logo/设置那条），全屏看图
@@ -189,7 +193,7 @@ export function TopBar() {
         {/* 导航：跟在版本号后面（移动端改为底部 Tab，见组件末尾） */}
         {!mobile && (
         <nav className="flex items-center gap-1 ml-2">
-          {NAV_ITEMS.map((it) => (
+          {navItems.map((it) => (
             <button
               key={it.key}
               onClick={() => setPage(it.key)}
@@ -395,7 +399,7 @@ export function TopBar() {
             paddingBottom: 'env(safe-area-inset-bottom)',
           }}
         >
-          {NAV_ITEMS.map((it) => (
+          {navItems.map((it) => (
             <button
               key={it.key}
               onClick={() => setPage(it.key)}
