@@ -1166,21 +1166,48 @@ struct DataStatusPayload {
 fn load_in_background(app: tauri::AppHandle) {
     let tracker = app.state::<startup::StartupTracker>();
 
+    // 缓存里一份数据都没有（无内置数据版首次启动，或用户清掉了数据目录）：先把数据
+    // 下下来再建索引，下载进度写进启动遮罩（「正在下载游戏数据 3/10：地图数据」）。
+    // 下载失败也照常放行：界面以空数据进入，用户可在设置页「更新数据」重试。
+    let before = apidata::status(&app);
+    let mut download_err: Option<String> = None;
+    if !before.files.iter().any(|f| f.bytes > 0) {
+        tracker.step(&app, "download", "正在下载游戏数据…");
+        let mut report = |done: usize, total: usize, label: &str| {
+            tracker.step(
+                &app,
+                "download",
+                &format!("正在下载游戏数据 {}/{}：{label}", done + 1, total),
+            );
+        };
+        match apidata::sync_with(&app, false, &mut report) {
+            Ok(r) => println!("[data] 首次数据下载完成：{}", r.message),
+            Err(e) => {
+                eprintln!("[data] 首次数据下载失败：{e}");
+                download_err = Some(format!(
+                    "游戏数据下载失败（{e}）：界面将以空数据启动，可在设置页「更新数据」中重试"
+                ));
+            }
+        }
+    }
+
     tracker.step(&app, "dataset", "正在读取游戏数据…");
     let dataset_err = {
         let mut report = |label: &str| tracker.step(&app, "dataset", label);
-        data::init_with(&app, &mut report).err()
+        data::init_with(&app, &mut report)
+            .err()
+            .map(|e| format!("游戏数据读取失败，界面将以空数据启动：{e}"))
     };
 
-    // 仅当缓存里已有部分数据且已过期时才后台静默拉取；缓存为空（没有任何 JSON）时
-    // 不自动联网下载，避免离线/首次启动空转与误报，首次数据由用户在设置页「更新数据」获取。
+    // 已有部分数据且已过期时才后台静默拉取（一份数据都没有的首次启动已在上一步处理）
     tracker.step(&app, "update", "正在检查数据更新…");
     let st = apidata::status(&app);
     if st.stale && st.files.iter().any(|f| f.bytes > 0) {
         spawn_sync(app.clone(), false);
     }
 
-    tracker.finish(&app, dataset_err);
+    // 下载失败的原因优先于「数据集为空」的报错：后者正是前者导致的
+    tracker.finish(&app, download_err.or(dataset_err));
 }
 
 /// 后台同步：拉取全部端点 -> 重建派生索引 -> 通知前端刷新

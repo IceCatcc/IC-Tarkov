@@ -5,9 +5,10 @@
   "scripts": {
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "tauri:build:nobundle": "tauri build --no-bundle",
-    "tauri:android": "node scripts/clean-dist.mjs --android && node scripts/sync-android-version.mjs && tauri android build --apk --target aarch64 && node scripts/sign-apk.mjs",
+    "data:fetch": "node scripts/fetch-api-data.mjs",
+    "tauri:build": "node scripts/build-app.mjs",
+    "tauri:build:nobundle": "node scripts/build-app.mjs --no-bundle",
+    "tauri:android": "node scripts/clean-dist.mjs --android && node scripts/sync-android-version.mjs && node scripts/build-app.mjs --android",
     "tauri:android:dev": "tauri android dev",
     "react:dev": "vite",
     "react:build": "node scripts/clean-dist.mjs && tsc && vite build",

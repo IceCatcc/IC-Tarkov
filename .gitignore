@@ -23,9 +23,14 @@ vite.config.ts.timestamp-*.mjs
 
 # 本机打包的 APK 成品
 /apks/
+# 无内置数据版打包时本地种子的临时寄存目录（构建结束会挪回）
+src-tauri/resources/.api-stash/
 quest_analysis
-# tarkov.dev 原始 API 种子数据下的运行时缓存清单（每次同步重写，不入库）
-src-tauri/resources/api/manifest.json
+# tarkov.dev 原始 API 种子数据（含同步清单 manifest.json）：不入库。
+# 打包时由 scripts/fetch-api-data.mjs 抓取（npm run data:fetch，构建脚本与 CI 已接入），
+# 无内置数据版（IC_NO_SEED=1）则完全不带；目录用 .gitkeep 保住，
+# 免得全新克隆后 tauri.conf.json 的 bundle.resources 找不到目标。
+src-tauri/resources/api/*.json
 
 # 本地开发规划与参考资料，不入库
 MOBILE_LAN_SYNC_PLAN.md

@@ -138,48 +138,17 @@ pub fn bundled_file(app: &tauri::AppHandle, name: &str) -> Option<PathBuf> {
 /// 故把种子直接打进二进制。种子在编译期由 build.rs 用 gzip 压成
 /// `<OUT_DIR>/api-gz/<rel 中 '/' 换成 '__'>.gz` 再内嵌，运行时解压，
 /// 17MB 原始 JSON 仅以约 4MB 的压缩形态入 .so（APK/NSIS 不再膨胀 13MB+）。
+///
+/// 种子表由 build.rs 生成：**缺失的文件不在表里**（无内置数据版 `IC_NO_SEED=1`
+/// 则整表为空），此时返回 None，调用方走「没有种子」分支——
+/// 数据由用户在首次启动时联网下载（见 `lib.rs::load_in_background`）。
+mod seed_table {
+    include!(concat!(env!("OUT_DIR"), "/seed_table.rs"));
+}
+
 fn embedded_seed(rel: &str) -> Option<Vec<u8>> {
-    let gz: &[u8] = match rel {
-        "api/regular_tasks.json" => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_tasks.json.gz")).as_slice()
-        }
-        "api/pve_tasks.json" => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__pve_tasks.json.gz")).as_slice()
-        }
-        "api/season_tasks.json" => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__season_tasks.json.gz")).as_slice()
-        }
-        "api/regular_tasks_zh.json" => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_tasks_zh.json.gz")).as_slice()
-        }
-        "api/pve_tasks_zh.json" => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__pve_tasks_zh.json.gz")).as_slice()
-        }
-        "api/regular_maps.json" => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_maps.json.gz")).as_slice()
-        }
-        "api/regular_maps_zh.json" => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_maps_zh.json.gz")).as_slice()
-        }
-        "api/regular_traders.json" => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_traders.json.gz")).as_slice()
-        }
-        "api/regular_traders_zh.json" => {
-            include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/api-gz/api__regular_traders_zh.json.gz"
-            ))
-            .as_slice()
-        }
-        "api/regular_items_zh.json" => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/api__regular_items_zh.json.gz")).as_slice()
-        }
-        "maps-skeleton.json" => {
-            include_bytes!(concat!(env!("OUT_DIR"), "/api-gz/maps-skeleton.json.gz")).as_slice()
-        }
-        _ => return None,
-    };
-    let mut dec = flate2::read::GzDecoder::new(&gz[..]);
+    let gz = seed_table::gzipped(rel)?;
+    let mut dec = flate2::read::GzDecoder::new(gz);
     let mut out = Vec::with_capacity(gz.len() * 4);
     dec.read_to_end(&mut out).ok()?;
     Some(out)
@@ -452,15 +421,32 @@ fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
 
 /// 从 API 拉取全部端点并写入缓存（阻塞）。force=true 时忽略过期判断，全部重下。
 pub fn sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
+    sync_with(app, force, &mut |_, _, _| {})
+}
+
+/// 带进度回调的同步：每开始一个端点前回调 `(已完成数, 总数, 端点名)`。
+/// 首次启动（缓存为空）时 `lib.rs` 用它把「正在下载游戏数据 3/10：地图数据」
+/// 写进启动遮罩的步骤文案。
+pub fn sync_with<F>(
+    app: &tauri::AppHandle,
+    force: bool,
+    progress: &mut F,
+) -> Result<SyncReport, String>
+where
+    F: FnMut(usize, usize, &str),
+{
     if SYNCING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return Err("数据更新正在进行中".to_string());
     }
-    let result = do_sync(app, force);
+    let result = do_sync(app, force, progress);
     SYNCING.store(false, Ordering::SeqCst);
     result
 }
 
-fn do_sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
+fn do_sync<F>(app: &tauri::AppHandle, force: bool, progress: &mut F) -> Result<SyncReport, String>
+where
+    F: FnMut(usize, usize, &str),
+{
     let dir = ensure_cache(app)?;
     let agent = build_agent()?;
     let total = ENDPOINTS.len();
@@ -481,6 +467,7 @@ fn do_sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
                 force,
             },
         );
+        progress(i, total, ep.label);
         let path = dir.join(ep.file);
         // 非强制更新时带上本地 ETag 发条件请求：内容没变服务端回 304，连响应体都不收
         let known = if force { None } else { local_etag(&dir, &manifest, ep) };
