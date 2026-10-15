@@ -340,7 +340,7 @@ pub struct SyncReport {
     pub message: String,
 }
 
-fn build_agent() -> Result<ureq::Agent, String> {
+pub(crate) fn build_agent() -> Result<ureq::Agent, String> {
     // 启用 rustls feature 后，ureq 默认以 rustls + webpki-roots 作为 TLS 后端（移动端必须，
     // native-tls 不可用）。桌面端普通用户（直连 json.tarkov.dev）无影响；仅企业自签/代理证书场景有差异。
     Ok(ureq::AgentBuilder::new()
@@ -407,7 +407,8 @@ fn fetch_one(agent: &ureq::Agent, ep: &Endpoint, etag: Option<&str>) -> Result<F
     Ok(Fetched::Fresh(buf, new_etag))
 }
 
-fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
+/// 原子替换写入（先写 .tmp 再 rename）：图片资源同步也复用（assets.rs）
+pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, data).map_err(|e| format!("写入失败：{e}"))?;
     match std::fs::rename(&tmp, path) {
@@ -500,6 +501,39 @@ where
     manifest.checked_at = now_secs();
     write_manifest(&dir, &manifest);
 
+    // ---- 图片资源（与数据同一次「更新数据」完成） ----
+    // 物品图标 / 商人头像直连上游 CDN；地图底图、地图标记、Boss 图与瓦片走项目自有资源清单。
+    // 自有清单基址不可达时 assets 内部静默跳过，不影响 JSON 数据的更新结果。
+    let assets_report = {
+        let mut report = |done: usize, total: usize, label: &str| {
+            let _ = app.emit(
+                "data-sync-progress",
+                SyncProgress {
+                    running: true,
+                    done,
+                    total,
+                    // 数据文件更新数 + 图片已处理数：界面上「已更新 x/y」跟着图片进度走
+                    changed: updated.len() + done,
+                    label: format!("图片 · {label}"),
+                    force,
+                },
+            );
+            // 启动遮罩的步骤文案与「更新数据」共用同一条时间线
+            progress(done, total, label);
+        };
+        crate::assets::sync_with(app, force, &mut report)
+            .map_err(|e| eprintln!("[assets] 图片资源更新失败：{e}"))
+            .ok()
+    };
+    let assets_note = match &assets_report {
+        Some(ar) if ar.total > 0 => crate::assets::summary_text(ar),
+        _ => String::new(),
+    };
+    if let Some(ar) = assets_report {
+        failed.extend(ar.failed);
+        unchanged += ar.unchanged;
+    }
+
     let _ = app.emit(
         "data-sync-progress",
         SyncProgress {
@@ -513,15 +547,19 @@ where
     );
 
     let ok = failed.is_empty();
-    let message = if ok {
-        if updated.is_empty() {
-            format!("已是最新：{total} 份文件内容均未变化，已跳过下载")
-        } else {
-            format!("已更新 {} / {} 份文件", updated.len(), total)
-        }
+    let mut parts: Vec<String> = Vec::new();
+    parts.push(if updated.is_empty() {
+        format!("已是最新：{total} 份数据文件内容均未变化")
     } else {
-        format!("{}/{} 份文件更新失败：{}", failed.len(), total, failed.join("；"))
-    };
+        format!("已更新 {} / {} 份数据文件", updated.len(), total)
+    });
+    if !assets_note.is_empty() {
+        parts.push(assets_note);
+    }
+    if !failed.is_empty() {
+        parts.push(format!("{} 项失败：{}", failed.len(), failed.join("；")));
+    }
+    let message = parts.join("；");
     let report = SyncReport {
         ok,
         updated,

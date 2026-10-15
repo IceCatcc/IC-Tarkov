@@ -1,4 +1,5 @@
 mod apidata;
+mod assets;
 mod data;
 pub mod dataset;
 mod keepawake;
@@ -1158,6 +1159,18 @@ struct DataStatusPayload {
     base: apidata::DataStatus,
     quest_count: usize,
     map_count: usize,
+    /// 图片资源（物品图标 / 商人头像 / 地图底图 / Boss 图）的本地情况
+    assets: assets::AssetsStatus,
+}
+
+/// 图片资源索引：前端启动时取一次，决定每张图走运行时资源还是随包资源
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AssetIndexPayload {
+    /// 资源目录绝对路径（空串 = 不可用，前端一律回退随包资源）
+    dir: String,
+    /// 已下载的资源相对路径（'/' 分隔）
+    files: Vec<String>,
 }
 
 /// 启动资料加载（后台线程执行，与界面进程分离）：
@@ -1233,6 +1246,20 @@ fn get_data_status(app: tauri::AppHandle) -> DataStatusPayload {
         base: apidata::status(&app),
         quest_count: s.quests.len(),
         map_count: s.maps.len(),
+        assets: assets::status(&app),
+    }
+}
+
+/// 图片资源索引（前端 assetUrl 用）：资源目录 + 已下载的相对路径列表。
+/// 数据更新（data-synced）后前端会重新取一次，新下载的图片立即生效。
+#[tauri::command]
+fn get_asset_index(app: tauri::AppHandle) -> AssetIndexPayload {
+    let dir = assets::dir(&app)
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    AssetIndexPayload {
+        dir,
+        files: assets::index(&app),
     }
 }
 
@@ -1454,6 +1481,12 @@ pub fn run() {
             // （启动即生效；用户在设置里切换时由 set_keep_screen_on 即时同步）
             #[cfg(any(target_os = "android", target_os = "ios"))]
             crate::keepawake::apply(&handle, read_settings(&handle).keep_screen_on);
+            // 运行时下载的图片（<data_root>/tarkov-assets）经 asset: 协议暴露给前端：
+            // 前端 assetUrl() 优先用它，没下载到的资源继续走随包路径。
+            // 作用域必须在窗口加载前放行，否则前几张图会被协议挡掉。
+            if let Ok(dir) = assets::dir(&handle) {
+                let _ = app.asset_protocol_scope().allow_directory(&dir, true);
+            }
             // 同步：生成 token + 广播通道，并把现有事件桥接到广播（供手机端 WS 订阅）。
             // 仅电脑端启动服务端；手机端为客户端，无此步骤。
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1504,6 +1537,7 @@ pub fn run() {
                     set_objective_status,
                     get_data_status,
                     refresh_game_data,
+                    get_asset_index,
                     get_map_markers,
                     get_quest_zones,
                     get_map_bosses,
@@ -1558,6 +1592,7 @@ pub fn run() {
                     set_objective_status,
                     get_data_status,
                     refresh_game_data,
+                    get_asset_index,
                     get_map_markers,
                     get_quest_zones,
                     get_map_bosses,
