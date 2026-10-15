@@ -103,7 +103,10 @@ if (!skipData) {
 }
 
 // 2. 构建
-const liteEnv = lite ? { IC_NO_SEED: '1' } : {}
+// lite 版两个开关：
+//   IC_NO_SEED      build.rs 不内嵌种子 JSON
+//   IC_NO_ASSETS    build.rs 输出空的随包图片清单，且 Vite 构建后把图片从产物里剔除
+const liteEnv = lite ? { IC_NO_SEED: '1', IC_NO_ASSETS: '1' } : {}
 if (android) {
   const stashed = lite ? stashSeeds() : false
   try {
