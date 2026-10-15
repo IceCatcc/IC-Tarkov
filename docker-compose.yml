@@ -1,0 +1,63 @@
+# IC Tarkov Web 一键部署（MySQL + Node 服务端）。
+#
+# 使用：
+#   npm run web:build              # 先产出前端产物 src-react/dist-web
+#   docker compose up -d --build
+#   浏览器打开 http://localhost:3000
+#
+# 生产环境务必修改 MYSQL_ROOT_PASSWORD / MYSQL_PASSWORD，并把 COOKIE_SECURE 置为 true
+# （配合反向代理的 HTTPS）。
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ic_tarkov_root}
+      MYSQL_DATABASE: ${DB_NAME:-ic_tarkov}
+      MYSQL_USER: ${DB_USER:-ic_tarkov}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-ic_tarkov_pwd}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-p${MYSQL_ROOT_PASSWORD:-ic_tarkov_root}']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # 仅本机需要直连调试时再打开
+    # ports:
+    #   - '3306:3306'
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      HOST: 0.0.0.0
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-ic_tarkov}
+      DB_PASSWORD: ${DB_PASSWORD:-ic_tarkov_pwd}
+      DB_NAME: ${DB_NAME:-ic_tarkov}
+      DB_AUTO_CREATE: 'false'
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SESSION_TTL_DAYS: 30
+      TZ: Asia/Shanghai
+    ports:
+      - '${HTTP_PORT:-3000}:3000'
+    volumes:
+      # 游戏数据缓存与派生索引（含 17MB 原始 JSON），需要持久化
+      - ic-data:/app/data
+
+volumes:
+  mysql-data:
+  ic-data:

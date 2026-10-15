@@ -1,7 +1,8 @@
 /**
  * 构建前清理产物目录。
  * 用法：
- *   node scripts/clean-dist.mjs              清 src-react/dist
+ *   node scripts/clean-dist.mjs              清 src-react/dist（Tauri 桌面 / 移动）
+ *   node scripts/clean-dist.mjs --web        清 src-react/dist-web（Web 端）
  *   node scripts/clean-dist.mjs --android    额外清 src-tauri/gen/android/app/build
  *
  * 背景：vite.config.ts 里 emptyOutDir=false（避免逐文件删除触发 IDE 批量确认），
@@ -19,7 +20,8 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-const targets = ['src-react/dist']
+// Web 构建与 Tauri 构建产物是两套目录（见 vite.config.ts 的 outDir），互不覆盖
+const targets = [process.argv.includes('--web') ? 'src-react/dist-web' : 'src-react/dist']
 if (process.argv.includes('--android')) {
   targets.push('src-tauri/gen/android/app/build')
 }

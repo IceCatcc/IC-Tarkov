@@ -1,6 +1,7 @@
 node_modules
 dist
 src-react/dist
+src-react/dist-web
 # clean-dist.mjs 的暂存目录（rename 后待删，异常时可能短时残留）
 src-react/.dist-trash*
 dist-verify*

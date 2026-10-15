@@ -1,19 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
-import { listen } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
-import { getVersion } from '@tauri-apps/api/app'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../store'
 import type { QuestMode } from '../types'
-import { isMobile } from '../platform'
+import { isMobile, isWeb } from '../platform'
 import { getLanConnStatus, onLanStatus } from '../lan'
 import { checkLatestRelease, isNewer, RELEASES_PAGE, type ReleaseInfo } from '../updater'
 import { openUrl, getLanStatus } from '../tauri'
+import {
+  appVersion,
+  closeWindow,
+  listenEvent,
+  minimizeWindow,
+  toggleMaximizeWindow,
+} from '../api/shell'
+import { logout } from '../api/web-account'
+import { ImportDataModal } from './ImportDataModal'
 import { LanSyncModal } from './LanSyncModal'
 import { LanConnectModal } from './LanConnectModal'
-
-const win = getCurrentWindow()
 
 const NAV_ITEMS: {
   key: 'monitor' | 'graph' | 'map' | 'collector' | 'items'
@@ -71,15 +75,25 @@ export function TopBar() {
   const [lanOpen, setLanOpen] = useState(false)
   const [connectOpen, setConnectOpen] = useState(false)
   const [lanConn, setLanConn] = useState(getLanConnStatus())
+  const [importOpen, setImportOpen] = useState(false)
+
+  const doLogout = async () => {
+    try {
+      await logout()
+    } catch {
+      /* 会话可能已失效，照样回到登录页 */
+    }
+    window.location.reload()
+  }
 
   useEffect(() => onLanStatus(setLanConn), [])
 
-  // 应用版本号（Tauri 运行时；开发环境取不到时静默留空）
+  // 应用版本号（Tauri 运行时；开发环境与 Web 端取不到时静默留空 → 版本标签隐藏）
   useEffect(() => {
     let disposed = false
-    getVersion()
+    appVersion()
       .then((v) => {
-        if (disposed) return null
+        if (disposed || !v) return null
         setVersion(v)
         // 用拿到的版本号比较，避免闭包读到旧的空值
         return checkLatestRelease().then((info) => {
@@ -96,6 +110,8 @@ export function TopBar() {
   }, [])
 
   const mobile = isMobile()
+  // Web 端（浏览器）：没有窗口控制、没有本机局域网服务，相关按钮一律不渲染
+  const web = isWeb()
   // 导航项：未开启「收藏家追踪」时隐藏收藏家页签（桌面顶栏与移动端底部 Tab 共用）
   const navItems = NAV_ITEMS.filter((it) => it.key !== 'collector' || collectorTrack)
   // 电脑端：是否有手机端已连上本机的同步服务（顶部「连接」按钮据此显示「已连接」）
@@ -146,9 +162,9 @@ export function TopBar() {
       })
       .catch(() => {})
     Promise.all([
-      listen('lan-client-connected', () => setPcConnected(true)),
+      listenEvent('lan-client-connected', () => setPcConnected(true)),
       // payload = 是否仍有客户端在线（单设备限制下被新连接顶掉时仍为 true）
-      listen<boolean>('lan-client-disconnected', (e) => setPcConnected(e.payload === true)),
+      listenEvent<boolean>('lan-client-disconnected', (p) => setPcConnected(p === true)),
     ])
       .then((us) => {
         if (disposed) us.forEach((u) => u())
@@ -240,8 +256,8 @@ export function TopBar() {
             {watcher.error}
           </span>
         )}
-        {/* 连接（做服务端）：仅桌面；手机端无意义。已连上手机时显示绿点「已连接」 */}
-        {!mobile && (
+        {/* 连接（做服务端）：仅桌面且非 Web；手机端无意义。已连上手机时显示绿点「已连接」 */}
+        {!mobile && !web && (
           <button
             onClick={() => setLanOpen(true)}
             title={
@@ -259,8 +275,8 @@ export function TopBar() {
             {pcConnected ? '已连接' : '连接'}
           </button>
         )}
-        {/* 连接（做客户端）：仅移动端；桌面无摄像头扫码场景。文本三态：连接/连接中/已连接 */}
-        {mobile && (
+        {/* 连接（做客户端）：仅移动端且非 Web；桌面无摄像头扫码场景。文本三态：连接/连接中/已连接 */}
+        {mobile && !web && (
           <button
             onClick={() => setConnectOpen(true)}
             title={
@@ -280,6 +296,25 @@ export function TopBar() {
             {lanConn === 'connected' ? '已连接' : lanConn === 'connecting' ? '连接中' : '连接'}
           </button>
         )}
+        {/* Web 端：导入桌面端本地数据 + 退出登录（桌面端没有账号体系） */}
+        {web && (
+          <>
+            <button
+              onClick={() => setImportOpen(true)}
+              title="导入桌面端（设置 → 导出数据）生成的 zip，或单个进度 JSON"
+              className="px-2.5 py-1 rounded border border-line text-[12px] hover:bg-ink-700 text-[#e6edf3]"
+            >
+              导入数据
+            </button>
+            <button
+              onClick={() => void doLogout()}
+              title="退出登录"
+              className="px-2.5 py-1 rounded border border-line text-[12px] text-muted hover:text-[#e6edf3] hover:bg-ink-700"
+            >
+              退出
+            </button>
+          </>
+        )}
         <button
           onClick={openSettings}
           title="设置"
@@ -289,13 +324,13 @@ export function TopBar() {
         </button>
       </div>
 
-      {/* 窗口控制按钮（仅桌面） */}
-      {!mobile && (
+      {/* 窗口控制按钮（仅 Tauri 桌面端；浏览器没有窗口控制概念） */}
+      {!mobile && !web && (
         <>
           <div className="w-px self-stretch bg-line mx-1" />
-          <WinButton onClick={() => win.minimize()} label="─" title="最小化" />
-          <WinButton onClick={() => win.toggleMaximize()} label="▢" title="最大化 / 还原" />
-          <WinButton onClick={() => win.close()} label="✕" title="关闭" danger />
+          <WinButton onClick={() => void minimizeWindow()} label="─" title="最小化" />
+          <WinButton onClick={() => void toggleMaximizeWindow()} label="▢" title="最大化 / 还原" />
+          <WinButton onClick={() => void closeWindow()} label="✕" title="关闭" danger />
         </>
       )}
       </header>
@@ -387,8 +422,9 @@ export function TopBar() {
         </div>
       )}
 
-      <LanSyncModal open={lanOpen} onClose={() => setLanOpen(false)} />
-      <LanConnectModal open={connectOpen} onClose={() => setConnectOpen(false)} />
+      {!web && <LanSyncModal open={lanOpen} onClose={() => setLanOpen(false)} />}
+      {!web && <LanConnectModal open={connectOpen} onClose={() => setConnectOpen(false)} />}
+      {web && <ImportDataModal open={importOpen} onClose={() => setImportOpen(false)} />}
 
       {/* 移动端底部 Tab 导航 */}
       {mobile && (

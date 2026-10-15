@@ -119,3 +119,123 @@ git push origin v<version>
 - **角色档案已移除**：等级 / 商人忠诚等级（loyalty）/ 地图解锁（lockedMaps）不再维护，档案页、`settings.json` 的 `profile` / `profiles` 字段、`save_settings` 的 `profile` 参数、`profile-changed` 事件与 `set-profile` 反向同步指令、同步摘要里的 `level` 均已删除。任务图谱 / 任务板 / 收藏家页里原本的「当前 Lv / 当前 LL + ✓✗ 达标」对照一并降级为只显示任务自带的要求值（要求值来自任务数据，保留）。旧 `settings.json` / 旧快照里残留的 `profile` / `profiles` 会被 serde 忽略（未知字段不报错），无需迁移；新旧版本混用做局域网同步时摘要指纹会不同，会触发一次「两端不一致」确认。
 - `quest_analysis/` 目录已被 `.gitignore` 忽略，README 与提交中均不涉及。
 - 本项目为 Vibe Coding 项目（深度使用 AI 编程），README 与软件内「帮助窗口 → 关于」均已声明。
+
+## Web 分支（服务器部署）
+
+`web` 分支把桌面端迁移为「Node.js + MySQL 服务端 + 浏览器前端」，数据按用户账号隔离。
+**本节只描述 web 分支；上面的桌面端约定在 web 分支上仅作参考，不再作为主构建路径。**
+
+> 一句话架构：**同一份 React 源码，两套数据层**。页面 / store 完全不感知平台，
+> 差异收敛在 `src-react/api/` 与打包期别名里。
+
+### 目录与职责
+
+```
+IC-Tarkov/
+├── server/                    # 新增：Node.js + Fastify + MySQL 服务端
+│   ├── sql/                   # 迁移脚本（按文件名排序，一次性执行并记录）
+│   ├── src/
+│   │   ├── index.ts           # 启动入口（连库 → 迁移 → 加载数据 → 监听）
+│   │   ├── app.ts             # Fastify 组装（Cookie / CORS / WS / 静态前端 / 鉴权）
+│   │   ├── config.ts          # 环境变量集中处
+│   │   ├── db.ts              # 连接池与 query / execute / tx 封装
+│   │   ├── migrate.ts         # 迁移执行器
+│   │   ├── auth/              # 注册登录、会话、口令哈希（Node 内置 scrypt）
+│   │   ├── repo/userData.ts   # 按 (user_id, mode) 隔离的用户数据访问层
+│   │   ├── routes/            # progress / game / settings / data / ws 路由
+│   │   ├── data/              # 游戏数据：endpoints / store（原始缓存）/ derive / questIndex
+│   │   └── realtime/hub.ts    # WebSocket 按用户广播（替代 Tauri emit）
+│   └── Dockerfile
+├── src-react/                 # 复用：前端
+│   ├── api/tauri-impl.ts      # 数据层实现 A：Tauri invoke + 事件
+│   ├── api/web-impl.ts        # 数据层实现 B：HTTP + WebSocket
+│   ├── api/shell.ts           # 外壳能力：窗口控制 / 版本号 / 监听事件（web 端空实现）
+│   └── tauri.ts               # 唯一入口：`export * from '@api-impl'`
+└── docker-compose.yml         # MySQL + 服务端一键部署
+```
+
+### 关键约束（web 分支）
+
+- **数据层必须成对实现**：新增任何数据访问函数，`api/tauri-impl.ts` 与 `api/web-impl.ts` 都要加。
+  `web-impl.ts` 末尾有一处编译期校验（`_apiParity`），缺函数或签名不符会在 `tsc` 时报错。
+- **入口与别名**：页面一律 `import ... from '../tauri'`；实现由 `vite.config.ts` 的 `@api-impl` 别名选择。
+  `tsconfig.json` 的 `paths` 指向 tauri 实现（供类型检查），因此 `web-impl.ts` 自身也要能被 `tsc` 覆盖到。
+- **两套构建产物分开**：`src-react/dist`（Tauri）/ `src-react/dist-web`（Web），
+  `clean-dist.mjs --web` 只清后者，互不覆盖。
+- **平台判断用 `isWeb()`**（打包期常量 `__WEB_TARGET__`），不要用 UA —— 桌面壳里跑的是同一套代码。
+  需要区分「浏览器 / Tauri」的地方：窗口控制按钮、局域网「连接」按钮、刷新与右键屏蔽、LAN 自动重连。
+- **shell 能力集中在 `api/shell.ts`**：禁止在组件里直接 `import { getCurrentWindow } from '@tauri-apps/api/window'`
+  （`getCurrentWindow()` 在浏览器里模块加载期就会抛错）。版本号取不到时返回空串，顶部栏据此隐藏版本标签。
+- **服务端不做本机能力**：日志监控、截图定位、数据目录迁移、局域网同步在 web 端不存在，
+  对应函数是空实现或抛「当前环境不支持」。局域网同步的职责由「同一账号多端实时同步」取代。
+- **时间格式**：DB 读出的 DATETIME 一律以 `YYYY-MM-DD HH:mm:ss` 字符串往返（连接池 `dateStrings: true`），
+  与桌面端日志时间戳格式保持一致，前端无需适配。
+- **模式（pvp / pvps / pve）**：所有用户数据表都以 `(user_id, mode)` 为主键前缀；
+  接口的 `mode` 参数缺省时取该用户 `user_settings.view_mode`。
+
+### 常用命令（web 分支）
+
+```powershell
+# 前端
+npm run web:dev              # Web 前端开发服务器（5173，/api 反向代理到 3000）
+npm run web:build            # 类型检查 + 构建到 src-react/dist-web
+npm run web:build:fast       # 跳过 tsc
+
+# 服务端（首次需先 cd server; npm install）
+npm run server:dev           # tsx watch
+npm run server:migrate       # 只建表 / 升级结构
+npm run server:build         # tsc → server/dist
+npm run server:start         # node dist/index.js
+
+# 一键部署
+docker compose up -d --build # 需先 npm run web:build
+```
+
+服务端配置见 `server/.env.example`（复制为 `server/.env`）。本地无 MySQL 时可用
+`docker compose up -d mysql` 只起数据库，再 `npm run server:dev`。
+
+### 账号与数据导入
+
+- **登录门禁**：`src-react/components/AuthGate.tsx`，由 `App.tsx` 在 `isWeb()` 且未登录时整屏接管；
+  未登录期间**不发起任何业务请求**（否则会 401），启动链（`bootReady` 之后的那段）也一并跳过。
+- **账号接口**：`src-react/api/web-account.ts`（Web 专属，**不**放进 `tauri.ts` 的统一数据层，
+  否则会破坏 `web-impl.ts` 的一致性校验）。
+- **数据导入**：`POST /api/import`（multipart，字段 `file` + `mode=replace|merge`），
+  解析在 `server/src/import/parse.ts`，落库在 `server/src/repo/importData.ts`，UI 为 `ImportPanel.tsx`
+  （首次登录且账号为空时由 AuthGate 引导，另有顶部栏「导入数据」按钮）。
+  - 支持桌面端导出的 zip（`quest_state.{mode}.json` / `collected.{mode}.json` / `settings.json`），
+    也支持单个 JSON 文件；无文件名的裸 JSON 按内容猜归属。
+  - **命名易错点**：`ModeData` 在 Rust 侧**没有** `rename_all`，字段是 snake_case（`current_map`、
+    `offsets`）；而 `QuestEntry` / `ActivityRow` 是 camelCase（`acceptedAt`、`objectivesDone`、`questId`）。
+    解析器两种都容忍，改动时别只按一种写。
+  - 导入后经 `hub.emit(userId, 'data-imported')` 通知同账号其它设备整批重取。
+
+### 待办（按优先级）
+
+1. **移植 `src-tauri/src/dataset.rs` → `server/src/data/derive.ts`**（当前为空实现）。
+   这是唯一的功能性缺口：没有它，任务 / 地图 / 物品 / 标记接口都会返回空数据
+   （`GET /api/data/status` 的 `derivedReady` 为 false）。
+   落地形态：读取 `DATA_DIR/tarkov-api/*.json`，产出 `DATA_DIR/derived/*.json` 后 `derived.load()`。
+   产出清单与逐项要点见 `derive.ts` 末尾的注释。`maps-skeleton.json` 已可直接服务（无需派生）。
+   备选方案（若不愿重写 1600 行派生逻辑）：把 dataset.rs 抽成独立 Rust CLI 侧车，只负责产出这些 JSON。
+2. 设置页适配：日志目录 / 截图目录 / 数据目录迁移 / 局域网同步等桌面专属项在 web 端隐藏
+   （目前这些控件仍会渲染，web 端点了不生效）。
+3. 数据导出（web 端改为服务端生成 zip 下载），与导入形成闭环。
+4. 任务进度录入方式（见下方「开放决策」）。
+5. 安全加固：注册/登录接口限流、改密后强制其它会话失效已做但未覆盖「导出/导入」的频次限制。
+
+### 开放决策
+
+**桌面端最核心的「实时监控游戏日志」在 Web 上无法直接实现** —— 服务端读不到玩家本机的
+`Logs/*.log`。目前已确定的部分：手动接取 / 完成 / 重置、目标打勾、收藏家勾选全部可用；
+尚未决定的是「自动跟踪」这一能力怎么补：
+
+- 方案 A（改动最小）：web 端只做手动维护，砍掉自动跟踪。
+- 方案 B（推荐）：新增「日志上报」入口 —— 用户在 PC 上选一次日志目录，由一个小工具
+  （或浏览器 File System Access API 轮询）把 `Logs` 增量推到服务端，服务端复用
+  `src-tauri/src/parser.rs` 的解析逻辑（需移植为 TS）写库并广播 `quest-event`。
+  这样能保住「实时监控」的核心体验，且多端天然同步。
+- 方案 C：只支持手动上传日志文件，服务端离线解析一次（无实时性，但实现最简单）。
+
+实时通道（WebSocket + `hub.emit`）与 `applyDetectedEvent` 入库函数已就位，
+方案 B / C 落地时直接调用即可，无需改动前端事件层。

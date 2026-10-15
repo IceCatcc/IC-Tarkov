@@ -21,3 +21,13 @@ export function isAndroid(): boolean {
   if (typeof navigator === 'undefined') return false
   return /android/i.test(navigator.userAgent || '')
 }
+
+/**
+ * 是否 Web 构建（服务端部署的浏览器端）。
+ *
+ * 由打包期注入的常量决定（vite.config.ts 的 `define`），不是运行时探测 ——
+ * 桌面 Tauri 壳里跑的也是同一套代码，靠 UA 无法与「浏览器打开」区分。
+ */
+export function isWeb(): boolean {
+  return __WEB_TARGET__
+}

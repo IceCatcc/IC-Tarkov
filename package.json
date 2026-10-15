@@ -13,6 +13,13 @@
     "react:build": "node scripts/clean-dist.mjs && tsc && vite build",
     "react:build:fast": "node scripts/clean-dist.mjs && vite build",
     "react:preview": "vite preview",
+    "web:dev": "vite --mode web",
+    "web:build": "node scripts/clean-dist.mjs --web && tsc && vite build --mode web",
+    "web:build:fast": "node scripts/clean-dist.mjs --web && vite build --mode web",
+    "server:dev": "npm --prefix server run dev",
+    "server:build": "npm --prefix server run build",
+    "server:start": "npm --prefix server run start",
+    "server:migrate": "npm --prefix server run migrate",
     "rust:check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "rust:build": "cargo build --release --manifest-path src-tauri/Cargo.toml"
   },

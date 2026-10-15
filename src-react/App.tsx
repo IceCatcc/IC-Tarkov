@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { listen } from '@tauri-apps/api/event'
 import {
   initTauri,
   startWatching,
@@ -10,8 +9,11 @@ import {
 } from './tauri'
 import { useStore } from './store'
 import { startLanAutoConnect, reloadLocalData } from './lan'
+import { listenEvent } from './api/shell'
+import { fetchMe } from './api/web-account'
+import { AuthGate } from './components/AuthGate'
 import { bootReady, bootSnapshot, finishBoot, reportStep, subscribeBoot } from './boot'
-import { isMobile, isAndroid } from './platform'
+import { isMobile, isAndroid, isWeb } from './platform'
 import { TopBar } from './components/TopBar'
 import { StartupSplash } from './components/StartupSplash'
 import { MonitorPage } from './pages/MonitorPage'
@@ -95,6 +97,28 @@ export default function App() {
   const uiScale = useStore((s) => s.uiScale)
   // 移动端 UI 适配分支：底部 Tab、transform 缩放、关闭监控
   const mobile = isMobile()
+  // Web 端登录门禁：未登录不加载任何业务数据（接口会 401），先整屏接管
+  const web = isWeb()
+  const [authChecked, setAuthChecked] = useState(!web)
+  const [authed, setAuthed] = useState(!web)
+  useEffect(() => {
+    if (!web) return
+    let alive = true
+    fetchMe()
+      .then((u) => {
+        if (!alive) return
+        setAuthed(!!u)
+        setAuthChecked(true)
+      })
+      .catch(() => {
+        if (!alive) return
+        setAuthed(false)
+        setAuthChecked(true)
+      })
+    return () => {
+      alive = false
+    }
+  }, [web])
   useEffect(() => {
     // 移动端用根容器 transform 缩放（见渲染处），桌面保留 document.zoom。
     // 同时把缩放值写进 CSS 变量：浮层的 vh 高度需按缩放反算，
@@ -106,6 +130,8 @@ export default function App() {
   }, [uiScale, mobile])
 
   useEffect(() => {
+    // Web 端未登录时不加载数据（接口会 401），等门禁放行后再走启动链
+    if (!authChecked || !authed) return
     let off: (() => void) | undefined
     let cancelled = false
     void (async () => {
@@ -163,15 +189,17 @@ export default function App() {
       cancelled = true
       off?.()
     }
-  }, [setWatcher, setSettings, seedPlayerQuests, setUnlockedQuests])
+  }, [authChecked, authed, setWatcher, setSettings, seedPlayerQuests, setUnlockedQuests])
 
   // 同步（手机端）：启动自动重连已保存的电脑端；监听快照应用后刷新本地数据。
   // 未保存过连接配置时不自动弹连接窗口（首次启动直接弹会打断使用），
   // 由用户点顶部栏「连接」按钮进入（TopBar 内的 LanConnectModal）。
+  // Web 端没有局域网同步（多端同步由服务端负责），整体跳过。
   useEffect(() => {
+    if (isWeb()) return
     let off: (() => void) | undefined
     startLanAutoConnect()
-    listen('lan-sync-updated', () => {
+    listenEvent('lan-sync-updated', () => {
       void reloadLocalData()
     })
       .then((u) => {
@@ -186,16 +214,16 @@ export default function App() {
   // 同步（电脑端）：手机端连上后自动完成的同步，提示结果；
   // 需要人工选择的情况由 LanConflictModal 弹窗处理。
   useEffect(() => {
-    if (isMobile()) return
+    if (isMobile() || isWeb()) return
     let disposed = false
     let off: (() => void) | undefined
-    listen<{ state: string; message?: string }>('lan-sync-status', (e) => {
+    listenEvent<{ state: string; message?: string }>('lan-sync-status', (e) => {
       const done: Record<string, string> = {
         pushed: '已把电脑端数据同步到手机',
         pulled: '已用手机端数据覆盖本机',
         skipped: '已跳过本次同步',
       }
-      const s = e.payload
+      const s = e
       if (s.state === 'error') {
         useStore.getState().pushToast('同步失败：' + (s.message ?? ''), 'info')
       } else if (done[s.state]) {
@@ -213,8 +241,10 @@ export default function App() {
     }
   }, [])
 
-  // 屏蔽浏览器刷新（F5 / Ctrl+R）与右键菜单
+  // 屏蔽浏览器刷新（F5 / Ctrl+R）与右键菜单。
+  // 仅 Tauri 壳内需要（壳里刷新会丢状态）；浏览器端保留原生行为，不干扰用户。
   useEffect(() => {
+    if (isWeb()) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) {
         e.preventDefault()
@@ -228,6 +258,11 @@ export default function App() {
       window.removeEventListener('contextmenu', onCtx)
     }
   }, [])
+
+  // 登录门禁（仅 Web）：未登录 / 会话校验未完成时整屏接管，不渲染主界面
+  if (!authChecked || !authed) {
+    return <AuthGate onAuthed={() => setAuthed(true)} />
+  }
 
   return (
     <div
@@ -270,7 +305,7 @@ export default function App() {
       </main>
       {showSettings && <SettingsModal />}
       <HelpModal open={showHelp} onClose={closeHelp} onGoSettings={goToSettings} />
-      {!mobile && <LanConflictModal />}
+      {!mobile && !isWeb() && <LanConflictModal />}
       <WikiDrawer />
       <Toasts />
       {/* 启动遮罩压在最上层：初始化跑完后淡出（帮助 / 设置等浮层都在其下） */}
