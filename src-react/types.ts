@@ -464,6 +464,26 @@ export interface DataStatus {
   questCount: number
   mapCount: number
   files: DataFileStat[]
+  /** 图片资源（物品图标 / 商人头像 / 地图底图 / Boss 图）的本地情况；Web 端与旧后端可能没有该字段 */
+  assets?: AssetStats
+}
+
+/** 已下载图片资源的本地情况（get_data_status 的 assets 字段） */
+export interface AssetStats {
+  /** 资源目录绝对路径（空串 = 不可用，一律回退随包资源） */
+  dir: string
+  files: number
+  bytes: number
+  /** 最近一次资源真正发生变化的时间（epoch 秒，0 = 从未更新过） */
+  updatedAt: number
+}
+
+/** 图片资源索引（get_asset_index）：前端据此决定每张图走运行时资源还是随包资源 */
+export interface AssetIndex {
+  /** 资源目录绝对路径（空串 = 不可用） */
+  dir: string
+  /** 已下载的资源相对路径（与 public/ 下一致，'/' 分隔） */
+  files: string[]
 }
 
 /** data-sync-progress 事件：数据更新进度 */

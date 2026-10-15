@@ -36,10 +36,15 @@ import {
   type IconGroup,
 } from '../mapIconGroups'
 import { bossImage } from '../bossImages'
+import { assetUrl, assetUrlTemplate } from '../assetUrl'
 
 /* ================= 常量 ================= */
 
-const ICON_BASE = 'maps/interactive/'
+/**
+ * 地图标记图标 URL（相对 public/）。
+ * 图标随包分发，但「更新数据」下载的版本会替换掉随包资源（lite 版完全依赖下载）。
+ */
+const iconUrl = (file: string) => assetUrl(`maps/interactive/${file}.png`)
 
 // 常见英文楼层名的中文显示
 const FLOOR_NAME_ZH: Record<string, string> = {
@@ -208,7 +213,8 @@ function reqHtml(r: Requirement): string {
   if (r.itemId) {
     const cnt = r.count != null && r.count > 0 ? ` ×${r.count}` : ''
     const nm = r.name ?? r.value ?? ''
-    return `<span class="req-item"><img class="req-item-img" src="/item-icons/${r.itemId}.webp" alt=""/>` +
+    const icon = assetUrl(`item-icons/${r.itemId}.webp`)
+    return `<span class="req-item"><img class="req-item-img" src="${icon}" alt=""/>` +
       `<span class="req-item-name">${nm}</span>${cnt ? `<span class="req-item-count">${cnt}</span>` : ''}</span>`
   }
   return reqText(r)
@@ -231,7 +237,8 @@ function extractReqIconHtml(r: Requirement): string | null {
   }
   if (r.itemId) {
     const nm = r.name ?? r.value ?? ''
-    return `<img class="extract-req-icon extract-req-item" src="/item-icons/${r.itemId}.webp" alt="" title="${nm}"/>`
+    const icon = assetUrl(`item-icons/${r.itemId}.webp`)
+    return `<img class="extract-req-icon extract-req-item" src="${icon}" alt="" title="${nm}"/>`
   }
   return null
 }
@@ -764,10 +771,14 @@ export function MapPage() {
       noWrap: true,
     }
 
-    // 主层：优先 SVG 抽象图；无 SVG 的地图（实验室/灯塔号/迷宫）才用卫星瓦片
+    // 主层：数据里给了瓦片模板就用瓦片（缩放更清晰、可按需加载），否则回退单张 SVG 抽象图。
+    // 两者同时存在时瓦片作底图、SVG 作为该层线稿叠加（下面的 svgPath 分支负责叠加）。
     let mainTileLayer: L.TileLayer | null = null
+    if (imap.tilePath) {
+      mainTileLayer = L.tileLayer(assetUrlTemplate(imap.tilePath), tileOpts).addTo(container)
+    }
+    // 瓦片是唯一主层（没有 SVG 线稿）时，它跟随楼层开关显隐；有 SVG 时显隐交给 SVG 组
     if (imap.tilePath && !imap.svgPath) {
-      mainTileLayer = L.tileLayer(imap.tilePath, tileOpts).addTo(container)
       defaultHandle = {
         show: () => {
           if (mainTileLayer && !container.hasLayer(mainTileLayer)) mainTileLayer.addTo(container)
@@ -780,7 +791,8 @@ export function MapPage() {
     }
 
     if (imap.svgPath) {
-      fetch(imap.svgPath)
+      // 底图 SVG 也走统一入口：运行时若有下载的新版本优先用它（lite 版完全依赖下载）
+      fetch(assetUrl(imap.svgPath))
         .then((r) => r.text())
         .then((svgText) => {
           if (cancelled) return
@@ -822,7 +834,7 @@ export function MapPage() {
     // tile 楼层（可能同时带 svgLayer：瓦片作底图 + SVG 该层结构线稿叠加）
     ;(imap.layers ?? []).forEach((lyr, i) => {
       if (!lyr.tilePath) return
-      const tl = L.tileLayer(lyr.tilePath, tileOpts)
+      const tl = L.tileLayer(assetUrlTemplate(lyr.tilePath), tileOpts)
       floorHandles.set(i, {
         show: () => {
           if (!container.hasLayer(tl)) tl.addTo(container)
@@ -850,7 +862,7 @@ export function MapPage() {
         // 尺寸必须写在 style 里：HTML 的 width/height 属性优先级低于样式表，
         // 会让源图尺寸（撤离点图标比 20px 大）直接生效
         html:
-          `<img src="${ICON_BASE}${file}.png" alt="" ` +
+          `<img src="${iconUrl(file)}" alt="" ` +
           'style="width:20px;height:20px;display:block"/><span class="lvl-arrow"></span>',
         iconSize: [20, 20],
         iconAnchor: [10, 10],
@@ -1313,7 +1325,7 @@ export function MapPage() {
       const icon = L.divIcon({
         className: `quest-obj-marker${allDone ? ' is-done' : ''}`,
         html:
-          `<img src="${ICON_BASE}quest_objective.png" alt="" data-obj-marker="${encodeURIComponent(
+          `<img src="${iconUrl('quest_objective')}" alt="" data-obj-marker="${encodeURIComponent(
             tid,
           )}|${encodeURIComponent(oids.join(','))}" />` +
           `<span class="quest-obj-name">${qName}</span>`,

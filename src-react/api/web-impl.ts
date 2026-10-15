@@ -30,6 +30,7 @@ import type {
   DataStatus,
   ItemInfo,
   SimplifyLogResult,
+  AssetIndex,
 } from '../types'
 
 /* ---------------- HTTP 基础 ---------------- */
@@ -480,6 +481,14 @@ export async function getDataStatus(): Promise<DataStatus> {
 
 export async function refreshGameData(force = false): Promise<void> {
   await request('POST', '/api/data/refresh', { force })
+}
+
+/**
+ * 图片资源索引：服务端部署没有「本机资源目录」，图片随前端产物一起分发，
+ * 因此恒为空索引 —— assetUrl() 会一律回退到随包路径。
+ */
+export async function getAssetIndex(): Promise<AssetIndex> {
+  return { dir: '', files: [] }
 }
 
 /**

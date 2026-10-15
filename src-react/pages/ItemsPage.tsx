@@ -3,6 +3,7 @@ import { useStore } from '../store'
 import { getItems, getQuestGraph, getCollectorQuestId, getMapMarkers, getMapsSkeleton } from '../tauri'
 import { isMobile } from '../platform'
 import { LOCK_TYPE_ZH } from '../mapIconGroups'
+import { assetUrl } from '../assetUrl'
 import type { ItemInfo, QuestGraph, ItemRef } from '../types'
 
 /** tarkov.dev 稀有度颜色 (backgroundColor) -> 中文等级 + 展示色 */
@@ -224,7 +225,7 @@ function ItemDetailModal({
           <div className="pr-8 flex items-start gap-3">
             <span className="shrink-0 w-12 h-12 grid place-items-center rounded-lg bg-ink-900/60 border border-line overflow-hidden">
               <img
-                src={`/item-icons/${item.id}.webp`}
+                src={assetUrl(`item-icons/${item.id}.webp`)}
                 alt=""
                 onError={(e) => (e.currentTarget.style.display = 'none')}
                 className="w-12 h-12 object-contain"
@@ -402,7 +403,7 @@ function ItemCard({
         <div className="flex items-center gap-3 min-w-0">
           <span className="shrink-0 w-10 h-10 grid place-items-center rounded bg-ink-900/60 overflow-hidden">
             <img
-              src={`/item-icons/${it.id}.webp`}
+              src={assetUrl(`item-icons/${it.id}.webp`)}
               alt=""
               loading="lazy"
               onError={(e) => (e.currentTarget.style.display = 'none')}

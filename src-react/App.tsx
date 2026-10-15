@@ -10,6 +10,7 @@ import {
 import { useStore } from './store'
 import { startLanAutoConnect, reloadLocalData } from './lan'
 import { listenEvent } from './api/shell'
+import { refreshAssets, registerAssetSyncListener, subscribeAssets } from './assetUrl'
 import { fetchMe } from './api/web-account'
 import { AuthGate } from './components/AuthGate'
 import { bootReady, bootSnapshot, finishBoot, reportStep, subscribeBoot } from './boot'
@@ -34,6 +35,9 @@ export default function App() {
   const page = useStore((s) => s.page)
   const setPage = useStore((s) => s.setPage)
   const openSettings = useStore((s) => s.openSettings)
+  // 图片资源索引刷新后整棵树重渲染一次：新下载的图片随即替换掉随包路径
+  const [, setAssetsRev] = useState(0)
+  useEffect(() => subscribeAssets(() => setAssetsRev((v) => v + 1)), [])
   // 首次启动帮助弹窗（仅未看过时显示，看过写入 localStorage 不再弹）
   const [showHelp, setShowHelp] = useState(
     () => typeof localStorage !== 'undefined' && localStorage.getItem('ic-tarkov.helpSeen.v1') !== '1',
@@ -133,6 +137,7 @@ export default function App() {
     // Web 端未登录时不加载数据（接口会 401），等门禁放行后再走启动链
     if (!authChecked || !authed) return
     let off: (() => void) | undefined
+    let offAssets: (() => void) | undefined
     let cancelled = false
     void (async () => {
       try {
@@ -141,6 +146,11 @@ export default function App() {
         await bootReady()
         if (cancelled) return
         off = await initTauri()
+        // 图片资源索引：每张图优先用「更新数据」下载到本机的版本，缺失才回退随包资源，
+        // 因而必须在首次渲染前取到（无内置资源版完全依赖它）；更新完成后再刷新一次。
+        reportStep('assets', '正在读取图片资源…')
+        await refreshAssets()
+        offAssets = registerAssetSyncListener()
         reportStep('settings', '正在读取界面设置…')
         const st = await getSettings()
         setSettings(st)
@@ -188,6 +198,7 @@ export default function App() {
     return () => {
       cancelled = true
       off?.()
+      offAssets?.()
     }
   }, [authChecked, authed, setWatcher, setSettings, seedPlayerQuests, setUnlockedQuests])
 

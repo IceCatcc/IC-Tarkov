@@ -32,6 +32,7 @@ import type {
   DataStatus,
   ItemInfo,
   SimplifyLogResult,
+  AssetIndex,
 } from '../types'
 
 /**
@@ -426,6 +427,14 @@ export async function getDataStatus(): Promise<DataStatus> {
  */
 export async function refreshGameData(force = false): Promise<void> {
   await invoke('refresh_game_data', { force })
+}
+
+/**
+ * 图片资源索引：资源目录 + 已下载的相对路径列表。
+ * 前端 assetUrl() 据此决定每张图走运行时资源还是随包资源（见 src-react/assetUrl.ts）。
+ */
+export async function getAssetIndex(): Promise<AssetIndex> {
+  return await invoke<AssetIndex>('get_asset_index')
 }
 
 export async function getMapMarkers(): Promise<MapMarkersDoc> {

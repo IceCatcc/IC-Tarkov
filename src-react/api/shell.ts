@@ -51,6 +51,23 @@ export async function closeWindow(): Promise<void> {
 }
 
 /**
+ * 取 `convertFileSrc`：把本地绝对路径转成 Tauri 的 `asset:` 协议 URL。
+ *
+ * 与窗口控制同理，不能在 Web 环境里静态 import Tauri 的 core 模块，故动态加载。
+ * 返回 null 表示当前环境不支持（Web 端）——调用方据此一律回退随包资源。
+ * 取回的函数是同步的，可缓存后直接在 render 里用（见 src-react/assetUrl.ts）。
+ */
+export async function loadConvertFileSrc(): Promise<((path: string) => string) | null> {
+  if (isWeb()) return null
+  try {
+    const mod = await import('@tauri-apps/api/core')
+    return mod.convertFileSrc
+  } catch {
+    return null
+  }
+}
+
+/**
  * 监听 Tauri 全局事件；Web 端恒为空实现。
  * 返回取消函数，与 `listen` 的用法保持一致。
  */

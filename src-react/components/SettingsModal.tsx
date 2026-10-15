@@ -569,7 +569,7 @@ export default function SettingsModal() {
               <button
                 onClick={onUpdateData}
                 disabled={syncing}
-                title="逐项比对远端 ETag：内容没变的不下载，只取有变化的端点"
+                title="逐项比对远端 ETag：内容没变的不下载，只取有变化的数据；图片资源一并更新（物品图标 / 商人头像来自 tarkov.dev 图床，地图底图与 Boss 图来自项目资源清单）"
                 className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
               >
                 {syncing ? '更新中…' : '更新数据'}
@@ -579,6 +579,13 @@ export default function SettingsModal() {
                   ? `${dataStatus.questCount} 个任务 / ${dataStatus.mapCount} 张地图`
                   : '读取中…'}
               </span>
+              {/* 图片资源：运行时下载到数据目录的图片数量与体积（随包自带的图不计入） */}
+              {dataStatus?.assets && dataStatus.assets.files > 0 && (
+                <span className={DESC_CLS} title={dataStatus.assets.dir}>
+                  图片资源 {dataStatus.assets.files} 张 /{' '}
+                  {(dataStatus.assets.bytes / 1048576).toFixed(1)} MB
+                </span>
+              )}
             </div>
             {/* 更新中显示进度；失败显示原因；其他时候（含更新完成后）显示最近更新时间 */}
             {syncing ? (

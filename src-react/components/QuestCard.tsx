@@ -3,6 +3,7 @@ import { useStore, useQuestDetail, dedupeItems } from '../store'
 import { ObjectiveChecklist } from './ObjectiveChecklist'
 import { traderImage } from '../traderImages'
 import { traderDisplayName } from '../traderMeta'
+import { assetUrl } from '../assetUrl'
 
 /**
  * hideStatus：隐藏状态药丸（如地图浮窗里只列进行中任务，状态无信息量）；
@@ -67,7 +68,7 @@ export function QuestCard({
           >
             {/* 与地图上「任务目标」标记同一个图标文件 */}
             <img
-              src="/maps/interactive/quest_objective.png"
+              src={assetUrl('maps/interactive/quest_objective.png')}
               alt=""
               className="w-5 h-5 object-contain"
             />
@@ -138,7 +139,7 @@ export function QuestCard({
                 title={`${it.name}${it.count ? ` ×${it.count}` : ''}`}
               >
                 <img
-                  src={`/item-icons/${it.id}.webp`}
+                  src={assetUrl(`item-icons/${it.id}.webp`)}
                   alt=""
                   loading="lazy"
                   className="w-3.5 h-3.5 object-contain"

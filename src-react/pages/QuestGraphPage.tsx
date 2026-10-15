@@ -20,6 +20,7 @@ import { QuestBoardView } from '../components/QuestBoardView'
 import { ObjectiveChecklist } from '../components/ObjectiveChecklist'
 import { traderDisplayName } from '../traderMeta'
 import type { GraphEdge, GraphNode, ItemRef, MapInfo } from '../types'
+import { assetUrl } from '../assetUrl'
 import {
   compareLabel,
   questLoyaltyLevel,
@@ -2117,7 +2118,7 @@ export function QuestGraphPage() {
           ctx.strokeStyle = 'rgba(255,255,255,0.1)'
           ctx.lineWidth = 1
           ctx.stroke()
-          const im = getImage(`/item-icons/${items[i].id}.webp`)
+          const im = getImage(assetUrl(`item-icons/${items[i].id}.webp`))
           if (imgReady(im)) ctx.drawImage(im, ix + 2, iy + 2, 20, 20)
           ix += 26
         }
@@ -2838,7 +2839,7 @@ export function QuestGraphPage() {
                           title={`${it.name}${it.count ? ` ×${it.count}` : ''}`}
                         >
                           <img
-                            src={`/item-icons/${it.id}.webp`}
+                            src={assetUrl(`item-icons/${it.id}.webp`)}
                             alt=""
                             loading="lazy"
                             className="w-3 h-3 object-contain shrink-0"
@@ -2949,7 +2950,7 @@ export function QuestGraphPage() {
                     title={`${it.name}${it.count ? ` ×${it.count}` : ''}`}
                   >
                     <img
-                      src={`/item-icons/${it.id}.webp`}
+                      src={assetUrl(`item-icons/${it.id}.webp`)}
                       alt=""
                       loading="lazy"
                       className="w-6 h-6 object-contain"
