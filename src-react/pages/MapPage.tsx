@@ -27,6 +27,7 @@ import type {
 import { useStore } from '../store'
 import { QuestCard } from '../components/QuestCard'
 import { MapIconPanel } from '../components/MapIconPanel'
+import { GameClock } from '../components/GameClock'
 import {
   buildIconGroups,
   resolveChipOn,
@@ -1699,6 +1700,8 @@ export function MapPage() {
         >
           {infoOpen && (
             <div className="pointer-events-none w-[180px] max-h-[calc(60dvh/var(--ui-scale,1))] overflow-y-auto rounded-xl border border-line bg-ink-800/60 shadow-xl p-2.5 space-y-2.5">
+              {/* 游戏时间：塔科夫 7 倍速时钟（本地计算，见 components/GameClock.tsx） */}
+              <GameClock />
               <div>
                 <div className="text-[13px] text-muted mb-1">Boss 刷新率</div>
                 {mapBosses.length === 0 ? (
@@ -1736,7 +1739,7 @@ export function MapPage() {
           )}
           <button
             onClick={() => setInfoOpen((o) => !o)}
-            title="地图信息：Boss 刷新率"
+            title="地图信息：Boss 刷新率 / 游戏时间"
             className="pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
