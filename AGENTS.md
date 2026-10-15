@@ -113,10 +113,15 @@ git push origin v<version>
 - **日志监控只看任务 + 「精简日志」**：重扫（`reset_and_rescan`）与启动首扫（`emit=false`）不再解析「进入地图」事件（`watcher.rs` 里 `RawEvent::Location` 在 `!emit` 时直接跳过），当前地图只由实时事件（notify / 3 秒轮询，`emit=true`）决定；覆盖重扫也不再清空 `current_map`（清了就补不回来）。另设「精简日志」入口（设置页数据操作区，命令 `simplify_logs` → `parser::simplify_logs_in_place`）：**就地覆盖** `Logs` 下的 `.log` 原文件，删掉与任务无关的行（进入地图 `Locations:` / `RaidId`、资源加载等），只保留任务通知多行 JSON 块（整块原样保留，写回后仍可被 `parse_chunk` 解析）、`Session mode:` 行与 `client/quest/` 请求；mtime 在 60 秒内的文件视为游戏仍在写，跳过不动。`simplify_logs` 在 `api/tauri-impl.ts` 与 `api/web-impl.ts`（抛「不支持」）都已实现，勿漏。
 
 - **图片资源（物品图标 / 商人头像 / Boss 图 / 地图底图 / 地图标记 / 瓦片）可在线更新**：
-  - 后端 `src-tauri/src/assets.rs` 把图片缓存到 `<data_root>/tarkov-assets/`，布局与前端 `public/` 下**完全一致**（`item-icons/<物品id>.webp`、`trader-icons/<商人id>.webp`、`boss-icons/*`、`maps/svg/*.svg`、`maps/interactive/*.png`、`maps/tiles/<地图>/<z>/<x>/<y>.png`），随 `apidata` 的「更新数据」一并同步（共用 `data-sync-progress` / `data-synced` 事件与设置页进度）。
-  - 两类来源：物品图标与商人头像按 id 直连 `assets.tarkov.dev`（数千张，非强制更新**只补本地缺失的**，不做逐张条件请求）；地图底图 / 地图标记 / Boss 图 / 瓦片走项目**自有资源包**（`{IC_ASSETS_BASE}/assets-manifest.json` 里的 `hash` 与本地一致就跳过整包，否则下载 `assets.zip` 解包覆盖）。默认基址是本仓库 Release 的 `assets` 标签，用 `npm run assets:pack` 生成这两个文件；自建服务用环境变量 `IC_ASSETS_BASE` 覆盖。自有清单不可达时**静默跳过**（不报错、不影响 JSON 数据更新）。
-  - 前端一律经 `src-react/assetUrl.ts` 的 `assetUrl()` / `assetUrlTemplate()` 取图，**不要再写 `/item-icons/...` 这类硬编码路径**：运行时目录里有就用 Tauri `asset:` 协议（`protocol-asset` feature + `tauri.conf.json` 的 `assetProtocol.enable`，`setup` 里 `allow_directory` 放行资源目录；Android CSP 需允许 `asset:` / `http://asset.localhost`），没有就回退随包路径 —— 离线可用与在线更新因此并存。启动时 `refreshAssets()` 取一次索引（`get_asset_index`），`data-synced` 后再刷一次。
-  - 「随包已带的图片」由 `build.rs` 扫描 `public/{item-icons,trader-icons,boss-icons,maps}` 生成 `bundled_assets.rs`（`IC_NO_ASSETS=1` 时为空），图标类据此跳过已随包的图，完整版因此几乎不用下载。
+  - **与游戏数据分开两个按钮、两条命令**：设置页「游戏数据（tarkov.dev）」区块只更新 JSON（`refresh_game_data` → `apidata`），下面另一个「图片资源」区块只更新图片（`refresh_assets` → `assets::sync_with`）。一次更新只碰一项，两个按钮的禁用状态、进度行、结果行、最近更新时间各自独立（`dataStatus.syncing` vs `dataStatus.assets.syncing`）。共用的是同一条进度事件 `data-sync-progress`，靠 payload 里的 **`kind`（`data` / `assets`）** 分流；结束事件分开：`data-synced`（游戏数据）/ `assets-synced`（图片资源，载荷见 `lib.rs::AssetsSyncReport`）。**新增数据层函数要两套实现都加**（`refreshAssets` 在 `api/tauri-impl.ts` 与 `api/web-impl.ts`，web 端抛「不支持」且按钮用 `isWeb()` 隐藏）。
+  - 后端 `src-tauri/src/assets.rs` 把图片缓存到 `<data_root>/tarkov-assets/`，布局与前端 `public/` 下**完全一致**（`item-icons/<物品id>.webp`、`trader-icons/<商人id>.webp`、`boss-icons/*`、`maps/svg/*.svg`、`maps/interactive/*.png`、`maps/tiles/<地图>/<z>/<x>/<y>.png`）。
+  - **逐文件增量**：远端清单 `{IC_ASSETS_BASE}/assets-manifest.json`（`version: 2`）逐条列出 `{ path, name | url, bytes, etag }`。`path` 即本地落盘相对路径（与前端 `public/` 一致），`etag` 是版本标记，本地另行维护一份**记录清单**（`<data_root>/tarkov-assets/assets-manifest.json`，同样叫这个名字但只存 `{ bytes, updatedAt, etag }`，不会被远端清单覆盖）。同步时逐条比对：`etag` 一致且字节数一致就**整条跳过**（连请求都不发），于是「更新图片资源」只下载真正变化的文件——改一张底图不会再重下整套资源。本地记录里的值一律取自清单声明（不是响应头），保证两边同源可比。
+  - 两类来源：地图底图 / 地图标记 / Boss 图 / 瓦片等**自有资源**打成**散附件**放在清单同目录的 `files/` 下（附件名扁平化：`maps/svg/Customs.svg` → `maps__svg__Customs.svg`，因为附件名不能含 `/`），`etag` 即文件内容 sha256 前 16 位；物品图标与商人头像**不搬文件**（仍按 id 直连 `assets.tarkov.dev`），清单只带它们的上游版本标记（ETag，缺失时退化为 `Last-Modified|Content-Length`）。默认基址是本仓库 Release 的 `assets` 标签，用 `npm run assets:pack` 生成清单与附件（`--no-icons` 跳过抓图标标记，快很多）；自建服务把 `files/` 与清单放进同一目录，用环境变量 `IC_ASSETS_BASE` 覆盖。
+  - 清单不可达时**退化为「图标缺失即下」**（只补本地没有的图标），不报错、不影响 JSON 数据更新。上游确实没有的图（约 600 个物品本就没有图标，HEAD/GET 均 404）记为**本地清单里的 `etag: "missing"` 占位**，下次不再重复探测；上游后来补齐了，会由清单里的真实 etag 覆盖该占位（`force` 时忽略占位重探）。写占位只把清单标脏落盘，**不动 `updatedAt`**（那个字段表示「资源真正变化的时间」）。
+  - 发布侧（CI）**不做增量**：每次 `npm run assets:pack` 后整份 `--clobber` 覆盖上传（内容没变的附件名与内容都不变，重传不影响客户端）。清单用**紧凑 JSON**（每次都整份下载，缩进会让它多出约 200 KB）。
+  - **启动时默认不自动同步图片**：只有 `assets::needs_seed_download`（`IC_NO_ASSETS` 构建且运行时资源目录为空 —— 无内置资源版首次启动 / 刚换过数据目录）为真时，`load_in_background` 才在启动线程里补齐一次（步骤键 `assets`，文案「正在下载图片资源 x/y」），否则一律等用户点按钮。这样完整版不会再在后台悄悄拉图。
+  - 前端一律经 `src-react/assetUrl.ts` 的 `assetUrl()` / `assetUrlTemplate()` 取图，**不要再写 `/item-icons/...` 这类硬编码路径**：运行时目录里有就用 Tauri `asset:` 协议（`protocol-asset` feature + `tauri.conf.json` 的 `assetProtocol.enable`，`setup` 里 `allow_directory` 放行资源目录；Android CSP 需允许 `asset:` / `http://asset.localhost`），没有就回退随包路径 —— 离线可用与在线更新因此并存。启动时 `assetUrl.ts::refreshAssetIndex()` 取一次索引（`get_asset_index`），`assets-synced`（兜底还挂了 `data-synced`）后再刷一次（注意别与 api 层的 `refreshAssets()`（触发图片更新）混淆）。
+  - 「随包已带的图片」由 `build.rs` 扫描 `public/{item-icons,trader-icons,boss-icons,maps}` 生成 `bundled_assets.rs`（`IC_NO_ASSETS=1` 时为空）。它只服务于**清单不可达时的兜底**（清单没列出的图标，随包已有就不再下）；清单可用时一律按清单里的版本标记逐条比对，因此**首次同步（本地记录为空）会把清单列出的图各取一次**（完整版约十几 MB、图标约 5400 张），之后才全部命中跳过。
   - **lite 版**（`--lite` → `IC_NO_SEED=1 IC_NO_ASSETS=1`）：`build.rs` 不内嵌种子与图片清单，且 `vite.config.ts` 的插件在构建后把 `item-icons` / `trader-icons` / `boss-icons` / `maps` 从产物里剔除（必须赶在 cargo 打包前，故挂在 Vite 构建尾上），图片全部由首次启动下载。商人 / Boss 图因此在 `public/` 下（不再走 Vite 静态 import，那会带 hash 无法剔除）。
   - 地图底图「瓦片优先」：数据里给了 `tilePath` 就用真瓦片（`assetUrlTemplate` 解析含 `{z}/{x}/{y}` 的模板），没有才回退单张 SVG；两者同时存在时瓦片作底图、SVG 作该层线稿叠加。
 
@@ -174,8 +179,9 @@ IC-Tarkov/
   需要区分「浏览器 / Tauri」的地方：窗口控制按钮、局域网「连接」按钮、刷新与右键屏蔽、LAN 自动重连。
 - **shell 能力集中在 `api/shell.ts`**：禁止在组件里直接 `import { getCurrentWindow } from '@tauri-apps/api/window'`
   （`getCurrentWindow()` 在浏览器里模块加载期就会抛错）。版本号取不到时返回空串，顶部栏据此隐藏版本标签。
-- **服务端不做本机能力**：日志监控、截图定位、数据目录迁移、局域网同步在 web 端不存在，
-  对应函数是空实现或抛「当前环境不支持」。局域网同步的职责由「同一账号多端实时同步」取代。
+- **服务端不做本机能力**：日志监控、截图定位、数据目录迁移、局域网同步、**图片资源更新**
+  （图片随前端产物一起分发，`refreshAssets` 抛「当前环境不支持」、设置页那一块用 `isWeb()` 隐藏）
+  在 web 端不存在，对应函数是空实现或抛「当前环境不支持」。局域网同步的职责由「同一账号多端实时同步」取代。
 - **时间格式**：DB 读出的 DATETIME 一律以 `YYYY-MM-DD HH:mm:ss` 字符串往返（连接池 `dateStrings: true`），
   与桌面端日志时间戳格式保持一致，前端无需适配。
 - **模式（pvp / pvps / pve）**：所有用户数据表都以 `(user_id, mode)` 为主键前缀；

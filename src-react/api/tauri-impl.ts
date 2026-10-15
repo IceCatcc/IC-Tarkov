@@ -421,12 +421,25 @@ export async function getDataStatus(): Promise<DataStatus> {
 }
 
 /**
- * 触发数据更新：后端向 tarkov.dev 逐项发条件请求（带上次记录的 ETag），
+ * 触发**游戏数据**更新：后端向 tarkov.dev 逐项发条件请求（带上次记录的 ETag），
  * 内容没变的端点返回 304、不传输响应体；有变化的才下载，完成后重建派生索引。
+ * 不含图片资源（那是 `refreshAssets`）：进度经 data-sync-progress（kind = "data"）下发，
+ * 结果经 data-synced 下发。
  * @param force true = 忽略 ETag 强制全量重下（本地缓存疑似损坏时用）
  */
 export async function refreshGameData(force = false): Promise<void> {
   await invoke('refresh_game_data', { force })
+}
+
+/**
+ * 触发**图片资源**更新（与游戏数据互相独立）：物品图标 / 商人头像直连 tarkov.dev 图床，
+ * 地图底图 / 地图标记 / Boss 图走项目资源清单，按清单里的版本标记逐条比对，
+ * 只下载有变化的文件。进度经 data-sync-progress（kind = "assets"）下发，
+ * 结果经 assets-synced 下发。
+ * @param force true = 忽略本地记录强制全量重下
+ */
+export async function refreshAssets(force = false): Promise<void> {
+  await invoke('refresh_assets', { force })
 }
 
 /**

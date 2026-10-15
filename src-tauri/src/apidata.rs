@@ -326,7 +326,15 @@ pub struct SyncProgress {
     pub changed: usize,
     pub label: String,
     pub force: bool,
+    /// 进度属于哪一类更新：`data`（游戏数据 JSON）/ `assets`（图片资源）。
+    /// 两类更新互相独立、可分别触发，前端据此把进度写进各自的那一行。
+    pub kind: &'static str,
 }
+
+/// 进度事件的分类：游戏数据（本模块）
+pub const KIND_DATA: &str = "data";
+/// 进度事件的分类：图片资源（`assets` 模块，由设置页「更新图片资源」按钮与启动兜底触发）
+pub const KIND_ASSETS: &str = "assets";
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -421,6 +429,7 @@ pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
 }
 
 /// 从 API 拉取全部端点并写入缓存（阻塞）。force=true 时忽略过期判断，全部重下。
+/// 只处理游戏数据 JSON —— 图片资源由 `assets` 模块独立更新（见 `lib.rs::refresh_assets`）。
 pub fn sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
     sync_with(app, force, &mut |_, _, _| {})
 }
@@ -466,6 +475,7 @@ where
                 changed: updated.len(),
                 label: ep.label.to_string(),
                 force,
+                kind: KIND_DATA,
             },
         );
         progress(i, total, ep.label);
@@ -501,38 +511,8 @@ where
     manifest.checked_at = now_secs();
     write_manifest(&dir, &manifest);
 
-    // ---- 图片资源（与数据同一次「更新数据」完成） ----
-    // 物品图标 / 商人头像直连上游 CDN；地图底图、地图标记、Boss 图与瓦片走项目自有资源清单。
-    // 自有清单基址不可达时 assets 内部静默跳过，不影响 JSON 数据的更新结果。
-    let assets_report = {
-        let mut report = |done: usize, total: usize, label: &str| {
-            let _ = app.emit(
-                "data-sync-progress",
-                SyncProgress {
-                    running: true,
-                    done,
-                    total,
-                    // 数据文件更新数 + 图片已处理数：界面上「已更新 x/y」跟着图片进度走
-                    changed: updated.len() + done,
-                    label: format!("图片 · {label}"),
-                    force,
-                },
-            );
-            // 启动遮罩的步骤文案与「更新数据」共用同一条时间线
-            progress(done, total, label);
-        };
-        crate::assets::sync_with(app, force, &mut report)
-            .map_err(|e| eprintln!("[assets] 图片资源更新失败：{e}"))
-            .ok()
-    };
-    let assets_note = match &assets_report {
-        Some(ar) if ar.total > 0 => crate::assets::summary_text(ar),
-        _ => String::new(),
-    };
-    if let Some(ar) = assets_report {
-        failed.extend(ar.failed);
-        unchanged += ar.unchanged;
-    }
+    // 图片资源**不在这一步**里更新：它与游戏数据是两个独立的按钮/命令
+    // （见 lib.rs 的 refresh_assets），只是共用同一条进度事件（payload 的 kind 区分）。
 
     let _ = app.emit(
         "data-sync-progress",
@@ -543,6 +523,7 @@ where
             changed: updated.len(),
             label: String::new(),
             force,
+            kind: KIND_DATA,
         },
     );
 
@@ -553,9 +534,6 @@ where
     } else {
         format!("已更新 {} / {} 份数据文件", updated.len(), total)
     });
-    if !assets_note.is_empty() {
-        parts.push(assets_note);
-    }
     if !failed.is_empty() {
         parts.push(format!("{} 项失败：{}", failed.len(), failed.join("；")));
     }

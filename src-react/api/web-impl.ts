@@ -483,6 +483,11 @@ export async function refreshGameData(force = false): Promise<void> {
   await request('POST', '/api/data/refresh', { force })
 }
 
+/** web 端图片随前端产物一起分发，没有「本机资源可更新」这回事（按钮也不显示） */
+export async function refreshAssets(_force = false): Promise<void> {
+  throw new Error(NOT_SUPPORTED)
+}
+
 /**
  * 图片资源索引：服务端部署没有「本机资源目录」，图片随前端产物一起分发，
  * 因此恒为空索引 —— assetUrl() 会一律回退到随包路径。

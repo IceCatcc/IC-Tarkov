@@ -1219,11 +1219,30 @@ fn load_in_background(app: tauri::AppHandle) {
         spawn_sync(app.clone(), false);
     }
 
+    // 图片资源默认**不**自动同步（由设置页「更新图片资源」按钮按需触发）；
+    // 只有「一张图都没有」时（无内置资源版首次启动 / 刚换过数据目录）才在这里补齐，
+    // 否则界面到处都是破图。放在最后，不阻塞数据集读取。
+    if assets::needs_seed_download(&app) {
+        tracker.step(&app, "assets", "正在下载图片资源…");
+        let mut report = |done: usize, total: usize, label: &str| {
+            tracker.step(
+                &app,
+                "assets",
+                &format!("正在下载图片资源 {}/{}：{label}", done + 1, total),
+            );
+        };
+        match assets::sync_with(&app, false, &mut report) {
+            Ok(r) => println!("[assets] 首次图片资源下载完成：{}", assets::summary_text(&r)),
+            Err(e) => eprintln!("[assets] 首次图片资源下载失败：{e}"),
+        }
+    }
+
     // 下载失败的原因优先于「数据集为空」的报错：后者正是前者导致的
     tracker.finish(&app, download_err.or(dataset_err));
 }
 
-/// 后台同步：拉取全部端点 -> 重建派生索引 -> 通知前端刷新
+/// 后台同步**游戏数据**：拉取全部端点 -> 重建派生索引 -> 通知前端刷新。
+/// 图片资源不在这一步里（见 `spawn_assets_sync`），两者互不影响。
 fn spawn_sync(app: tauri::AppHandle, force: bool) {
     std::thread::spawn(move || match apidata::sync(&app, force) {
         Ok(report) => {
@@ -1236,6 +1255,65 @@ fn spawn_sync(app: tauri::AppHandle, force: bool) {
             }
         }
         Err(e) => eprintln!("[apidata] 数据更新失败：{e}"),
+    });
+}
+
+/// `assets-synced` 事件载荷：一次图片资源更新的结果
+#[derive(Clone, serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AssetsSyncReport {
+    ok: bool,
+    /// 本次真正写入的文件数
+    updated: usize,
+    /// 与本地记录一致、跳过下载的张数
+    unchanged: usize,
+    /// 上游没有该图（404），不算失败
+    missing: usize,
+    bytes: u64,
+    /// 资源最近一次真正变化的时间（epoch 秒）
+    updated_at: i64,
+    failed: Vec<String>,
+    message: String,
+}
+
+/// 后台同步**图片资源**（物品图标 / 商人头像 / 地图底图 / 地图标记 / Boss 图 / 瓦片）。
+/// 与游戏数据更新完全独立（设置页两个按钮各走各的），只共用进度事件（kind = assets）。
+fn spawn_assets_sync(app: tauri::AppHandle, force: bool) {
+    std::thread::spawn(move || {
+        let emit = |running: bool, done: usize, total: usize, label: &str| {
+            let _ = app.emit(
+                "data-sync-progress",
+                apidata::SyncProgress {
+                    running,
+                    done,
+                    total,
+                    // 图片按「张」处理：这里的数字是已处理数（下载 + 判定跳过）
+                    changed: done,
+                    label: label.to_string(),
+                    force,
+                    kind: apidata::KIND_ASSETS,
+                },
+            );
+        };
+        let mut report = |done: usize, total: usize, label: &str| emit(true, done, total, label);
+        let payload = match assets::sync_with(&app, force, &mut report) {
+            Ok(r) => {
+                emit(false, r.total, r.total, "");
+                AssetsSyncReport {
+                    ok: r.failed.is_empty(),
+                    updated: r.updated.len(),
+                    unchanged: r.unchanged,
+                    missing: r.missing,
+                    bytes: r.bytes,
+                    updated_at: assets::status(&app).updated_at,
+                    message: assets::summary_text(&r),
+                    failed: r.failed,
+                }
+            }
+            // 另一次资源更新正在跑 / 资源目录不可用：界面把这一句显示在那一行即可
+            Err(e) => AssetsSyncReport { ok: false, message: e, ..Default::default() },
+        };
+        let _ = app.emit("assets-synced", payload);
     });
 }
 
@@ -1263,13 +1341,25 @@ fn get_asset_index(app: tauri::AppHandle) -> AssetIndexPayload {
     }
 }
 
-/// 触发数据更新（异步执行，进度通过 data-sync-progress / data-synced 事件下发）
+/// 触发**游戏数据**更新（异步执行，进度通过 data-sync-progress / data-synced 事件下发）。
+/// 不含图片资源：那是另一条命令 `refresh_assets`。
 #[tauri::command]
 fn refresh_game_data(app: tauri::AppHandle, force: Option<bool>) -> Result<(), String> {
     if apidata::status(&app).syncing {
         return Err("数据更新正在进行中".to_string());
     }
     spawn_sync(app, force.unwrap_or(false));
+    Ok(())
+}
+
+/// 触发**图片资源**更新（异步执行，进度通过 data-sync-progress（kind=assets）
+/// 下发，结果通过 assets-synced 下发）。与 `refresh_game_data` 相互独立。
+#[tauri::command]
+fn refresh_assets(app: tauri::AppHandle, force: Option<bool>) -> Result<(), String> {
+    if assets::syncing() {
+        return Err("图片资源更新正在进行中".to_string());
+    }
+    spawn_assets_sync(app, force.unwrap_or(false));
     Ok(())
 }
 
@@ -1537,6 +1627,7 @@ pub fn run() {
                     set_objective_status,
                     get_data_status,
                     refresh_game_data,
+                    refresh_assets,
                     get_asset_index,
                     get_map_markers,
                     get_quest_zones,
@@ -1592,6 +1683,7 @@ pub fn run() {
                     set_objective_status,
                     get_data_status,
                     refresh_game_data,
+                    refresh_assets,
                     get_asset_index,
                     get_map_markers,
                     get_quest_zones,

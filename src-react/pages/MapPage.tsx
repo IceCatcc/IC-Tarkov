@@ -42,7 +42,7 @@ import { assetUrl, assetUrlTemplate } from '../assetUrl'
 
 /**
  * 地图标记图标 URL（相对 public/）。
- * 图标随包分发，但「更新数据」下载的版本会替换掉随包资源（lite 版完全依赖下载）。
+ * 图标随包分发，但「更新图片资源」下载的版本会替换掉随包资源（lite 版完全依赖下载）。
  */
 const iconUrl = (file: string) => assetUrl(`maps/interactive/${file}.png`)
 

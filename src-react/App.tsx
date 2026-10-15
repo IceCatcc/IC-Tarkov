@@ -10,7 +10,7 @@ import {
 import { useStore } from './store'
 import { startLanAutoConnect, reloadLocalData } from './lan'
 import { listenEvent } from './api/shell'
-import { refreshAssets, registerAssetSyncListener, subscribeAssets } from './assetUrl'
+import { refreshAssetIndex, registerAssetSyncListener, subscribeAssets } from './assetUrl'
 import { fetchMe } from './api/web-account'
 import { AuthGate } from './components/AuthGate'
 import { bootReady, bootSnapshot, finishBoot, reportStep, subscribeBoot } from './boot'
@@ -146,10 +146,10 @@ export default function App() {
         await bootReady()
         if (cancelled) return
         off = await initTauri()
-        // 图片资源索引：每张图优先用「更新数据」下载到本机的版本，缺失才回退随包资源，
+        // 图片资源索引：每张图优先用「更新图片资源」下载到本机的版本，缺失才回退随包资源，
         // 因而必须在首次渲染前取到（无内置资源版完全依赖它）；更新完成后再刷新一次。
         reportStep('assets', '正在读取图片资源…')
-        await refreshAssets()
+        await refreshAssetIndex()
         offAssets = registerAssetSyncListener()
         reportStep('settings', '正在读取界面设置…')
         const st = await getSettings()

@@ -37,10 +37,11 @@ jobs:
       - name: Fetch seed data
         run: npm run data:fetch
 
-      # 图片资源包（地图底图 / 地图标记 / Boss 图）：这两类图上游没有，由本项目托管。
-      # 客户端「更新数据」时按 assets-manifest.json 里的 hash 比对，一致就跳过整包下载。
+      # 图片资源（地图底图 / 地图标记 / Boss 图）：上游没有，由本项目托管。
+      # 清单（assets-manifest.json）+ 散附件（files/ 下）必须挂在同一个 Release 下，
+      # 客户端按清单逐条比对摘要，只下载变化的文件（增量在客户端，CI 每次全量上传即可）。
       # 挂在独立的 `assets` 标签下（与版本 tag 无关），无内置数据版首次启动靠它拿图。
-      - name: Publish image assets bundle
+      - name: Publish image assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -48,7 +49,9 @@ jobs:
           npm run assets:pack
           gh release view assets >/dev/null 2>&1 ||
             gh release create assets --title "图片资源" --notes "地图底图 / 地图标记 / Boss 图：客户端「更新数据」自动获取，请勿手动删除"
-          gh release upload assets dist-assets/assets.zip dist-assets/assets-manifest.json --clobber
+          # 旧版整包资产，已弃用（改为散附件 + 逐文件清单）
+          gh release delete-asset assets assets.zip -y >/dev/null 2>&1 || true
+          gh release upload assets dist-assets/assets-manifest.json dist-assets/files/* --clobber
 
       # 读取 RELEASE_NOTES.md 作为 Release 说明（发布前在本地维护好该文件）。
       # 文件不存在或为空时，说明留空，不会中断构建。
