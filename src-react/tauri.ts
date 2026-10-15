@@ -32,6 +32,7 @@ import type {
   DataStatus,
   ItemInfo,
 } from './types'
+  SimplifyLogResult,
 
 /**
  * 注册全局监听，返回统一清理函数。
@@ -284,6 +285,11 @@ export async function importData(path: string): Promise<void> {
 /** 移动端导入：前端用 plugin-fs 读取 content:// URI 字节后传入 */
 export async function importDataBytes(bytes: Uint8Array): Promise<void> {
   await invoke('import_data_bytes', { bytes })
+}
+
+/** 精简日志：就地清掉日志目录下各 .log 里的无关输出（进入地图等），只保留任务相关信息 */
+export async function simplifyLogs(): Promise<SimplifyLogResult> {
+  return await invoke<SimplifyLogResult>('simplify_logs')
 }
 
 export async function getQuestGraph(): Promise<QuestGraph> {

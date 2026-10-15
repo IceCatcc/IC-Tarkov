@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { open, save } from '@tauri-apps/plugin-dialog'
+import { confirm, open, save } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { useStore } from '../store'
 import { isMobile, isAndroid } from '../platform'
@@ -13,6 +13,7 @@ import {
   getPlayerQuests,
   resetAndRescan,
   exportData,
+  simplifyLogs,
   importData,
   importDataBytes,
   openDataDir,
@@ -276,6 +277,31 @@ export default function SettingsModal() {
         mode === 'merge'
           ? '已补充重扫：本地日志缺失的进度已并入当前数据'
           : '已覆盖重扫：已重置到日志真值（手动改动已丢弃）',
+      )
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // 精简日志：就地清掉日志目录下各 .log 里的无关输出（进入地图 / 资源加载等），
+  // 只保留任务相关信息。会直接覆盖原文件，先让用户确认；正在写入的日志自动跳过。
+  const onSimplifyLogs = async () => {
+    setBusy('simplify')
+    setError(null)
+    setFeedback(null)
+    try {
+      const ok = await confirm(
+        '将直接清理日志目录下的 .log 文件：删除进入地图等无关输出，只保留任务相关信息。\n' +
+          '原文件会被覆盖，此操作不可撤销；正在写入的日志会自动跳过。',
+        { title: '精简日志', kind: 'warning' },
+      )
+      if (!ok) return
+      const r = await simplifyLogs()
+      setFeedback(
+        `已精简日志：清理 ${r.trimmedFiles} 个文件，删除 ${r.removedLines} 行（保留 ${r.keptLines}/${r.totalLines} 行）` +
+          (r.skippedFiles > 0 ? `，跳过 ${r.skippedFiles} 个（使用中）` : ''),
       )
     } catch (e) {
       setError(String(e))
@@ -631,6 +657,16 @@ export default function SettingsModal() {
                   className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
                 >
                   {busy === 'rescan' ? '读取中…' : '重新读取日志'}
+                </button>
+              )}
+              {!mobile && (
+                <button
+                  onClick={onSimplifyLogs}
+                  disabled={busy !== null}
+                  className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
+                  title="就地清理日志目录下各 .log 的无关输出（进入地图等），只保留任务相关信息"
+                >
+                  {busy === 'simplify' ? '精简中…' : '精简日志'}
                 </button>
               )}
               <button

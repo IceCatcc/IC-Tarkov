@@ -889,7 +889,8 @@ async fn reset_and_rescan(app: tauri::AppHandle, mode: Option<String>) -> Result
             for md in g.values_mut() {
                 md.quests.clear();
                 md.activity.clear();
-                md.current_map = None;
+                // current_map 不清：重扫只重建任务进度，当前地图由实时事件维护
+                // （首扫也不再解析「进入地图」事件，清了就再也补不回来）
                 md.offsets.clear();
                 md.unlocked.clear();
             }
@@ -942,6 +943,20 @@ fn export_data(app: tauri::AppHandle, path: Option<String>) -> Result<String, St
     }
     zip.finish().map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// 精简日志：就地清掉日志目录下各 .log 里的无关输出（进入地图 / 资源加载等），
+/// 只保留任务相关信息。原文件被直接覆盖，不产生副本；正在写入的文件跳过。
+#[tauri::command]
+async fn simplify_logs(app: tauri::AppHandle) -> Result<parser::SimplifyResult, String> {
+    let dir = read_settings(&app).log_dir;
+    if dir.trim().is_empty() {
+        return Err("请先在设置里配置日志目录".into());
+    }
+    if !Path::new(&dir).is_dir() {
+        return Err(format!("日志目录不存在：{dir}"));
+    }
+    parser::simplify_logs_in_place(Path::new(&dir))
 }
 
 /// 导入数据：读取 zip 包（quest_state / collected / settings.json），覆盖对应持久化文件并载入内存；
@@ -1450,6 +1465,7 @@ pub fn run() {
                     set_data_location,
                     reset_and_rescan,
                     export_data,
+                    simplify_logs,
                     import_data,
                     import_data_bytes,
                     get_unlocked,
@@ -1503,6 +1519,7 @@ pub fn run() {
                     set_data_location,
                     reset_and_rescan,
                     export_data,
+                    simplify_logs,
                     import_data,
                     import_data_bytes,
                     get_unlocked,

@@ -253,12 +253,18 @@ fn process_file(
                 location_id,
                 timestamp,
             } => {
-                // 无论初始扫描还是实时事件都要更新当前地图（并去重：地图未变不重复 emit）
+                // 重扫 / 启动首扫只重建任务进度，不处理「进入地图」事件：
+                // 当前地图只由实时事件决定，避免全量重扫把历史日志里最后一张地图
+                // 当成「当前所在地图」而跳来跳去。
+                if !emit {
+                    continue;
+                }
+                // 实时事件更新当前地图（并去重：地图未变不重复 emit）
                 let changed = {
                     let binding = app.state::<AppState>();
                     binding.with_active(|md| md.apply_location(&location_id))
                 };
-                if changed && emit {
+                if changed {
                     let _ = app.emit(
                         "map-changed",
                         serde_json::json!({ "locationId": location_id, "timestamp": timestamp }),

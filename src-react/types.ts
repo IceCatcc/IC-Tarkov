@@ -70,6 +70,26 @@ export interface AppSettings {
   uiPrefs?: Record<string, unknown>
 }
 
+/** 精简日志结果（桌面端）：就地清掉游戏日志里的无关输出 */
+export interface SimplifyLogResult {
+  /** 日志目录 */
+  dir: string
+  /** 扫描到的 .log 文件数 */
+  files: number
+  /** 实际被裁剪的文件数 */
+  trimmedFiles: number
+  /** 跳过的文件数（正在写入 / 读写失败） */
+  skippedFiles: number
+  /** 删除的行数 */
+  removedLines: number
+  /** 保留的行数 */
+  keptLines: number
+  /** 原始总行数 */
+  totalLines: number
+  /** 节省的字节数 */
+  bytesSaved: number
+}
+
 export interface ItemRef {
   id: string
   name: string
