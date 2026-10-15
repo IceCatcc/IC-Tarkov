@@ -33,9 +33,22 @@ jobs:
         run: npm install
 
       # 种子数据不入库（见 .gitignore）：打包前抓一份最新的，build.rs 会 gzip 内嵌进
-      # 二进制、tauri 同时把 resources/api 作为资源打进安装包。
+      # 二进制、tauri 同时把 resources/api 作为资源放进安装包。
       - name: Fetch seed data
         run: npm run data:fetch
+
+      # 图片资源包（地图底图 / 地图标记 / Boss 图）：这两类图上游没有，由本项目托管。
+      # 客户端「更新数据」时按 assets-manifest.json 里的 hash 比对，一致就跳过整包下载。
+      # 挂在独立的 `assets` 标签下（与版本 tag 无关），无内置数据版首次启动靠它拿图。
+      - name: Publish image assets bundle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          npm run assets:pack
+          gh release view assets >/dev/null 2>&1 ||
+            gh release create assets --title "图片资源" --notes "地图底图 / 地图标记 / Boss 图：客户端「更新数据」自动获取，请勿手动删除"
+          gh release upload assets dist-assets/assets.zip dist-assets/assets-manifest.json --clobber
 
       # 读取 RELEASE_NOTES.md 作为 Release 说明（发布前在本地维护好该文件）。
       # 文件不存在或为空时，说明留空，不会中断构建。

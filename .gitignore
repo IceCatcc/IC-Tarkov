@@ -23,6 +23,8 @@ vite.config.ts.timestamp-*.mjs
 
 # 本机打包的 APK 成品
 /apks/
+# 「npm run assets:pack」产出的图片资源包与清单（上传到 Release 用，不入库）
+/dist-assets/
 # 无内置数据版打包时本地种子的临时寄存目录（构建结束会挪回）
 src-tauri/resources/.api-stash/
 quest_analysis
