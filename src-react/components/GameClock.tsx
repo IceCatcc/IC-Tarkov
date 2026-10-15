@@ -54,7 +54,7 @@ export function GameClock() {
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2 text-[14px]">
-        <span className="text-[#c9d1d9]">游戏时间</span>
+        <span className="text-[13px] text-muted">游戏时间</span>
         <span className="shrink-0 tabular-nums text-amber">{fmtHMS(g1)}</span>
       </div>
       <div className="flex items-center justify-end gap-2 text-[14px]">
