@@ -464,31 +464,9 @@ export interface DataStatus {
   questCount: number
   mapCount: number
   files: DataFileStat[]
-  /** 图片资源（物品图标 / 商人头像 / 地图底图 / Boss 图）的本地情况；Web 端与旧后端可能没有该字段 */
-  assets?: AssetStats
 }
 
-/** 已下载图片资源的本地情况（get_data_status 的 assets 字段） */
-export interface AssetStats {
-  /** 资源目录绝对路径（空串 = 不可用，一律回退随包资源） */
-  dir: string
-  files: number
-  bytes: number
-  /** 最近一次资源真正发生变化的时间（epoch 秒，0 = 从未更新过） */
-  updatedAt: number
-  /** 是否正在更新图片资源；旧后端没有该字段 */
-  syncing?: boolean
-}
-
-/** 图片资源索引（get_asset_index）：前端据此决定每张图走运行时资源还是随包资源 */
-export interface AssetIndex {
-  /** 资源目录绝对路径（空串 = 不可用） */
-  dir: string
-  /** 已下载的资源相对路径（与 public/ 下一致，'/' 分隔） */
-  files: string[]
-}
-
-/** data-sync-progress 事件：更新进度（游戏数据与图片资源共用，按 kind 区分） */
+/** data-sync-progress 事件：数据更新进度 */
 export interface DataSyncProgress {
   running: boolean
   done: number
@@ -497,11 +475,9 @@ export interface DataSyncProgress {
   changed: number
   label: string
   force: boolean
-  /** 进度属于哪一类更新；旧后端没有该字段（一律按游戏数据算） */
-  kind?: 'data' | 'assets'
 }
 
-/** data-synced 事件：一次**游戏数据**更新结束的结果 */
+/** data-synced 事件：一次更新结束的结果 */
 export interface DataSyncReport {
   ok: boolean
   updated: string[]
@@ -509,22 +485,6 @@ export interface DataSyncReport {
   /** 内容未变化（服务端 304）而跳过下载的端点数 */
   unchanged: number
   updatedAt: number
-  message: string
-}
-
-/** assets-synced 事件：一次**图片资源**更新结束的结果 */
-export interface AssetsSyncReport {
-  ok: boolean
-  /** 本次真正写入的图片张数 */
-  updated: number
-  /** 与本地记录一致、跳过下载的张数 */
-  unchanged: number
-  /** 上游没有该图（404），不算失败 */
-  missing: number
-  bytes: number
-  /** 资源最近一次真正变化的时间（epoch 秒） */
-  updatedAt: number
-  failed: string[]
   message: string
 }
 

@@ -108,26 +108,14 @@ git push origin v<version>
 - **互斥任务（多选一）失败判定**：上游 `failConditions` 里 `type=taskStatus` + `status` 含 `complete` 表示「那个任务完成时本任务失败」（如海关的化学品-4 / 大客户 / 出于好奇三选一）。`dataset` 解析为 `QuestNode.fail_on_done` 并反推 `Store.fail_map`，`data::failed_quests(completed)` 算出失败集合，`get_player_quests` / `set_quest_status` 返回 `status:"failed"`（自身已完成时以完成为准）。前端 `QuestStatus` 增 `'failed'`：地图只画 `in_progress`（失败任务自动不再出现），监控页/任务板/图谱显示「已失败」。日志检测到完成任务后 `applyEvent` 会补拉一次任务列表刷新该派生状态。
 - **任务目标可单独勾选**：目标 id 取上游 objective id（`dataset::Objective.id` → `ObjectiveInfo.id`，缺失时兜底 `任务id#序号`）。打勾进度按任务模式存在 `quest_state.{mode}.json` 的 `QuestEntry.objectivesDone`，读写命令 `get_objectives_done` / `set_objective_status`（后者落盘后 emit `objective-changed`，已在 `lan.rs` 的事件转发列表与手机端反向同步里）。勾选只是玩家自己记进度，**不改变任务的接取/完成状态**；任务「手动重置」时清空该任务的目标打勾。三处目标列表（监控页卡片 / 任务板卡片 / 任务链详情面板）统一用 `src-react/components/ObjectiveChecklist.tsx`，状态经 `useObjectivesDone` 缓存（切模式时清空）。地图页点击任务目标图标的 Leaflet 弹窗也能勾选：它是静态 HTML，走 `data-obj-check="任务id|目标id"` + 地图容器的事件委托，勾选后就地改 DOM（不走重绘），所需进度由 `ensureObjectivesDone` 预取。**同一任务里坐标相同的多个目标（如「找到」+「标记」）会合并成一个图标**（图标只标任务名，弹窗里逐条列出目标描述、各自可勾选），图标的半透明要求组内目标全部勾选。已勾选的目标在地图上图标转半透明（`.quest-obj-marker.is-done`，由 `refreshObjectiveMarkers` 就地改 class，不重建图层以免弹窗被关掉）。另外 `dataset::push_zone_dedup` 会按「地图+坐标」给目标的 zone 点去重：上游 `zones` 里常有完全重合的重复点（如「这是什么梗」在工厂的放置点），不去重会画出两个重叠图标（典型案例：目标的 zone 带 factory4_day / factory4_night 两份副本，`NN_MERGE` 后 nn 都是 `factory`，且两份副本坐标可能有微小出入——所以去重优先按上游 zone id（`zid`），无 id 才退回按坐标）。前端 `MapPage` 绘制时再按「任务id+目标id+坐标」兜底去重一次，这样旧数据集或未重建时也不会重影。（只有目标打勾、既未接取也未完成的任务条目不进入玩家任务列表，避免打勾把未接取任务顶到列表/地图上。）
 - **地图「图标」筛选**：分类 / 子分类由 `src-react/mapIconGroups.ts` 从当前地图数据派生（不写死清单），每个子分类一个独立 Leaflet 图层、可单独开关；开关键为 `cat:<分类>` / `sub:<分类>:<子分类>`，存于 `uiPrefs.mapPrefs.chips`，旧版扁平键（`extract_pmc` 等）在 `migrateChips` 里一次性迁移；「任务目标」的子项即进行中的任务，沿用 `untrackedQuests`。默认显隐见 `ICON_DEFAULTS`（未显式设置的子项继承所属分类）。
+- **地图底图：有 SVG 线稿就不用卫星图**（`MapPage`，用户偏好线稿）：
+  - 主层：数据里同时给了 `svgPath` 与 `tilePath` 时**只加载 SVG**；`tilePath` 仅在**没有** `svgPath` 的地图上用（实验室 / 破冰船 / 迷宫）；
+  - 楼层：该层在 SVG 里有对应线稿组（`layers[].svgLayer` 且该 `id` 确实存在于 SVG 里）就只用线稿——主层线稿**压暗 20%** 作底（`applySvgLayer(id, true, false)`，CSS 的 `.off-level g.base-layer`）、选中层全亮，不加载该层瓦片；没有线稿组的楼层（海关 4 楼、储备站 2~5 楼，上游没给线稿）才用瓦片，此时整张线稿隐藏（`hideBase=true` / `svgRoot.style.display='none'`）；
+  - 瓦片图层**懒创建**（切到该层才建），线稿可用时移除已建瓦片，避免「SVG 尚未加载完成时先按瓦片处理」留下的卫星图残留；
+  - SVG 取不到时（文件缺失，`fetch` 非 2xx 显式抛错）**回退瓦片**，不让地图空着；SVG 异步加载完成后按 `floorSelRef.current` 复位当前楼层（不能直接 `showSvgMain()`，会把用户已选的楼层顶掉）。
 - **地图「游戏时间」显示**：组件 `src-react/components/GameClock.tsx`，并入地图页右下角「地图信息」面板（Boss 刷新率上方）。**纯本地计算，不依赖任何后端接口**（历史上基于 tarkov.dev `time` 接口的版本已因长期无数据被移除）：`游戏秒 = (UTC 秒 × 7 + 3h) % 86400`，另有一套 `+12h` 的对侧时间；现实 1 秒 = 游戏 7 秒，故以 `1000/7 ≈ 143ms` 定时刷新让游戏秒逐秒跳动。UI 上只保留一个「游戏时间」标签（第二行即 +12h 时间，不带标签），无按钮、无弹窗、不显示 UTC。地图页 keepAlive 隐藏（`display:none`）时按 store 的 `page` 停表，切回立即刷新一次；面板收起时组件卸载，定时器随之清理。
 - **启动：资料读取与界面进程分离 + 「读取中 xx」提示**。`setup` 只做轻量初始化（装配 `AppState`、同步载入体量很小的三套任务进度、局域网服务），最耗时的游戏数据集构建（约 17MB 原始 JSON 的解析与派生索引重建）放到后台线程（`src-tauri/src/lib.rs::load_in_background`），进度写入 `src-tauri/src/startup.rs::StartupTracker`，经 `startup-step` 事件与 `get_startup_state` 命令下发；数据集构建的各子阶段（读各文件 / 建索引）通过 `dataset::*_with(progress)` 回调上报同一步骤键，前端就地更新文案而不新增行。前端 `src-react/boot.ts` 把后端步骤与自身步骤（读取界面设置 / 扫描日志 / 加载任务列表）汇成一条时间线，由 `StartupSplash`（`z-[3000]`，见 `src-react/components/StartupSplash.tsx`）渲染遮罩。**约定：`bootReady()` resolve 之前不得调用依赖数据集的命令**（任务/地图/物品），否则会读到空数据集；`bootReady` 用「事件 + 轮询」双保险并带 120s 兜底，后端异常也不会把界面卡在遮罩上。另外 `start_watching` / `reset_and_rescan` 声明为 async：非 async 命令跑在 Tauri 主线程，全量日志扫描会把界面冻住。
 - **日志监控只看任务 + 「精简日志」**：重扫（`reset_and_rescan`）与启动首扫（`emit=false`）不再解析「进入地图」事件（`watcher.rs` 里 `RawEvent::Location` 在 `!emit` 时直接跳过），当前地图只由实时事件（notify / 3 秒轮询，`emit=true`）决定；覆盖重扫也不再清空 `current_map`（清了就补不回来）。另设「精简日志」入口（设置页数据操作区，命令 `simplify_logs` → `parser::simplify_logs_in_place`）：**就地覆盖** `Logs` 下的 `.log` 原文件，删掉与任务无关的行（进入地图 `Locations:` / `RaidId`、资源加载等），只保留任务通知多行 JSON 块（整块原样保留，写回后仍可被 `parse_chunk` 解析）、`Session mode:` 行与 `client/quest/` 请求；mtime 在 60 秒内的文件视为游戏仍在写，跳过不动。`simplify_logs` 在 `api/tauri-impl.ts` 与 `api/web-impl.ts`（抛「不支持」）都已实现，勿漏。
-
-- **图片资源（物品图标 / 商人头像 / Boss 图 / 地图底图 / 地图标记 / 瓦片）可在线更新**：
-  - **与游戏数据分开两个按钮、两条命令**：设置页「游戏数据（tarkov.dev）」区块只更新 JSON（`refresh_game_data` → `apidata`），下面另一个「图片资源」区块只更新图片（`refresh_assets` → `assets::sync_with`）。一次更新只碰一项，两个按钮的禁用状态、进度行、结果行、最近更新时间各自独立（`dataStatus.syncing` vs `dataStatus.assets.syncing`）。共用的是同一条进度事件 `data-sync-progress`，靠 payload 里的 **`kind`（`data` / `assets`）** 分流；结束事件分开：`data-synced`（游戏数据）/ `assets-synced`（图片资源，载荷见 `lib.rs::AssetsSyncReport`）。**新增数据层函数要两套实现都加**（`refreshAssets` 在 `api/tauri-impl.ts` 与 `api/web-impl.ts`，web 端抛「不支持」且按钮用 `isWeb()` 隐藏）。
-  - 后端 `src-tauri/src/assets.rs` 把图片缓存到 `<data_root>/tarkov-assets/`，布局与前端 `public/` 下**完全一致**（`item-icons/<物品id>.webp`、`trader-icons/<商人id>.webp`、`boss-icons/*`、`maps/svg/*.svg`、`maps/interactive/*.png`、`maps/tiles/<地图>/<z>/<x>/<y>.png`）。
-  - **逐文件增量**：远端清单 `{IC_ASSETS_BASE}/assets-manifest.json`（`version: 2`）逐条列出 `{ path, name | url, bytes, etag }`。`path` 即本地落盘相对路径（与前端 `public/` 一致），`etag` 是版本标记，本地另行维护一份**记录清单**（`<data_root>/tarkov-assets/assets-manifest.json`，同样叫这个名字但只存 `{ bytes, updatedAt, etag }`，不会被远端清单覆盖）。同步时逐条比对：`etag` 一致且字节数一致就**整条跳过**（连请求都不发），于是「更新图片资源」只下载真正变化的文件——改一张底图不会再重下整套资源。本地记录里的值一律取自清单声明（不是响应头），保证两边同源可比。
-  - 两类来源：地图底图 / 地图标记 / Boss 图 / 瓦片等**自有资源**打成**散附件**放在清单同目录的 `files/` 下（附件名扁平化：`maps/svg/Customs.svg` → `maps__svg__Customs.svg`，因为附件名不能含 `/`），`etag` 即文件内容 sha256 前 16 位；物品图标与商人头像**不搬文件**（仍按 id 直连 `assets.tarkov.dev`），清单只带它们的上游版本标记（ETag，缺失时退化为 `Last-Modified|Content-Length`）。默认基址是本仓库 Release 的 `assets` 标签，用 `npm run assets:pack` 生成清单与附件（`--no-icons` 跳过抓图标标记，快很多）；自建服务把 `files/` 与清单放进同一目录，用环境变量 `IC_ASSETS_BASE` 覆盖。
-  - 清单不可达时**退化为「图标缺失即下」**（只补本地没有的图标），不报错、不影响 JSON 数据更新。上游确实没有的图（约 600 个物品本就没有图标，HEAD/GET 均 404）记为**本地清单里的 `etag: "missing"` 占位**，下次不再重复探测；上游后来补齐了，会由清单里的真实 etag 覆盖该占位（`force` 时忽略占位重探）。写占位只把清单标脏落盘，**不动 `updatedAt`**（那个字段表示「资源真正变化的时间」）。
-  - 发布侧（CI）**不做增量**：每次 `npm run assets:pack` 后整份 `--clobber` 覆盖上传（内容没变的附件名与内容都不变，重传不影响客户端）。清单用**紧凑 JSON**（每次都整份下载，缩进会让它多出约 200 KB）。
-  - **启动时默认不自动同步图片**：只有 `assets::needs_seed_download`（`IC_NO_ASSETS` 构建且运行时资源目录为空 —— 无内置资源版首次启动 / 刚换过数据目录）为真时，`load_in_background` 才在启动线程里补齐一次（步骤键 `assets`，文案「正在下载图片资源 x/y」），否则一律等用户点按钮。这样完整版不会再在后台悄悄拉图。
-  - 前端一律经 `src-react/assetUrl.ts` 的 `assetUrl()` / `assetUrlTemplate()` 取图，**不要再写 `/item-icons/...` 这类硬编码路径**：运行时目录里有就用 Tauri `asset:` 协议（`protocol-asset` feature + `tauri.conf.json` 的 `assetProtocol.enable`，`setup` 里 `allow_directory` 放行资源目录；Android CSP 需允许 `asset:` / `http://asset.localhost`），没有就回退随包路径 —— 离线可用与在线更新因此并存。启动时 `assetUrl.ts::refreshAssetIndex()` 取一次索引（`get_asset_index`），`assets-synced`（兜底还挂了 `data-synced`）后再刷一次（注意别与 api 层的 `refreshAssets()`（触发图片更新）混淆）。
-  - 「随包已带的图片」由 `build.rs` 扫描 `public/{item-icons,trader-icons,boss-icons,maps}` 生成 `bundled_assets.rs`（`IC_NO_ASSETS=1` 时为空）。它只服务于**清单不可达时的兜底**（清单没列出的图标，随包已有就不再下）；清单可用时一律按清单里的版本标记逐条比对，因此**首次同步（本地记录为空）会把清单列出的图各取一次**（完整版约十几 MB、图标约 5400 张），之后才全部命中跳过。
-  - **lite 版**（`--lite` → `IC_NO_SEED=1 IC_NO_ASSETS=1`）：`build.rs` 不内嵌种子与图片清单，且 `vite.config.ts` 的插件在构建后把 `item-icons` / `trader-icons` / `boss-icons` / `maps` 从产物里剔除（必须赶在 cargo 打包前，故挂在 Vite 构建尾上），图片全部由首次启动下载。商人 / Boss 图因此在 `public/` 下（不再走 Vite 静态 import，那会带 hash 无法剔除）。
-  - **地图底图：有 SVG 线稿就不用卫星图**（`MapPage`，用户偏好线稿）：
-    - 主层：数据里同时给了 `svgPath` 与 `tilePath` 时**只加载 SVG**（`tilePath` 仅在**没有** `svgPath` 的地图上用：实验室 / 破冰船 / 迷宫）；
-    - 楼层：该层在 SVG 里有对应线稿组（`layers[].svgLayer` 且该 `id` 确实存在于 SVG 里）就只用线稿——主层线稿**压暗 20%** 作底（`applySvgLayer(id, true, false)`，CSS 的 `.off-level g.base-layer`）、选中层全亮，不加载该层瓦片；没有线稿组的楼层（海关 4 楼、储备站 2~5 楼，上游没给线稿）才用瓦片，此时整张线稿隐藏（`hideBase=true` / `svgRoot.style.display='none'`）；
-    - 瓦片图层**懒创建**（切到该层才建），线稿可用时会把它移除，避免「SVG 尚未加载完成时先按瓦片处理」留下的卫星图残留；
-    - SVG 取不到时（lite 版资源尚未下载 / 文件缺失，`fetch` 非 2xx 会显式抛错）**回退瓦片**，不让地图空着。SVG 异步加载完成后按 `floorSelRef.current` 复位当前楼层（不能直接 `showSvgMain()`，会把用户已选的楼层顶掉）。
 
 ## 其他
 
@@ -183,9 +171,8 @@ IC-Tarkov/
   需要区分「浏览器 / Tauri」的地方：窗口控制按钮、局域网「连接」按钮、刷新与右键屏蔽、LAN 自动重连。
 - **shell 能力集中在 `api/shell.ts`**：禁止在组件里直接 `import { getCurrentWindow } from '@tauri-apps/api/window'`
   （`getCurrentWindow()` 在浏览器里模块加载期就会抛错）。版本号取不到时返回空串，顶部栏据此隐藏版本标签。
-- **服务端不做本机能力**：日志监控、截图定位、数据目录迁移、局域网同步、**图片资源更新**
-  （图片随前端产物一起分发，`refreshAssets` 抛「当前环境不支持」、设置页那一块用 `isWeb()` 隐藏）
-  在 web 端不存在，对应函数是空实现或抛「当前环境不支持」。局域网同步的职责由「同一账号多端实时同步」取代。
+- **服务端不做本机能力**：日志监控、截图定位、数据目录迁移、局域网同步在 web 端不存在，
+  对应函数是空实现或抛「当前环境不支持」。局域网同步的职责由「同一账号多端实时同步」取代。
 - **时间格式**：DB 读出的 DATETIME 一律以 `YYYY-MM-DD HH:mm:ss` 字符串往返（连接池 `dateStrings: true`），
   与桌面端日志时间戳格式保持一致，前端无需适配。
 - **模式（pvp / pvps / pve）**：所有用户数据表都以 `(user_id, mode)` 为主键前缀；

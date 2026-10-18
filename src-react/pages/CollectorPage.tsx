@@ -4,7 +4,6 @@ import { getCollectorQuestId, getCollectedItems, setItemCollected } from '../tau
 import { traderDisplayName } from '../traderMeta'
 import { isMobile } from '../platform'
 import { compareLabel, type ItemRef } from '../types'
-import { assetUrl } from '../assetUrl'
 
 /** 卡片网格间距（px） */
 const GAP = 8
@@ -61,7 +60,7 @@ function ItemCard({
     >
       {/* 图标随卡片宽度等比缩放（正方形），窗口变大时卡片整体铺开 */}
       <img
-        src={assetUrl(`item-icons/${item.id}.webp`)}
+        src={`/item-icons/${item.id}.webp`}
         alt=""
         loading="lazy"
         className="w-full aspect-square object-contain shrink-0"

@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { confirm, open, save } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { useStore } from '../store'
-import { isMobile, isAndroid, isWeb } from '../platform'
+import { isMobile, isAndroid } from '../platform'
 import { WIKI_TEMPLATES, type WikiSite } from '../wiki'
 import { HelpModal } from './HelpModal'
 import AboutModal from './AboutModal'
@@ -19,14 +19,13 @@ import {
   openDataDir,
   getDataStatus,
   refreshGameData,
-  refreshAssets,
   getDataLocation,
   setDataLocation,
   getSettings,
   setKeepScreenOn,
   type DataLocation,
 } from '../tauri'
-import type { DataStatus, DataSyncProgress, DataSyncReport, AssetsSyncReport } from '../types'
+import type { DataStatus, DataSyncProgress, DataSyncReport } from '../types'
 
 const fmtTime = (epochSecs: number): string => {
   if (!epochSecs) return '从未更新'
@@ -123,8 +122,6 @@ export default function SettingsModal() {
   const mobile = isMobile()
   // 屏幕常亮：仅 Android 有原生实现（iOS 无原生工程），只在 Android 上展示开关
   const android = isAndroid()
-  // Web 端图片随前端产物分发，没有「本机图片资源可更新」这回事，不显示该按钮
-  const web = isWeb()
   const [keepOn, setKeepOn] = useState(settings.keepScreenOn ?? true)
 
   // 设置项分组视觉：标题(白亮加粗) / 选项(主色) / 说明(灰小字) 三级层级
@@ -176,17 +173,11 @@ export default function SettingsModal() {
   const [syncResult, setSyncResult] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
 
-  /* ---------- 图片资源（物品图标 / 商人头像 / 地图底图 / 地图标记 / Boss 图） ---------- */
-  const [assetsMsg, setAssetsMsg] = useState<string | null>(null)
-  const [assetsResult, setAssetsResult] = useState<string | null>(null)
-  const [syncingAssets, setSyncingAssets] = useState(false)
-
   const loadDataStatus = useCallback(() => {
     getDataStatus()
       .then((s) => {
         setDataStatus(s)
         setSyncing(s.syncing)
-        setSyncingAssets(!!s.assets?.syncing)
       })
       .catch(() => {})
   }, [])
@@ -204,14 +195,8 @@ export default function SettingsModal() {
     track(
       listen<DataSyncProgress>('data-sync-progress', (e) => {
         const p = e.payload
-        // 两类更新共用这条事件，按 kind 写进各自那一行（旧后端没有 kind，按游戏数据算）
-        if (p.kind === 'assets') {
-          setSyncingAssets(p.running)
-          setAssetsMsg(p.running ? `${p.label} · 已处理 ${p.done}/${p.total} 张` : null)
-        } else {
-          setSyncing(p.running)
-          setSyncMsg(p.running ? `${p.label} · 已更新 ${p.changed}/${p.total} 份` : null)
-        }
+        setSyncing(p.running)
+        setSyncMsg(p.running ? `${p.label} · 已更新 ${p.changed}/${p.total} 份` : null)
       }),
     )
     track(
@@ -223,16 +208,6 @@ export default function SettingsModal() {
         loadDataStatus()
       }),
     )
-    track(
-      listen<AssetsSyncReport>('assets-synced', (e) => {
-        setSyncingAssets(false)
-        // 与数据那行同理：失败红字，成功把摘要留在下一行
-        setAssetsMsg(e.payload.ok ? null : e.payload.message)
-        setAssetsResult(e.payload.ok ? e.payload.message : null)
-        // 图片张数 / 体积与「最近更新」跟着刷新
-        loadDataStatus()
-      }),
-    )
     // 后端重建完派生索引后刷新计数
     track(listen('data-reloaded', () => loadDataStatus()))
     return () => {
@@ -241,7 +216,7 @@ export default function SettingsModal() {
     }
   }, [loadDataStatus])
 
-  // 更新游戏数据：后端逐项带 ETag 发条件请求，内容没变的端点（304）直接跳过下载（不含图片）
+  // 更新数据：后端逐项带 ETag 发条件请求，内容没变的端点（304）直接跳过下载
   const onUpdateData = async () => {
     setError(null)
     setFeedback(null)
@@ -252,21 +227,6 @@ export default function SettingsModal() {
       await refreshGameData(false)
     } catch (e) {
       setSyncing(false)
-      setError(String(e))
-    }
-  }
-
-  // 更新图片资源：与游戏数据完全分开的另一个按钮（按清单版本标记只取有变化的图）
-  const onUpdateAssets = async () => {
-    setError(null)
-    setFeedback(null)
-    setAssetsMsg(null)
-    setAssetsResult(null)
-    setSyncingAssets(true)
-    try {
-      await refreshAssets(false)
-    } catch (e) {
-      setSyncingAssets(false)
       setError(String(e))
     }
   }
@@ -609,7 +569,7 @@ export default function SettingsModal() {
               <button
                 onClick={onUpdateData}
                 disabled={syncing}
-                title="逐项比对远端 ETag：内容没变的不下载，只取有变化的任务 / 地图 / 商人 / 物品等数据。图片资源不在其中，用下面的「更新图片资源」。"
+                title="逐项比对远端 ETag：内容没变的不下载，只取有变化的端点"
                 className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
               >
                 {syncing ? '更新中…' : '更新数据'}
@@ -644,47 +604,6 @@ export default function SettingsModal() {
               </div>
             )}
           </div>
-
-          {/* 图片资源：与游戏数据分成两个按钮各自更新（物品图标 / 商人头像来自 tarkov.dev 图床，
-              地图底图 / 地图标记 / Boss 图来自项目资源清单）；Web 端图片随前端产物分发，不显示 */}
-          {!web && (
-            <div className="border-t border-line pt-4">
-              <div className={`${TITLE_CLS} mb-2`}>图片资源</div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={onUpdateAssets}
-                  disabled={syncingAssets}
-                  title="按资源清单逐条比对版本标记：物品图标 / 商人头像来自 tarkov.dev 图床，地图底图 / 地图标记 / Boss 图来自项目资源清单，只下载有变化的图。与上面的「更新数据」互不影响。"
-                  className="px-3 py-1.5 rounded border border-line text-[14px] text-[#e6edf3] hover:bg-ink-700 disabled:opacity-50"
-                >
-                  {syncingAssets ? '更新中…' : '更新图片资源'}
-                </button>
-                {/* 已下载到数据目录的图片数量与体积（随包自带的图不计入） */}
-                {dataStatus?.assets && dataStatus.assets.files > 0 && (
-                  <span className={DESC_CLS} title={dataStatus.assets.dir}>
-                    已下载 {dataStatus.assets.files} 张 /{' '}
-                    {(dataStatus.assets.bytes / 1048576).toFixed(1)} MB
-                  </span>
-                )}
-              </div>
-              {syncingAssets ? (
-                <div className="mt-2 text-[12px] text-muted/80">{assetsMsg ?? '正在更新…'}</div>
-              ) : assetsMsg ? (
-                <div className="mt-2 text-[12px] text-red-400">{assetsMsg}</div>
-              ) : dataStatus?.assets?.updatedAt ? (
-                <div className="mt-2 text-[12px] text-muted/80">
-                  最近更新：{fmtTime(dataStatus.assets.updatedAt)}
-                </div>
-              ) : (
-                <div className="mt-2 text-[12px] text-muted/80">
-                  联网时只下载有变化的图（无内置图片的安装包在首次启动已自动补齐）。
-                </div>
-              )}
-              {assetsResult && !syncingAssets && (
-                <div className="mt-1 text-[12px] text-muted/70">{assetsResult}</div>
-              )}
-            </div>
-          )}
 
           {/* 数据管理（含数据目录位置） */}
           <div className="border-t border-line pt-4">

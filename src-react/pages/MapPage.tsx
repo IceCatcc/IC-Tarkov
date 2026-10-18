@@ -36,15 +36,10 @@ import {
   type IconGroup,
 } from '../mapIconGroups'
 import { bossImage } from '../bossImages'
-import { assetUrl, assetUrlTemplate } from '../assetUrl'
 
 /* ================= 常量 ================= */
 
-/**
- * 地图标记图标 URL（相对 public/）。
- * 图标随包分发，但「更新图片资源」下载的版本会替换掉随包资源（lite 版完全依赖下载）。
- */
-const iconUrl = (file: string) => assetUrl(`maps/interactive/${file}.png`)
+const ICON_BASE = 'maps/interactive/'
 
 // 常见英文楼层名的中文显示
 const FLOOR_NAME_ZH: Record<string, string> = {
@@ -213,8 +208,7 @@ function reqHtml(r: Requirement): string {
   if (r.itemId) {
     const cnt = r.count != null && r.count > 0 ? ` ×${r.count}` : ''
     const nm = r.name ?? r.value ?? ''
-    const icon = assetUrl(`item-icons/${r.itemId}.webp`)
-    return `<span class="req-item"><img class="req-item-img" src="${icon}" alt=""/>` +
+    return `<span class="req-item"><img class="req-item-img" src="/item-icons/${r.itemId}.webp" alt=""/>` +
       `<span class="req-item-name">${nm}</span>${cnt ? `<span class="req-item-count">${cnt}</span>` : ''}</span>`
   }
   return reqText(r)
@@ -237,8 +231,7 @@ function extractReqIconHtml(r: Requirement): string | null {
   }
   if (r.itemId) {
     const nm = r.name ?? r.value ?? ''
-    const icon = assetUrl(`item-icons/${r.itemId}.webp`)
-    return `<img class="extract-req-icon extract-req-item" src="${icon}" alt="" title="${nm}"/>`
+    return `<img class="extract-req-icon extract-req-item" src="/item-icons/${r.itemId}.webp" alt="" title="${nm}"/>`
   }
   return null
 }
@@ -777,7 +770,7 @@ export function MapPage() {
     // 主层底图：**地图有 SVG 线稿就只用线稿，不显示卫星图**（瓦片只留给没有线稿的地图：
     // 实验室 / 破冰船 / 迷宫）。有 SVG 时显隐交给 SVG 组，取不到 SVG 则在下面的 catch 里回退瓦片。
     if (imap.tilePath && !imap.svgPath) {
-      const tl = L.tileLayer(assetUrlTemplate(imap.tilePath), tileOpts).addTo(container)
+      const tl = L.tileLayer(`/${imap.tilePath}`, tileOpts).addTo(container)
       defaultHandle = {
         show: () => {
           if (!container.hasLayer(tl)) tl.addTo(container)
@@ -789,10 +782,9 @@ export function MapPage() {
     }
 
     if (imap.svgPath) {
-      // 底图 SVG 也走统一入口：运行时若有下载的新版本优先用它（lite 版完全依赖下载）
-      fetch(assetUrl(imap.svgPath))
+      fetch(`/${imap.svgPath}`)
         .then((r) => {
-          // 资源没下下来时前端会拿到 404 的 HTML，必须显式判失败才能走下面的瓦片兜底
+          // 取不到时（文件缺失 / 路径不对）会拿到 404 的 HTML，必须显式判失败才能走下面的瓦片兜底
           if (!r.ok) throw new Error(`HTTP ${r.status}`)
           return r.text()
         })
@@ -834,9 +826,9 @@ export function MapPage() {
         })
         .catch((err) => {
           console.error('svg load failed', err)
-          // 线稿取不到（lite 版资源尚未下载 / 文件缺失）时回退瓦片，别让地图整片空着
+          // 线稿取不到（文件缺失 / 路径不对）时回退瓦片，别让地图整片空着
           if (cancelled || !imap.tilePath) return
-          const tl = L.tileLayer(assetUrlTemplate(imap.tilePath), tileOpts).addTo(container)
+          const tl = L.tileLayer(`/${imap.tilePath}`, tileOpts).addTo(container)
           defaultHandle = {
             show: () => {
               if (!container.hasLayer(tl)) tl.addTo(container)
@@ -852,7 +844,7 @@ export function MapPage() {
     // 没有线稿组的楼层才用瓦片（如海关 4 楼、储备站 2~5 楼，上游没给这些层的线稿）。
     ;(imap.layers ?? []).forEach((lyr, i) => {
       let tl: L.TileLayer | null = null
-      const ensureTiles = () => (tl ??= L.tileLayer(assetUrlTemplate(lyr.tilePath!), tileOpts))
+      const ensureTiles = () => (tl ??= L.tileLayer(`/${lyr.tilePath!}`, tileOpts))
       floorHandles.set(i, {
         show: () => {
           // SVG 还没加载完时先按没有线稿处理（此时 map 上多半还没切过楼层）
@@ -890,7 +882,7 @@ export function MapPage() {
         // 尺寸必须写在 style 里：HTML 的 width/height 属性优先级低于样式表，
         // 会让源图尺寸（撤离点图标比 20px 大）直接生效
         html:
-          `<img src="${iconUrl(file)}" alt="" ` +
+          `<img src="${ICON_BASE}${file}.png" alt="" ` +
           'style="width:20px;height:20px;display:block"/><span class="lvl-arrow"></span>',
         iconSize: [20, 20],
         iconAnchor: [10, 10],
@@ -1353,7 +1345,7 @@ export function MapPage() {
       const icon = L.divIcon({
         className: `quest-obj-marker${allDone ? ' is-done' : ''}`,
         html:
-          `<img src="${iconUrl('quest_objective')}" alt="" data-obj-marker="${encodeURIComponent(
+          `<img src="${ICON_BASE}quest_objective.png" alt="" data-obj-marker="${encodeURIComponent(
             tid,
           )}|${encodeURIComponent(oids.join(','))}" />` +
           `<span class="quest-obj-name">${qName}</span>`,

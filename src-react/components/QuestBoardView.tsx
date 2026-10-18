@@ -4,7 +4,6 @@ import { ObjectiveChecklist } from './ObjectiveChecklist'
 import { traderImage } from '../traderImages'
 import { TRADERS, TRADER_ZH, traderDisplayName } from '../traderMeta'
 import { llLabel, questLoyaltyLevel, type GraphNode, type ItemRef } from '../types'
-import { assetUrl } from '../assetUrl'
 
 type ItemState = 'completed' | 'failed' | 'in_progress' | 'not_accepted'
 
@@ -557,7 +556,7 @@ function QuestBoardCard({
                 title={`${it.name}${it.count ? ` ×${it.count}` : ''}`}
               >
                 <img
-                  src={assetUrl(`item-icons/${it.id}.webp`)}
+                  src={`/item-icons/${it.id}.webp`}
                   alt=""
                   loading="lazy"
                   className="w-3.5 h-3.5 object-contain"

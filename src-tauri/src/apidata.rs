@@ -326,15 +326,7 @@ pub struct SyncProgress {
     pub changed: usize,
     pub label: String,
     pub force: bool,
-    /// 进度属于哪一类更新：`data`（游戏数据 JSON）/ `assets`（图片资源）。
-    /// 两类更新互相独立、可分别触发，前端据此把进度写进各自的那一行。
-    pub kind: &'static str,
 }
-
-/// 进度事件的分类：游戏数据（本模块）
-pub const KIND_DATA: &str = "data";
-/// 进度事件的分类：图片资源（`assets` 模块，由设置页「更新图片资源」按钮与启动兜底触发）
-pub const KIND_ASSETS: &str = "assets";
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -348,7 +340,7 @@ pub struct SyncReport {
     pub message: String,
 }
 
-pub(crate) fn build_agent() -> Result<ureq::Agent, String> {
+fn build_agent() -> Result<ureq::Agent, String> {
     // 启用 rustls feature 后，ureq 默认以 rustls + webpki-roots 作为 TLS 后端（移动端必须，
     // native-tls 不可用）。桌面端普通用户（直连 json.tarkov.dev）无影响；仅企业自签/代理证书场景有差异。
     Ok(ureq::AgentBuilder::new()
@@ -415,8 +407,7 @@ fn fetch_one(agent: &ureq::Agent, ep: &Endpoint, etag: Option<&str>) -> Result<F
     Ok(Fetched::Fresh(buf, new_etag))
 }
 
-/// 原子替换写入（先写 .tmp 再 rename）：图片资源同步也复用（assets.rs）
-pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
+fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, data).map_err(|e| format!("写入失败：{e}"))?;
     match std::fs::rename(&tmp, path) {
@@ -429,7 +420,6 @@ pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
 }
 
 /// 从 API 拉取全部端点并写入缓存（阻塞）。force=true 时忽略过期判断，全部重下。
-/// 只处理游戏数据 JSON —— 图片资源由 `assets` 模块独立更新（见 `lib.rs::refresh_assets`）。
 pub fn sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
     sync_with(app, force, &mut |_, _, _| {})
 }
@@ -475,7 +465,6 @@ where
                 changed: updated.len(),
                 label: ep.label.to_string(),
                 force,
-                kind: KIND_DATA,
             },
         );
         progress(i, total, ep.label);
@@ -511,9 +500,6 @@ where
     manifest.checked_at = now_secs();
     write_manifest(&dir, &manifest);
 
-    // 图片资源**不在这一步**里更新：它与游戏数据是两个独立的按钮/命令
-    // （见 lib.rs 的 refresh_assets），只是共用同一条进度事件（payload 的 kind 区分）。
-
     let _ = app.emit(
         "data-sync-progress",
         SyncProgress {
@@ -523,21 +509,19 @@ where
             changed: updated.len(),
             label: String::new(),
             force,
-            kind: KIND_DATA,
         },
     );
 
     let ok = failed.is_empty();
-    let mut parts: Vec<String> = Vec::new();
-    parts.push(if updated.is_empty() {
-        format!("已是最新：{total} 份数据文件内容均未变化")
+    let message = if ok {
+        if updated.is_empty() {
+            format!("已是最新：{total} 份文件内容均未变化，已跳过下载")
+        } else {
+            format!("已更新 {} / {} 份文件", updated.len(), total)
+        }
     } else {
-        format!("已更新 {} / {} 份数据文件", updated.len(), total)
-    });
-    if !failed.is_empty() {
-        parts.push(format!("{} 项失败：{}", failed.len(), failed.join("；")));
-    }
-    let message = parts.join("；");
+        format!("{}/{} 份文件更新失败：{}", failed.len(), total, failed.join("；"))
+    };
     let report = SyncReport {
         ok,
         updated,

@@ -1,5 +1,4 @@
 mod apidata;
-mod assets;
 mod data;
 pub mod dataset;
 mod keepawake;
@@ -1159,18 +1158,6 @@ struct DataStatusPayload {
     base: apidata::DataStatus,
     quest_count: usize,
     map_count: usize,
-    /// 图片资源（物品图标 / 商人头像 / 地图底图 / Boss 图）的本地情况
-    assets: assets::AssetsStatus,
-}
-
-/// 图片资源索引：前端启动时取一次，决定每张图走运行时资源还是随包资源
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AssetIndexPayload {
-    /// 资源目录绝对路径（空串 = 不可用，前端一律回退随包资源）
-    dir: String,
-    /// 已下载的资源相对路径（'/' 分隔）
-    files: Vec<String>,
 }
 
 /// 启动资料加载（后台线程执行，与界面进程分离）：
@@ -1219,30 +1206,11 @@ fn load_in_background(app: tauri::AppHandle) {
         spawn_sync(app.clone(), false);
     }
 
-    // 图片资源默认**不**自动同步（由设置页「更新图片资源」按钮按需触发）；
-    // 只有「一张图都没有」时（无内置资源版首次启动 / 刚换过数据目录）才在这里补齐，
-    // 否则界面到处都是破图。放在最后，不阻塞数据集读取。
-    if assets::needs_seed_download(&app) {
-        tracker.step(&app, "assets", "正在下载图片资源…");
-        let mut report = |done: usize, total: usize, label: &str| {
-            tracker.step(
-                &app,
-                "assets",
-                &format!("正在下载图片资源 {}/{}：{label}", done + 1, total),
-            );
-        };
-        match assets::sync_with(&app, false, &mut report) {
-            Ok(r) => println!("[assets] 首次图片资源下载完成：{}", assets::summary_text(&r)),
-            Err(e) => eprintln!("[assets] 首次图片资源下载失败：{e}"),
-        }
-    }
-
     // 下载失败的原因优先于「数据集为空」的报错：后者正是前者导致的
     tracker.finish(&app, download_err.or(dataset_err));
 }
 
-/// 后台同步**游戏数据**：拉取全部端点 -> 重建派生索引 -> 通知前端刷新。
-/// 图片资源不在这一步里（见 `spawn_assets_sync`），两者互不影响。
+/// 后台同步：拉取全部端点 -> 重建派生索引 -> 通知前端刷新
 fn spawn_sync(app: tauri::AppHandle, force: bool) {
     std::thread::spawn(move || match apidata::sync(&app, force) {
         Ok(report) => {
@@ -1258,65 +1226,6 @@ fn spawn_sync(app: tauri::AppHandle, force: bool) {
     });
 }
 
-/// `assets-synced` 事件载荷：一次图片资源更新的结果
-#[derive(Clone, serde::Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct AssetsSyncReport {
-    ok: bool,
-    /// 本次真正写入的文件数
-    updated: usize,
-    /// 与本地记录一致、跳过下载的张数
-    unchanged: usize,
-    /// 上游没有该图（404），不算失败
-    missing: usize,
-    bytes: u64,
-    /// 资源最近一次真正变化的时间（epoch 秒）
-    updated_at: i64,
-    failed: Vec<String>,
-    message: String,
-}
-
-/// 后台同步**图片资源**（物品图标 / 商人头像 / 地图底图 / 地图标记 / Boss 图 / 瓦片）。
-/// 与游戏数据更新完全独立（设置页两个按钮各走各的），只共用进度事件（kind = assets）。
-fn spawn_assets_sync(app: tauri::AppHandle, force: bool) {
-    std::thread::spawn(move || {
-        let emit = |running: bool, done: usize, total: usize, label: &str| {
-            let _ = app.emit(
-                "data-sync-progress",
-                apidata::SyncProgress {
-                    running,
-                    done,
-                    total,
-                    // 图片按「张」处理：这里的数字是已处理数（下载 + 判定跳过）
-                    changed: done,
-                    label: label.to_string(),
-                    force,
-                    kind: apidata::KIND_ASSETS,
-                },
-            );
-        };
-        let mut report = |done: usize, total: usize, label: &str| emit(true, done, total, label);
-        let payload = match assets::sync_with(&app, force, &mut report) {
-            Ok(r) => {
-                emit(false, r.total, r.total, "");
-                AssetsSyncReport {
-                    ok: r.failed.is_empty(),
-                    updated: r.updated.len(),
-                    unchanged: r.unchanged,
-                    missing: r.missing,
-                    bytes: r.bytes,
-                    updated_at: assets::status(&app).updated_at,
-                    message: assets::summary_text(&r),
-                    failed: r.failed,
-                }
-            }
-            // 另一次资源更新正在跑 / 资源目录不可用：界面把这一句显示在那一行即可
-            Err(e) => AssetsSyncReport { ok: false, message: e, ..Default::default() },
-        };
-        let _ = app.emit("assets-synced", payload);
-    });
-}
-
 #[tauri::command]
 fn get_data_status(app: tauri::AppHandle) -> DataStatusPayload {
     let s = dataset::store();
@@ -1324,42 +1233,16 @@ fn get_data_status(app: tauri::AppHandle) -> DataStatusPayload {
         base: apidata::status(&app),
         quest_count: s.quests.len(),
         map_count: s.maps.len(),
-        assets: assets::status(&app),
     }
 }
 
-/// 图片资源索引（前端 assetUrl 用）：资源目录 + 已下载的相对路径列表。
-/// 数据更新（data-synced）后前端会重新取一次，新下载的图片立即生效。
-#[tauri::command]
-fn get_asset_index(app: tauri::AppHandle) -> AssetIndexPayload {
-    let dir = assets::dir(&app)
-        .map(|d| d.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    AssetIndexPayload {
-        dir,
-        files: assets::index(&app),
-    }
-}
-
-/// 触发**游戏数据**更新（异步执行，进度通过 data-sync-progress / data-synced 事件下发）。
-/// 不含图片资源：那是另一条命令 `refresh_assets`。
+/// 触发数据更新（异步执行，进度通过 data-sync-progress / data-synced 事件下发）
 #[tauri::command]
 fn refresh_game_data(app: tauri::AppHandle, force: Option<bool>) -> Result<(), String> {
     if apidata::status(&app).syncing {
         return Err("数据更新正在进行中".to_string());
     }
     spawn_sync(app, force.unwrap_or(false));
-    Ok(())
-}
-
-/// 触发**图片资源**更新（异步执行，进度通过 data-sync-progress（kind=assets）
-/// 下发，结果通过 assets-synced 下发）。与 `refresh_game_data` 相互独立。
-#[tauri::command]
-fn refresh_assets(app: tauri::AppHandle, force: Option<bool>) -> Result<(), String> {
-    if assets::syncing() {
-        return Err("图片资源更新正在进行中".to_string());
-    }
-    spawn_assets_sync(app, force.unwrap_or(false));
     Ok(())
 }
 
@@ -1571,12 +1454,6 @@ pub fn run() {
             // （启动即生效；用户在设置里切换时由 set_keep_screen_on 即时同步）
             #[cfg(any(target_os = "android", target_os = "ios"))]
             crate::keepawake::apply(&handle, read_settings(&handle).keep_screen_on);
-            // 运行时下载的图片（<data_root>/tarkov-assets）经 asset: 协议暴露给前端：
-            // 前端 assetUrl() 优先用它，没下载到的资源继续走随包路径。
-            // 作用域必须在窗口加载前放行，否则前几张图会被协议挡掉。
-            if let Ok(dir) = assets::dir(&handle) {
-                let _ = app.asset_protocol_scope().allow_directory(&dir, true);
-            }
             // 同步：生成 token + 广播通道，并把现有事件桥接到广播（供手机端 WS 订阅）。
             // 仅电脑端启动服务端；手机端为客户端，无此步骤。
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1627,8 +1504,6 @@ pub fn run() {
                     set_objective_status,
                     get_data_status,
                     refresh_game_data,
-                    refresh_assets,
-                    get_asset_index,
                     get_map_markers,
                     get_quest_zones,
                     get_map_bosses,
@@ -1683,8 +1558,6 @@ pub fn run() {
                     set_objective_status,
                     get_data_status,
                     refresh_game_data,
-                    refresh_assets,
-                    get_asset_index,
                     get_map_markers,
                     get_quest_zones,
                     get_map_bosses,
