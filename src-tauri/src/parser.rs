@@ -29,6 +29,11 @@ static RE_LOCATION: Lazy<Regex> = Lazy::new(|| {
 /// 会话模式行（application_000.log 启动时一行）：`Session mode: Pve` / `Session mode: Pvp`
 static RE_SESSION_MODE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)Session mode:\s*(Pve|Pvp)").unwrap());
+/// 离开战局（撤离 / 阵亡后回到主界面）：application 日志的
+/// `CompleteSelectedProfile ProfileId:...`。BTR 跟踪据此停止倒计时。
+/// 进图前也会有 `PrepareSelectedProfileLocally`，但只有 raid 已开始时才接受本事件，
+/// 见 watcher 里的处理。
+static RE_RAID_END: Lazy<Regex> = Lazy::new(|| Regex::new(r"CompleteSelectedProfile").unwrap());
 /// 后端网关域名兜底：PvE 走 `gw-pve.escapefromtarkov.ru`，PvP 走 `gw-pvp.*`。
 /// 注意 `client/game/mode` 恒走 gw-pvp（启动器模式查询），不能作为判别依据。
 static RE_GW_MODE: Lazy<Regex> = Lazy::new(|| Regex::new(r"https?://gw-(pve|pvp)\.").unwrap());
@@ -53,6 +58,10 @@ pub enum RawEvent {
     },
     Location {
         location_id: String,
+        timestamp: String,
+    },
+    /// 离开战局（回到主界面）：BTR 跟踪据此停止计时
+    RaidEnd {
         timestamp: String,
     },
     /// 会话模式（"pve" | "pvp"），主来源为 `Session mode:` 行，兜底为网关域名
@@ -176,6 +185,10 @@ pub fn parse_chunk(text: &str, st: &mut ParseState) -> Vec<RawEvent> {
                     });
                 }
             }
+        } else if RE_RAID_END.is_match(line) {
+            out.push(RawEvent::RaidEnd {
+                timestamp: st.cur_ts.clone(),
+            });
         }
 
         i += 1;
@@ -259,10 +272,16 @@ pub struct SimplifyResult {
 /// - 任务通知（接取 / 完成）的多行 JSON 起始行（后续 JSON 行由状态机一并保留）
 /// - `Session mode:` 会话模式行（任务事件归属 pvp / pve 需要）
 /// - 任务接口请求（提交完成 / 同步任务列表）
+/// - 进图（`RaidId` + `Locations:`）与出图（`CompleteSelectedProfile`）行：
+///   BTR 路线跟踪依赖它们判断战局起点与结束，精简后仍要能继续用
 ///
-/// 进入地图（`Locations:` / `RaidId`）、资源加载等无关输出一律丢弃。
+/// 其余资源加载等无关输出一律丢弃。
 fn simplify_keep(line: &str) -> bool {
-    if RE_CHAT.is_match(line) || RE_SESSION_MODE.is_match(line) {
+    if RE_CHAT.is_match(line)
+        || RE_SESSION_MODE.is_match(line)
+        || line.contains("RaidId")
+        || RE_RAID_END.is_match(line)
+    {
         return true;
     }
     match RE_URL.captures(line) {

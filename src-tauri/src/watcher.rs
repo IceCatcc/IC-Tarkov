@@ -68,6 +68,8 @@ pub fn start(app: &AppHandle, dir: &str) -> Result<WatcherHandle, String> {
         thread::sleep(Duration::from_secs(3));
         scan_dir(&r_app, &r_dir, &r_states, &r_seen, true);
         crate::persist::save_all_from(&r_app); // 每次扫描后落盘（含新增任务与偏移）
+        // 崩溃 / 强退不会写出图日志行，用进程存在性兜底停止 BTR 倒计时
+        stop_raid_if_game_exited(&r_app);
     });
 
     Ok(WatcherHandle {
@@ -264,11 +266,44 @@ fn process_file(
                     let binding = app.state::<AppState>();
                     binding.with_active(|md| md.apply_location(&location_id))
                 };
+                // 战局起点：每次进图（含同一张图连打两局、转场到新图）都重置。
+                // 地图未变化时 map-changed 不 emit，但 raid-changed 必须发，否则第二局没有计时基准。
+                let raid = {
+                    let binding = app.state::<AppState>();
+                    let mut r = binding.raid.lock().unwrap();
+                    r.active = true;
+                    r.location_id = Some(location_id.clone());
+                    r.started_at = Some(timestamp.clone());
+                    r.ended_at = None;
+                    r.clone()
+                };
+                let _ = app.emit("raid-changed", &raid);
                 if changed {
                     let _ = app.emit(
                         "map-changed",
                         serde_json::json!({ "locationId": location_id, "timestamp": timestamp }),
                     );
+                }
+            }
+            parser::RawEvent::RaidEnd { timestamp } => {
+                // 初始扫描不处理：历史日志里的出图行与当前状态无关
+                if !emit {
+                    continue;
+                }
+                // 只有确实在战局中才结束，避免进图前的 profile 切换行误判
+                let raid = {
+                    let binding = app.state::<AppState>();
+                    let mut r = binding.raid.lock().unwrap();
+                    if r.active {
+                        r.active = false;
+                        r.ended_at = Some(timestamp);
+                        Some(r.clone())
+                    } else {
+                        None
+                    }
+                };
+                if let Some(r) = raid {
+                    let _ = app.emit("raid-changed", &r);
                 }
             }
             parser::RawEvent::SessionMode { mode, timestamp } => {
@@ -293,6 +328,54 @@ fn process_file(
             }
         }
     }
+}
+
+/// 游戏进程已退出但没收到出图事件（崩溃 / 强退）时，结束战局并广播。
+/// 只在战局进行中才查询进程，平时没有额外开销。
+fn stop_raid_if_game_exited(app: &AppHandle) {
+    let active = {
+        let st = app.state::<AppState>();
+        let r = st.raid.lock().unwrap();
+        r.active
+    };
+    if !active || game_running() {
+        return;
+    }
+    let payload = {
+        let st = app.state::<AppState>();
+        let mut r = st.raid.lock().unwrap();
+        if !r.active {
+            return;
+        }
+        r.active = false;
+        r.ended_at = Some(now());
+        r.clone()
+    };
+    let _ = app.emit("raid-changed", &payload);
+}
+
+/// 游戏主进程是否在运行。
+/// 查询失败时保守地当作「仍在运行」，避免一次偶发失败就结束计时。
+#[cfg(windows)]
+fn game_running() -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    std::process::Command::new("tasklist")
+        .args(["/FI", "IMAGENAME eq EscapeFromTarkov.exe", "/NH"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .to_ascii_lowercase()
+                .contains("escapefromtarkov.exe")
+        })
+        .unwrap_or(true)
+}
+
+/// 非 Windows 平台没有本机日志监控（移动端日志由电脑端推来），不额外判定
+#[cfg(not(windows))]
+fn game_running() -> bool {
+    true
 }
 
 fn now() -> String {

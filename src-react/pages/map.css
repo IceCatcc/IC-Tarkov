@@ -394,3 +394,18 @@ img.extract-req-icon {
         -1px -1px 2px #000,
         1px 1px 2px #000;
 }
+
+/* BTR 路线跟踪：车辆标记（divIcon 默认带白底，需清掉；站点用地图自带的 BTR 站点图标） */
+.btr-vehicle {
+    background: transparent;
+    border: none;
+}
+.btr-vehicle-box {
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.85));
+}
+.btr-vehicle-box svg {
+    width: 100%;
+    height: 100%;
+}

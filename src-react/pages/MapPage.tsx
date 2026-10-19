@@ -28,6 +28,17 @@ import { useStore } from '../store'
 import { QuestCard } from '../components/QuestCard'
 import { MapIconPanel } from '../components/MapIconPanel'
 import { GameClock } from '../components/GameClock'
+import { BtrPanel, BtrIcon, type BtrLayerState } from '../components/BtrPanel'
+import {
+  btrColor,
+  btrKeyOf,
+  btrSnapshot,
+  fmtClock,
+  loadBtrRoutes,
+  type BtrDoc,
+  type BtrMapData,
+  type BtrRoute,
+} from '../btr'
 import {
   buildIconGroups,
   resolveChipOn,
@@ -40,6 +51,15 @@ import { bossImage } from '../bossImages'
 /* ================= 常量 ================= */
 
 const ICON_BASE = 'maps/interactive/'
+
+/** BTR 车辆图标（divIcon 的 HTML；填色由外层 style 的 color + currentColor 控制） */
+const BTR_VEHICLE_SVG =
+  '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden>' +
+  '<path d="M3 14V9.5c0-.6.4-1 1-1h2l2-2.5h6L16 8.5h4c.6 0 1 .4 1 1V14c0 .6-.4 1-1 1h-1.2a2.3 2.3 0 0 1-4.6 0H9.8a2.3 2.3 0 0 1-4.6 0H4c-.6 0-1-.4-1-1Z" fill="currentColor" stroke="rgba(0,0,0,0.55)" stroke-width="1" stroke-linejoin="round"/>' +
+  '<circle cx="7.5" cy="15" r="1.9" fill="rgba(0,0,0,0.55)"/>' +
+  '<circle cx="16.5" cy="15" r="1.9" fill="rgba(0,0,0,0.55)"/>' +
+  '<path d="M9 8.5h6" stroke="rgba(0,0,0,0.45)" stroke-width="1.2" stroke-linecap="round"/>' +
+  '</svg>'
 
 // 常见英文楼层名的中文显示
 const FLOOR_NAME_ZH: Record<string, string> = {
@@ -423,6 +443,13 @@ export function MapPage() {
   const [infoOpen, setInfoOpen] = useState(true) // 右下角地图信息浮窗（默认展开）
   const [focusOpen, setFocusOpen] = useState(false) // 左下角「聚焦」浮动按钮展开面板
   const [chipsOpen, setChipsOpen] = useState(false) // 左下角「标记」浮动选单
+  // BTR 路线跟踪：路线数据（仅森林 / 街区 / 灯塔有）、面板开关、路线筛选
+  const [btrDoc, setBtrDoc] = useState<BtrDoc | null>(null)
+  // btrArmed：是否启用跟踪（面板收起后仍为 true，计时与绘制继续）；btrOpen：面板是否展开
+  const [btrArmed, setBtrArmed] = useState(false)
+  const [btrOpen, setBtrOpen] = useState(false)
+  const [btrFilter, setBtrFilter] = useState('all')
+  const raid = useStore((s) => s.raid)
 
   const [cursorCoord, setCursorCoord] = useState<{ x: number; z: number } | null>(null)
   // 三个浮窗（地图选单/任务/层级）的容器 ref：点击外部自动关闭
@@ -482,6 +509,44 @@ export function MapPage() {
     [imap, markers],
   )
 
+  // BTR 路线数据（静态资源，一次加载）：只有森林 / 街区 / 灯塔有
+  useEffect(() => {
+    let alive = true
+    loadBtrRoutes().then((d) => {
+      if (alive) setBtrDoc(d)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+  const btrKey = btrKeyOf(imap?.key)
+  const btrMap: BtrMapData | null = btrDoc && btrKey ? btrDoc.maps[btrKey] ?? null : null
+  // 战局是否就在当前查看的地图里（进图 location id -> normalizedName 后再比对）
+  const raidHere = useMemo(() => {
+    if (!raid?.locationId || !markers || !imap) return false
+    const nn =
+      markers.nameIdFallback?.[raid.locationId] ??
+      markers.nameIds?.[raid.locationId] ??
+      raid.locationId
+    return nn === imap.key
+  }, [raid?.locationId, markers, imap])
+
+  // 换到另一张 BTR 地图时，原筛选（分组 / 单条路线）可能不存在，回到「全部」
+  useEffect(() => {
+    if (!btrMap || btrFilter === 'all') return
+    const ok = btrFilter.startsWith('route:')
+      ? btrMap.routes.some((r) => r.id === btrFilter.slice(6))
+      : btrMap.groups.some((g) => g.key === btrFilter)
+    if (!ok) setBtrFilter('all')
+  }, [btrMap, btrFilter])
+
+  // 启用 BTR 跟踪时自动打开「BTR 站点」标记：站点用地图原有图标，BTR 图层不再重复画点。
+  // 切换地图后也重开一次（每张图各自的 chips 记忆可能是关闭的）
+  useEffect(() => {
+    if (!btrArmed || !btrMap) return
+    useStore.getState().setMapChip(subKey('btr:all'), true)
+  }, [btrArmed, btrMap])
+
   /* ---------- 玩家位置事件流（截图监听 + 日志地图检测） ---------- */
 
   useEffect(() => {
@@ -525,6 +590,11 @@ export function MapPage() {
   shotRef.current = shotPos
   const playerMarkerRef = useRef<L.Marker | null>(null)
   const questLayerRef = useRef<L.LayerGroup | null>(null)
+  // BTR 图层与「每秒位置更新」函数（面板通过回调驱动，不触发本组件重渲染）
+  const btrLayerRef = useRef<L.LayerGroup | null>(null)
+  const btrUpdateRef = useRef<((s: BtrLayerState) => void) | null>(null)
+  // 面板最近一次上报的状态：图层重建（换图 / 改筛选）后立即套用，不必等下一次 tick
+  const btrStateRef = useRef<BtrLayerState>({ remain: null, filter: 'all' })
   // 自动缩放 / 自动居中 / 任务跟踪 ref：地图构建 effect 与跟随 effect 通过 ref 读最新值
   const autoZoomRef = useRef(false)
   autoZoomRef.current = autoZoomMap
@@ -1389,6 +1459,97 @@ export function MapPage() {
     refreshObjectiveMarkers(map, objectivesDoneMap)
   }, [objectivesDoneMap, qzDoc, imap, chips, inProgressIds])
 
+  /* ---------- BTR 路线图层（候选路线轨迹 + BTR 当前位置） ---------- */
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    // 旧图层可能已随地图实例销毁，先判断存在再移除
+    if (btrLayerRef.current) {
+      if (map.hasLayer(btrLayerRef.current)) map.removeLayer(btrLayerRef.current)
+      btrLayerRef.current = null
+    }
+    btrUpdateRef.current = null
+    // 收起面板（btrOpen=false）不拆图层：只有「停止跟踪」才结束绘制
+    if (!btrArmed || !btrMap) return
+
+    const lg = L.layerGroup()
+    const rows: { route: BtrRoute; marker: L.Marker }[] = []
+    const routes = btrMap.routes.filter(
+      (r) => btrFilter === 'all' || r.group === btrFilter || btrFilter === `route:${r.id}`,
+    )
+    for (const route of routes) {
+      const color = btrColor(btrMap.routes.indexOf(route))
+      const focused = btrFilter === `route:${route.id}`
+      L.polyline(
+        route.path.map(([x, z]) => [z, x] as [number, number]),
+        {
+          color,
+          weight: focused ? 3.5 : 2.5,
+          opacity: btrFilter === 'all' ? 0.45 : 0.8,
+          interactive: false,
+        },
+      ).addTo(lg)
+      // 站点由地图自带的「BTR 站点」标记图层绘制（启用跟踪时会自动勾选），这里不再重复画点
+      const marker = L.marker([route.path[0][1], route.path[0][0]], {
+        icon: L.divIcon({
+          className: 'btr-vehicle',
+          html: `<div class="btr-vehicle-box" style="color:${color}">${BTR_VEHICLE_SVG}</div>`,
+          iconSize: [45, 45],
+          iconAnchor: [22, 22],
+        }),
+        zIndexOffset: 9000,
+        opacity: 0,
+      }).addTo(lg)
+      marker.bindTooltip(route.nameZh, {
+        direction: 'top',
+        className: 'marker-hover-tip',
+        offset: [0, -25],
+      })
+      // 点车/点候选路线即可只看这一条（再点一次回全部在面板里操作）
+      marker.on('click', () => setBtrFilter(`route:${route.id}`))
+      rows.push({ route, marker })
+    }
+    lg.addTo(map)
+    btrLayerRef.current = lg
+
+    // 面板每 0.5s 调一次：只动 Leaflet 标记，不触发 React 重渲染
+    btrUpdateRef.current = ({ remain }) => {
+      for (const row of rows) {
+        if (remain == null) {
+          row.marker.setOpacity(0)
+          continue
+        }
+        const snap = btrSnapshot(btrMap, row.route, remain)
+        if (snap.x == null || snap.z == null || snap.kind === 'waiting') {
+          row.marker.setOpacity(0)
+          continue
+        }
+        row.marker.setLatLng([snap.z, snap.x])
+        row.marker.setOpacity(1)
+        const eta = snap.eta == null ? '' : ` · ${fmtClock(snap.eta)}`
+        const txt =
+          snap.kind === 'stop'
+            ? `${row.route.nameZh} · 停靠 ${btrMap.stops[snap.stopId ?? '']?.nameZh ?? ''}${eta}`
+            : snap.kind === 'travel'
+              ? `${row.route.nameZh} · 前往 ${snap.nextStopName}${eta}`
+              : `${row.route.nameZh} · 已跑完`
+        row.marker.setTooltipContent(txt)
+      }
+    }
+    // 立即套用面板当前状态（子组件 effect 先于父组件，首次上报时图层还没建好）
+    btrUpdateRef.current?.(btrStateRef.current)
+
+    return () => {
+      btrUpdateRef.current = null
+      if (btrLayerRef.current && map.hasLayer(btrLayerRef.current)) {
+        map.removeLayer(btrLayerRef.current)
+      }
+      btrLayerRef.current = null
+    }
+    // markers 变化会重建 Leaflet 地图实例，BTR 图层要跟着重建
+  }, [imap, markers, btrMap, btrArmed, btrFilter])
+
   /* ---------- 渲染 ---------- */
 
   if (loadErr) {
@@ -1720,6 +1881,52 @@ export function MapPage() {
               </div>
             )}
           </div>
+          {/* BTR 路线跟踪：仅森林 / 街区 / 灯塔有路线数据。
+              面板收起后组件仍挂载（计时 / 地图绘制不中断），要彻底结束用面板里的「停止」 */}
+          {btrMap && (
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setBtrArmed(true)
+                  setBtrOpen((o) => !o)
+                }}
+                title="BTR 路线跟踪：按进图时间推算 BTR 可能的位置"
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded border shadow-lg text-[14px] transition-colors ${
+                  btrArmed
+                    ? 'border-amber text-[#d4a174] bg-amber/10'
+                    : 'border-line bg-ink-800/80 text-[#e6edf3] hover:border-amber/70'
+                }`}
+              >
+                <BtrIcon color={btrArmed ? '#d4a174' : 'currentColor'} />
+                BTR
+                <span
+                  className="text-[11px] opacity-70 transition-transform"
+                  style={{ transform: btrOpen ? 'rotate(180deg)' : 'none' }}
+                >
+                  ▼
+                </span>
+              </button>
+              {btrArmed && (
+                <BtrPanel
+                  map={btrMap}
+                  raid={raid}
+                  raidHere={raidHere}
+                  filter={btrFilter}
+                  visible={btrOpen}
+                  onFilter={setBtrFilter}
+                  onState={(s) => {
+                    btrStateRef.current = s
+                    btrUpdateRef.current?.(s)
+                  }}
+                  onClose={() => setBtrOpen(false)}
+                  onStop={() => {
+                    setBtrArmed(false)
+                    setBtrOpen(false)
+                  }}
+                />
+              )}
+            </div>
+          )}
         </div>
 
         {/* 地图信息：右下角浮动按钮 —— Boss 刷新率。

@@ -65,6 +65,23 @@ pub struct WatchStatus {
     pub error: Option<String>,
 }
 
+/// 当前战局（raid）状态：BTR 路线跟踪的计时基准。
+///
+/// 与任务模式无关（全局一份），不落盘：它描述的是「此刻游戏里是否在战局中」，
+/// 应用重启后由后续日志事件重新建立（首扫不解析进图事件）。
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RaidState {
+    /// 是否在战局中（进图事件置 true，出图事件置 false）
+    pub active: bool,
+    /// 所在地图（游戏内部 location id）
+    pub location_id: Option<String>,
+    /// 进图时间（日志时间戳，本地时间 `YYYY-MM-DD HH:mm:ss`）
+    pub started_at: Option<String>,
+    /// 出图时间（用于出图后冻结 BTR 倒计时）
+    pub ended_at: Option<String>,
+}
+
 /// 单个任务模式（PVP / PVPS / PVE）的全部数据，可直接序列化落盘。
 /// 其中 current_map（当前所在地图）与 current_mode（会话模式）只对「正在写入的模式」有意义。
 #[derive(Default, Clone, Serialize, Deserialize)]

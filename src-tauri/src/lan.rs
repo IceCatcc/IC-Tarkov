@@ -212,6 +212,8 @@ pub fn setup_lan(app: &mut tauri::App) {
     for ev in [
         "quest-event",
         "map-changed",
+        // 进图 / 出图：手机端与电脑端共用同一份战局计时（BTR 跟踪）
+        "raid-changed",
         "session-mode",
         "player-position",
         "data-reloaded",

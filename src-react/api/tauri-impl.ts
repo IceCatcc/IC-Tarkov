@@ -32,6 +32,7 @@ import type {
   DataStatus,
   ItemInfo,
   SimplifyLogResult,
+  RaidStatePayload,
 } from '../types'
 
 /**
@@ -91,6 +92,18 @@ export async function initTauri(): Promise<UnlistenFn> {
       pushToast(`进入地图：${name ?? e.payload.locationId}`, 'map')
     }),
   )
+  // 进图 / 出图：战局计时（地图页 BTR 跟踪用）。手机端由电脑端经局域网转发同一事件
+  track(
+    await listen<RaidStatePayload>('raid-changed', (e) => {
+      useStore.getState().setRaid(e.payload)
+    }),
+  )
+  getRaidState()
+    .then((r) => {
+      if (r) useStore.getState().setRaid(r)
+    })
+    .catch(() => {})
+
   // 启动时拉取后端已记录的当前地图（历史值），避免等到下一次地图变化事件
   getCurrentMap()
     .then((id) => {
@@ -341,6 +354,11 @@ export async function getPlayerPosition(): Promise<PlayerPositionPayload | null>
 
 export async function getCurrentMap(): Promise<string | null> {
   return await invoke<string | null>('get_current_map')
+}
+
+/** 当前战局状态（进图 / 出图时间）：BTR 跟踪的计时基准 */
+export async function getRaidState(): Promise<RaidStatePayload | null> {
+  return await invoke<RaidStatePayload | null>('get_raid_state')
 }
 
 export async function openDataDir(): Promise<void> {

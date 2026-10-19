@@ -30,6 +30,7 @@ import type {
   DataStatus,
   ItemInfo,
   SimplifyLogResult,
+  RaidStatePayload,
 } from '../types'
 
 /* ---------------- HTTP 基础 ---------------- */
@@ -441,6 +442,14 @@ export async function getPlayerPosition(): Promise<PlayerPositionPayload | null>
 
 export async function getCurrentMap(): Promise<string | null> {
   return request('GET', withMode('/api/current-map', useStore.getState().questMode))
+}
+
+/**
+ * 战局状态：web 端没有日志监控，拿不到进图 / 出图时间。
+ * 地图页的 BTR 跟踪退化为手动开始（输入当前战局剩余时间）。
+ */
+export async function getRaidState(): Promise<RaidStatePayload | null> {
+  return null
 }
 
 export async function openDataDir(): Promise<void> {

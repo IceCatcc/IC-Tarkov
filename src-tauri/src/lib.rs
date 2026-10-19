@@ -27,6 +27,8 @@ pub struct AppState {
     pub view_mode: Mutex<String>,
     /// 监控状态（全局：日志目录 / 会话数 / 最后扫描 / 错误）
     pub watch: Mutex<store::WatchStatus>,
+    /// 当前战局状态（进图/出图时间），BTR 跟踪的计时基准；与任务模式无关
+    pub raid: Mutex<store::RaidState>,
     pub watcher: Mutex<Option<watcher::WatcherHandle>>,
     pub screenshot: Mutex<Option<screenshots::ScreenshotHandle>>,
 }
@@ -1115,6 +1117,12 @@ fn get_current_map(app: tauri::AppHandle) -> Option<String> {
     st.with_active(|md| md.current_map.clone())
 }
 
+/// 当前战局状态（进图 / 出图时间）：地图页 BTR 跟踪用
+#[tauri::command]
+fn get_raid_state(app: tauri::AppHandle) -> store::RaidState {
+    app.state::<AppState>().raid.lock().unwrap().clone()
+}
+
 /// 当前会话模式（由日志检测得到）：pvp / pvps / pve
 #[tauri::command]
 fn get_session_mode(app: tauri::AppHandle) -> Option<String> {
@@ -1447,6 +1455,7 @@ pub fn run() {
                 active_mode: Mutex::new("pvp".to_string()),
                 view_mode: Mutex::new("pvp".to_string()),
                 watch: Mutex::new(store::WatchStatus::default()),
+                raid: Mutex::new(store::RaidState::default()),
                 watcher: Mutex::new(None),
                 screenshot: Mutex::new(None),
             });
@@ -1483,6 +1492,7 @@ pub fn run() {
                     save_settings,
                     get_player_position,
                     get_current_map,
+                    get_raid_state,
                     get_session_mode,
                     set_view_mode,
                     get_maps,
@@ -1537,6 +1547,7 @@ pub fn run() {
                     save_settings,
                     get_player_position,
                     get_current_map,
+                    get_raid_state,
                     get_session_mode,
                     set_view_mode,
                     get_maps,

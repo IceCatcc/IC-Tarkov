@@ -304,6 +304,21 @@ export interface MapChangedPayload {
   timestamp: string
 }
 
+/**
+ * 'raid-changed' 事件载荷 / get_raid_state 返回值：当前战局状态。
+ * 战局起点用于 BTR 路线跟踪的计时（地图页），出图后冻结倒计时。
+ */
+export interface RaidStatePayload {
+  /** 是否在战局中 */
+  active: boolean
+  /** 所在地图（游戏内部 location id，如 Woods / Sandbox_start） */
+  locationId: string | null
+  /** 进图时间（本地时间 `YYYY-MM-DD HH:mm:ss`） */
+  startedAt: string | null
+  /** 出图时间（出图后到此刻为止的倒计时冻结） */
+  endedAt: string | null
+}
+
 // ===== 地图页数据（后端由 tarkov.dev 原始 API JSON 派生，非本地预处理文件） =====
 
 export interface MarkerPosition {

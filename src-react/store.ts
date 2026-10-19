@@ -13,6 +13,7 @@ import type {
   Toast,
   ToastKind,
   QuestMode,
+  RaidStatePayload,
 } from './types'
 import {
   getQuestDetail,
@@ -38,6 +39,9 @@ interface AppState {
   /** 已解析的地图 normalizedName（MapPage 用 markers 映射后写回），用于切回地图页默认选中 */
   currentMap: string | null
   setCurrentMap: (m: string | null) => void
+  /** 当前战局状态（进图 / 出图时间），BTR 路线跟踪的计时基准；不在战局中为 null */
+  raid: RaidStatePayload | null
+  setRaid: (r: RaidStatePayload | null) => void
 
   settings: AppSettings
   setSettings: (s: AppSettings) => void
@@ -394,6 +398,8 @@ export const useStore = create<AppState>((set, get) => ({
   setCurrentMapId: (id) => set({ currentMapId: id }),
   currentMap: null,
   setCurrentMap: (m) => set({ currentMap: m }),
+  raid: null,
+  setRaid: (r) => set({ raid: r }),
 
   settings: {
     logDir: '',
