@@ -198,7 +198,7 @@ pub fn apply_snapshot_internal(app: &AppHandle, json: &str) -> Result<(), String
     // 前端随后 getSessionMode() 即可自动切到对应档位。桌面端有自己的日志，不采用对端模式。
     #[cfg(mobile)]
     if let Some(m) = parsed.session_mode.as_deref() {
-        let m = norm_mode(m);
+        let m = crate::store::norm_mode(m);
         let st = app.state::<crate::AppState>();
         *st.active_mode.lock().unwrap() = m.clone();
         *st.view_mode.lock().unwrap() = m;
