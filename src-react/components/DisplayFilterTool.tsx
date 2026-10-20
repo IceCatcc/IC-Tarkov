@@ -189,10 +189,18 @@ export function DisplayFilterTool() {
         setDisplays(ds)
         setElevated(admin)
         commitFilter(st)
-        const first = ds.find((d) => d.primary) ?? ds[0] ?? null
+        // 优先恢复上次选中的显示器；没有记录（首次打开 / 设备已拔掉）时退回主显示器
+        const first =
+          ds.find((d) => d.id === st.selected) ?? ds.find((d) => d.primary) ?? ds[0] ?? null
         if (first) {
           setSelectedId(first.id)
           setParamsAll(st.displays[first.id] ?? IDENTITY)
+          if (st.selected !== first.id) {
+            // 选中项要落盘：快捷键只作用于它，没有记录时会退回主显示器
+            const next = { ...st, selected: first.id }
+            commitFilter(next)
+            saveDisplayFilter(next).catch(() => {})
+          }
         }
       })
       .catch((e) => {
@@ -253,7 +261,7 @@ export function DisplayFilterTool() {
       applyTimer.current = window.setTimeout(() => {
         Promise.all(
           ids.map((id) =>
-            applyDisplayFilter(id, next).then(
+            applyDisplayFilter(id, next, nextState.selected ?? null).then(
               () => null,
               (e) => String(e),
             ),
@@ -261,7 +269,7 @@ export function DisplayFilterTool() {
         ).then((errs) => {
           const err = errs.find((e) => e)
           if (err) setStatus({ kind: 'err', text: err })
-          else setStatus({ kind: 'ok', text: `已应用到 ${ids.length} 台显示器` })
+          else setStatus({ kind: 'ok', text: '已应用' })
         })
       }, 90)
     },
@@ -282,8 +290,15 @@ export function DisplayFilterTool() {
 
   const selectDisplay = (id: string) => {
     setSelectedId(id)
-    setParamsAll(filterRef.current?.displays[id] ?? IDENTITY)
+    const cur = filterRef.current
+    setParamsAll(cur?.displays[id] ?? IDENTITY)
     setStatus(null)
+    // 选中项落盘：所有修改（含快捷键触发的）都只作用于这一台
+    if (cur && cur.selected !== id) {
+      const next = { ...cur, selected: id }
+      commitFilter(next)
+      saveDisplayFilter(next).catch(() => {})
+    }
   }
 
   useEffect(() => {
@@ -351,7 +366,11 @@ export function DisplayFilterTool() {
       setParamsAll(id ? p.state.displays[id] ?? IDENTITY : IDENTITY)
       setStatus({
         kind: 'ok',
-        text: p.preset ? `已通过快捷键切换方案「${p.preset}」` : '已通过快捷键应用方案',
+        text: p.preset
+          ? `已通过快捷键把「${p.preset}」应用到 ${
+              p.display ? p.display.replace('\\\\.\\', '') : '当前显示器'
+            }`
+          : '已通过快捷键应用方案',
       })
     }).then((f) => {
       if (cancelled) f()
@@ -451,11 +470,6 @@ export function DisplayFilterTool() {
     } catch (e) {
       setStatus({ kind: 'err', text: String(e) })
     }
-  }
-
-  const applyAll = () => {
-    if (!displays.length) return
-    pushParams(paramsRef.current, displays.map((d) => d.id))
   }
 
   const savePreset = () => {
@@ -616,11 +630,8 @@ export function DisplayFilterTool() {
               })}
             </div>
 
-            {/* 显示器级操作：跟随显示器模块，不再单独占一行 */}
+            {/* 显示器级操作：只针对选中的显示器（不再有「应用到所有」这种批量操作） */}
             <div className="flex flex-wrap items-center gap-2 border-t border-line/50 bg-[#0f141b]/40 px-3 py-2">
-              <ActionButton onClick={applyAll} tone="primary">
-                应用到所有显示器
-              </ActionButton>
               <ActionButton onClick={resetCurrent} tone="plain">
                 重置当前显示器
               </ActionButton>
@@ -628,7 +639,7 @@ export function DisplayFilterTool() {
                 重置所有显示器
               </ActionButton>
               <span className="ml-auto hidden text-[11px] text-muted/50 sm:inline">
-                拖动滑块只作用于选中的屏幕
+                参数与快捷键都只作用于选中的屏幕
               </span>
             </div>
           </Section>
@@ -788,7 +799,7 @@ export function DisplayFilterTool() {
                     : !enabled
                       ? '滤镜关闭时不注册快捷键'
                       : hotkeyCount > 0
-                        ? `已绑定 ${hotkeyCount} 个全局快捷键：游戏内直接按即切换方案`
+                        ? `已绑定 ${hotkeyCount} 个全局快捷键：只作用于当前选中的显示器`
                         : '未绑定快捷键：点右侧「未绑定」后按下组合键'}
                 </span>
                 {elevated ? (

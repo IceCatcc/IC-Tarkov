@@ -118,6 +118,8 @@ pub struct FilterChangedPayload {
     pub state: FilterState,
     /// 触发该次变更的方案名
     pub preset: Option<String>,
+    /// 本次实际作用的显示器（快捷键只改选中的那一台）
+    pub display: Option<String>,
 }
 
 /// 整机状态（持久化到 `<数据根>/display-filter.json`）
@@ -128,8 +130,11 @@ pub struct FilterState {
     pub enabled: bool,
     /// RGB 三通道联动（界面上勾「锁定 RGB 通道」）
     pub locked_rgb: bool,
+    /// 界面当前选中的显示器（设备名）；快捷键只作用于它
+    pub selected: Option<String>,
     /// 每块显示器最后一次生效的参数，键为设备名（`\\.\DISPLAY1`）
     pub displays: HashMap<String, FilterParams>,
+    /// 只保留用户自建方案（内置的「恢复默认 / 亮度+40 / +60 / +100」已移除）
     pub presets: Vec<FilterPreset>,
 }
 
@@ -138,54 +143,29 @@ impl Default for FilterState {
         Self {
             enabled: true,
             locked_rgb: true,
+            selected: None,
             displays: HashMap::new(),
-            presets: default_presets(),
+            presets: Vec::new(),
         }
     }
 }
 
-/// 内置方案（取自参考工具的预设值，塔科夫场景够亮而不糊）
-fn default_presets() -> Vec<FilterPreset> {
-    let p = |brightness: f32, contrast: f32, gamma: f32| FilterParams {
-        brightness,
-        contrast,
-        gamma_r: gamma,
-        gamma_g: gamma,
-        gamma_b: gamma,
+/// 早期版本内置的方案：现在不再提供，读档时按「名称 + 参数都吻合」清掉。
+/// 用参数一起判定，避免误删用户自己建的同名但不同参数的方案。
+fn is_builtin_preset(p: &FilterPreset) -> bool {
+    let same = |b: f32, c: f32, g: f32| {
+        (p.params.brightness - b).abs() < 1e-4
+            && (p.params.contrast - c).abs() < 1e-4
+            && (p.params.gamma_r - g).abs() < 1e-4
+            && (p.params.gamma_g - g).abs() < 1e-4
+            && (p.params.gamma_b - g).abs() < 1e-4
     };
-    vec![
-        // 「恢复默认」放最前：它是最常用的「一键回原状」
-        FilterPreset {
-            name: "恢复默认".into(),
-            params: FilterParams::default(),
-            hotkey: None,
-        },
-        FilterPreset {
-            name: "亮度+40".into(),
-            params: p(0.786_764_7, 1.198_529_4, 2.300_377_4),
-            hotkey: None,
-        },
-        FilterPreset {
-            name: "亮度+60".into(),
-            params: p(0.845_588_2, 1.617_647_1, 3.095_471_7),
-            hotkey: None,
-        },
-        FilterPreset {
-            name: "亮度+100".into(),
-            params: p(0.867_647_05, 1.845_588_3, 3.705_660_4),
-            hotkey: None,
-        },
-    ]
-}
-
-/// 老存档里「恢复默认」可能不在首位：读出后挪到最前，保证列表顺序稳定
-fn normalize_preset_order(presets: &mut Vec<FilterPreset>) {
-    const FIRST: &str = "恢复默认";
-    if let Some(pos) = presets.iter().position(|p| p.name == FIRST) {
-        if pos > 0 {
-            let p = presets.remove(pos);
-            presets.insert(0, p);
-        }
+    match p.name.as_str() {
+        "恢复默认" => same(1.0, 1.0, 1.0),
+        "亮度+40" => same(0.786_764_7, 1.198_529_4, 2.300_377_4),
+        "亮度+60" => same(0.845_588_2, 1.617_647_1, 3.095_471_7),
+        "亮度+100" => same(0.867_647_05, 1.845_588_3, 3.705_660_4),
+        _ => false,
     }
 }
 
@@ -219,7 +199,8 @@ fn load_state(app: &tauri::AppHandle) -> FilterState {
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|t| serde_json::from_str::<FilterState>(&t).ok())
         .unwrap_or_default();
-    normalize_preset_order(&mut st.presets);
+    // 老存档里可能还留着内置方案：按值判定后清掉（用户自建方案原样保留）
+    st.presets.retain(|p| !is_builtin_preset(p));
     st
 }
 
@@ -665,13 +646,22 @@ mod hotkeys {
         }
     }
 
-    /// 命中快捷键：方案应用到**所有**显示器，落盘并通知界面刷新
+    /// 命中快捷键：方案只应用到**界面上选中的那台**显示器，落盘并通知界面刷新。
+    /// 没有选中记录（老存档 / 刚装好还没打开过工具）时退回主显示器，再不行退回第一台。
     fn fire(app: &tauri::AppHandle, preset: &FilterPreset) {
         let mut st = load_state(app);
-        for d in enumerate() {
-            if apply_to_device(&d.id, Some(&preset.params)).is_ok() {
-                st.displays.insert(d.id, preset.params);
-            }
+        let displays = enumerate();
+        let target = st
+            .selected
+            .clone()
+            .filter(|id| displays.iter().any(|d| &d.id == id))
+            .or_else(|| displays.iter().find(|d| d.primary).map(|d| d.id.clone()))
+            .or_else(|| displays.first().map(|d| d.id.clone()));
+        let Some(target) = target else {
+            return;
+        };
+        if apply_to_device(&target, Some(&preset.params)).is_ok() {
+            st.displays.insert(target.clone(), preset.params);
         }
         // store_state 内部会再 sync 一次，指纹未变即直接返回
         let _ = store_state(app, &st);
@@ -680,6 +670,7 @@ mod hotkeys {
             FilterChangedPayload {
                 state: st,
                 preset: Some(preset.name.clone()),
+                display: Some(target),
             },
         );
     }
@@ -705,16 +696,23 @@ pub fn save_display_filter(app: tauri::AppHandle, state: FilterState) -> Result<
     store_state(&app, &state)
 }
 
-/// 把参数应用到一台显示器，并记进存档（重启后自动复现）
+/// 把参数应用到一台显示器，并记进存档（重启后自动复现）。
+///
+/// `selected` 由前端带上当前选中的显示器：这个命令会把整份状态写回磁盘，若只从存档里读
+/// `selected`，前端刚切过显示器但落盘还没到头时会用旧值覆盖（快捷键随后就会作用错屏）。
 #[tauri::command]
 pub fn apply_display_filter(
     app: tauri::AppHandle,
     display_id: String,
     params: FilterParams,
+    selected: Option<String>,
 ) -> Result<(), String> {
     let p = params.sanitized();
     apply_to_device(&display_id, Some(&p))?;
     let mut st = load_state(&app);
+    if selected.is_some() {
+        st.selected = selected;
+    }
     st.displays.insert(display_id, p);
     store_state(&app, &st)
 }

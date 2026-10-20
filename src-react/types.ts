@@ -123,8 +123,11 @@ export interface DisplayFilterState {
   enabled: boolean
   /** RGB 三通道联动 */
   lockedRgb: boolean
+  /** 界面当前选中的显示器（设备名）；快捷键只作用于它 */
+  selected?: string | null
   /** 每块显示器最后一次生效的参数，键为设备名 */
   displays: Record<string, DisplayFilterParams>
+  /** 只有用户自建方案（内置预设已移除） */
   presets: DisplayFilterPreset[]
 }
 
@@ -133,6 +136,8 @@ export interface DisplayFilterChangedPayload {
   state: DisplayFilterState
   /** 触发该次变更的方案名（命中快捷键时非空） */
   preset: string | null
+  /** 本次实际作用的显示器（快捷键只改选中的那一台） */
+  display: string | null
 }
 
 /** 精简日志结果（桌面端）：就地清掉游戏日志里的无关输出 */

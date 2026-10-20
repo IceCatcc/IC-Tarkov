@@ -461,6 +461,7 @@ export async function saveDisplayFilter(_state: DisplayFilterState): Promise<voi
 export async function applyDisplayFilter(
   _displayId: string,
   _params: DisplayFilterParams,
+  _selected?: string | null,
 ): Promise<void> {
   throw new Error(NOT_SUPPORTED)
 }

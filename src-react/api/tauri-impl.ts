@@ -374,12 +374,13 @@ export async function saveDisplayFilter(state: DisplayFilterState): Promise<void
   await invoke('save_display_filter', { state })
 }
 
-/** 把参数下发到一台显示器并记入存档 */
+/** 把参数下发到一台显示器并记入存档；selected 同步落盘（快捷键的目标） */
 export async function applyDisplayFilter(
   displayId: string,
   params: DisplayFilterParams,
+  selected?: string | null,
 ): Promise<void> {
-  await invoke('apply_display_filter', { displayId, params })
+  await invoke('apply_display_filter', { displayId, params, selected: selected ?? null })
 }
 
 /** 还原显示器：省略 displayId 表示还原全部 */

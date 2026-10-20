@@ -44,7 +44,7 @@ const TOOLS: ToolDef[] = [
   {
     key: 'display-filter',
     name: '显示器滤镜',
-    desc: '直接调整显卡输出：亮度、对比度、RGB Gamma，可存成方案一键切换（全屏游戏同样生效）',
+    desc: '按显示器调亮度 / 对比度 / RGB Gamma，方案可绑快捷键，只作用于选中的屏幕（全屏游戏同样生效）',
     icon: (
       <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="1.7">
         <rect x="2.5" y="4" width="19" height="12.5" rx="1.8" />
