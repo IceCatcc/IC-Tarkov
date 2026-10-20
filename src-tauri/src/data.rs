@@ -360,6 +360,12 @@ pub fn get_items() -> Vec<dataset::ItemInfo> {
     store().items.clone()
 }
 
+/// 全部藏身处配方（工具页「配方查询」用）：设施中文名、等级、时长，
+/// 材料与产物带中文名与跳蚤 24h 均价。
+pub fn get_crafts() -> Vec<dataset::CraftInfo> {
+    store().crafts.clone()
+}
+
 /// 全量任务图谱（不含玩家状态，前端按 id 合并）。
 /// 边取 pvp/pve 两套前置的并集：模式专属边的一端节点会被前端按模式隐藏，绘制时自动跳过。
 pub fn get_graph() -> QuestGraph {

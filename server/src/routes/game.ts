@@ -20,6 +20,9 @@ export function registerGameRoutes(app: FastifyInstance): void {
 
   app.get('/api/items', async () => qi.getItems())
 
+  /** 藏身处配方（工具 → 配方查询）。派生文档尚未移植时返回空数组，前端显示为空。 */
+  app.get('/api/crafts', async () => derived.getOr('crafts', []))
+
   app.get('/api/maps', async () => qi.getMaps())
 
   app.get('/api/collector-quest-id', async () => qi.collectorQuestId())

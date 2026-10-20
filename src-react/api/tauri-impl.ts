@@ -31,6 +31,7 @@ import type {
   SkeletonDoc,
   DataStatus,
   ItemInfo,
+  CraftInfo,
   SimplifyLogResult,
   RaidStatePayload,
 } from '../types'
@@ -312,6 +313,11 @@ export async function getQuestGraph(): Promise<QuestGraph> {
 /** 全部物品目录（物品列表用）：id + 中文名 + 主类型 */
 export async function getItems(): Promise<ItemInfo[]> {
   return await invoke<ItemInfo[]>('get_items')
+}
+
+/** 全部藏身处配方（工具 → 配方查询）：材料与产物都带跳蚤 24h 均价 */
+export async function getCrafts(): Promise<CraftInfo[]> {
+  return await invoke<CraftInfo[]>('get_crafts')
 }
 
 export async function getQuestDetail(questId: string): Promise<QuestDetail | null> {

@@ -29,6 +29,7 @@ import type {
   SkeletonDoc,
   DataStatus,
   ItemInfo,
+  CraftInfo,
   SimplifyLogResult,
   RaidStatePayload,
 } from '../types'
@@ -384,6 +385,10 @@ export async function getQuestGraph(): Promise<QuestGraph> {
 
 export async function getItems(): Promise<ItemInfo[]> {
   return request('GET', '/api/items')
+}
+
+export async function getCrafts(): Promise<CraftInfo[]> {
+  return request('GET', '/api/crafts')
 }
 
 export async function getQuestDetail(questId: string): Promise<QuestDetail | null> {

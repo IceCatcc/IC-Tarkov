@@ -44,6 +44,10 @@ pub const ENDPOINTS: &[Endpoint] = &[
     // 物品类别（types）：仅用于收藏家物品「按类型」排序；体积较大且为可选数据，
     // 老数据包里没有该文件时功能自动退化为按默认顺序
     Endpoint { file: "regular_items.json", path: "regular/items", label: "物品类别" },
+    // 藏身处配方 / 设施：工具页「配方查询」用；老数据包里没有时该工具显示为空
+    Endpoint { file: "regular_crafts.json", path: "regular/crafts", label: "藏身处配方" },
+    Endpoint { file: "regular_hideout.json", path: "regular/hideout", label: "藏身处设施" },
+    Endpoint { file: "regular_hideout_zh.json", path: "regular/hideout_zh", label: "藏身处中文" },
 ];
 
 const BASE_URL: &str = "https://json.tarkov.dev";

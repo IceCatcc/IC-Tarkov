@@ -15,7 +15,7 @@ import { LanConnectModal } from './LanConnectModal'
 import { WinControls } from './WinControls'
 
 const NAV_ITEMS: {
-  key: 'monitor' | 'graph' | 'map' | 'collector' | 'items'
+  key: 'monitor' | 'graph' | 'map' | 'collector' | 'items' | 'tools'
   label: string
 }[] = [
   { key: 'monitor', label: '监控' },
@@ -23,6 +23,7 @@ const NAV_ITEMS: {
   { key: 'graph', label: '任务' },
   { key: 'collector', label: '收藏家' },
   { key: 'items', label: '物品' },
+  { key: 'tools', label: '工具' },
 ]
 
 // 顶部栏不再放帮助按钮：帮助入口统一在设置页左下角（另有首次启动自动弹出）

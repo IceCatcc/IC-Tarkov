@@ -1107,6 +1107,11 @@ fn get_items() -> Vec<dataset::ItemInfo> {
 }
 
 #[tauri::command]
+fn get_crafts() -> Vec<dataset::CraftInfo> {
+    data::get_crafts()
+}
+
+#[tauri::command]
 fn get_quest_detail(quest_id: String) -> Option<data::QuestDetail> {
     data::get_detail(&quest_id)
 }
@@ -1488,6 +1493,7 @@ pub fn run() {
                     get_quest_graph,
                     get_quest_detail,
                     get_items,
+                    get_crafts,
                     get_settings,
                     save_settings,
                     get_player_position,
@@ -1543,6 +1549,7 @@ pub fn run() {
                     get_quest_graph,
                     get_quest_detail,
                     get_items,
+                    get_crafts,
                     get_settings,
                     save_settings,
                     get_player_position,

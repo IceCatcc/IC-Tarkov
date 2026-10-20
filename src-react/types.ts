@@ -118,6 +118,39 @@ export interface ItemInfo {
   caliber?: string | null
 }
 
+/** 藏身处配方里的一项物品（材料或产物） */
+export interface CraftItem {
+  id: string
+  /** 中文名（数据缺失时退化为 id） */
+  name: string
+  /** 物品主类型中文名（如「医疗」）；无数据时为 null */
+  category?: string | null
+  count: number
+  /** 跳蚤市场 24h 均价（₽）；不可上跳蚤 / 数据缺失时为 null */
+  price?: number | null
+  /** 工具类材料：配方里不消耗（如工具钳） */
+  tool: boolean
+  /** 任务限定材料：需要先完成任务才能拿到 */
+  quest: boolean
+}
+
+/** 藏身处配方（工具页「配方查询」用） */
+export interface CraftInfo {
+  id: string
+  /** 设施 id */
+  stationId: string
+  /** 设施中文名（如「医疗站」） */
+  station: string
+  /** 设施等级 */
+  level: number
+  /** 制作时长（秒） */
+  duration: number
+  /** 产物 */
+  product: CraftItem
+  /** 材料（含工具与任务限定材料，见 CraftItem 的 tool / quest） */
+  required: CraftItem[]
+}
+
 export interface ObjectiveInfo {
   /** 目标 id（上游 objective id）：用于单独标记该目标是否完成 */
   id: string

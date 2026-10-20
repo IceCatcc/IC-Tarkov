@@ -38,6 +38,9 @@ ENDPOINTS = [
     ("regular_traders.json", "regular/traders", "商人"),
     ("regular_traders_zh.json", "regular/traders_zh", "商人中文本地化"),
     ("regular_items_zh.json", "regular/items_zh", "物品中文本地化"),
+    ("regular_crafts.json", "regular/crafts", "藏身处配方"),
+    ("regular_hideout.json", "regular/hideout", "藏身处设施"),
+    ("regular_hideout_zh.json", "regular/hideout_zh", "藏身处中文本地化"),
 ]
 
 TIMEOUT = 120

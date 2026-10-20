@@ -30,7 +30,7 @@ import { buildWikiUrl, type WikiSite } from './wiki'
 import { ICON_DEFAULTS, migrateChips } from './mapIconGroups'
 
 interface AppState {
-  page: 'monitor' | 'graph' | 'map' | 'collector' | 'items'
+  page: 'monitor' | 'graph' | 'map' | 'collector' | 'items' | 'tools'
   setPage: (p: AppState['page']) => void
 
   /** 当前游戏所在地图（游戏内部 location id，如 factory4_day），由全局 map-changed 事件写入，任何页面生效 */

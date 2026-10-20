@@ -20,6 +20,7 @@ import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
 import { CollectorPage } from './pages/CollectorPage'
 import { ItemsPage } from './pages/ItemsPage'
+import { ToolsPage } from './pages/ToolsPage'
 import { MapPage } from './pages/MapPage'
 import SettingsModal from './components/SettingsModal'
 import { HelpModal } from './components/HelpModal'
@@ -81,6 +82,11 @@ export default function App() {
   const [itemsAlive, setItemsAlive] = useState(false)
   useEffect(() => {
     if (page === 'items') setItemsAlive(true)
+  }, [page])
+  // 工具页 keepAlive：同上（缓存配方数据与搜索状态）
+  const [toolsAlive, setToolsAlive] = useState(false)
+  useEffect(() => {
+    if (page === 'tools') setToolsAlive(true)
   }, [page])
   // 收藏家追踪关闭时导航不再显示「收藏家」页签；若正停留在该页（开关被关掉 /
   // 从设置或局域网同步恢复了关闭态），踢回监控页，避免出现无页签可点的死角
@@ -295,6 +301,11 @@ export default function App() {
         {itemsAlive && (
           <div className="h-full" style={{ display: page === 'items' ? 'block' : 'none' }}>
             <ItemsPage />
+          </div>
+        )}
+        {toolsAlive && (
+          <div className="h-full" style={{ display: page === 'tools' ? 'block' : 'none' }}>
+            <ToolsPage />
           </div>
         )}
         {mapAlive && (

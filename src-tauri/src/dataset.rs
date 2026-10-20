@@ -56,6 +56,44 @@ pub struct ItemInfo {
     pub caliber: Option<String>,
 }
 
+/// 藏身处配方里的一项物品（材料或产物）：名称 + 数量 + 跳蚤均价。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CraftItem {
+    pub id: String,
+    /// 中文名（zh_items 缺失时退化为 id）
+    pub name: String,
+    /// 物品主类型中文名（如「医疗」）；数据包缺少物品类别文件时为 None
+    pub category: Option<String>,
+    pub count: i64,
+    /// 跳蚤市场 24h 均价（₽）：优先 avg24hPrice，退化到 lastLowPrice；
+    /// 不可上跳蚤 / 数据包缺少物品价格时为 None
+    pub price: Option<i64>,
+    /// 是否为工具类材料（配方里不消耗，如工具钳）
+    pub tool: bool,
+    /// 是否为任务限定材料（requiredQuestItems：需要先完成任务才能拿到）
+    pub quest: bool,
+}
+
+/// 藏身处配方（工具页「配方查询」用）
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CraftInfo {
+    pub id: String,
+    /// 设施 id（hideout 站点的 id）
+    pub station_id: String,
+    /// 设施中文名（如「医疗站」）；查不到时退化到 normalizedName / id
+    pub station: String,
+    /// 设施等级
+    pub level: i64,
+    /// 制作时长（秒）
+    pub duration: i64,
+    /// 产物
+    pub product: CraftItem,
+    /// 材料（含工具与任务限定材料，见 CraftItem 的 tool / quest）
+    pub required: Vec<CraftItem>,
+}
+
 #[derive(Clone)]
 pub struct Objective {
     /// 目标 id（上游 objective id；缺失时用「任务id#序号」兜底），用于单独标记目标完成
@@ -131,6 +169,8 @@ pub struct Store {
     pub fail_map: HashMap<String, Vec<String>>,
     /// 物品目录（物品列表用）：全部物品 id -> 中文名 / 主类型
     pub items: Vec<ItemInfo>,
+    /// 藏身处配方（工具页「配方查询」用）
+    pub crafts: Vec<CraftInfo>,
 }
 
 impl Store {
@@ -145,6 +185,7 @@ impl Store {
             skeleton: Value::Object(Map::new()),
             fail_map: HashMap::new(),
             items: Vec::new(),
+            crafts: Vec::new(),
         }
     }
 }
@@ -232,6 +273,12 @@ pub struct Raw {
     /// 原始物品数据（regular_items.json 的 /data/items）：含 properties（网格/穿透）与
     /// backgroundColor 等二级属性；老数据包缺该文件时为空
     pub items_raw: serde_json::Map<String, Value>,
+    /// 藏身处配方原始数组（regular_crafts.json 的 /data）：老数据包缺该文件时为空
+    pub crafts: Vec<Value>,
+    /// 藏身处设施（regular_hideout.json 的 /data：设施 id -> 设施对象）
+    pub hideout: Map<String, Value>,
+    /// 藏身处本地化（regular_hideout_zh.json 的 /data：文案 key -> 中文）
+    pub zh_hideout: HashMap<String, String>,
 }
 
 fn read_json(dir: &Path, file: &str) -> Result<Value, String> {
@@ -293,6 +340,24 @@ impl Raw {
             .and_then(|doc| doc.pointer("/data/items").and_then(|v| v.as_object()).cloned())
             .unwrap_or_default();
 
+        progress("正在读取藏身处配方…");
+        // 藏身处配方 / 设施：同样是可选数据（老数据包没有时工具页显示为空）
+        let crafts_doc = read_json(dir, "regular_crafts.json").ok();
+        let hideout_doc = read_json(dir, "regular_hideout.json").ok();
+        let zh_hideout_doc = read_json(dir, "regular_hideout_zh.json").ok();
+        let crafts = crafts_doc
+            .as_ref()
+            .and_then(|doc| doc.pointer("/data").and_then(|v| v.as_array()).cloned())
+            .unwrap_or_default();
+        let hideout = hideout_doc
+            .as_ref()
+            .and_then(|doc| doc.pointer("/data").and_then(|v| v.as_object()).cloned())
+            .unwrap_or_default();
+        let zh_hideout = zh_hideout_doc
+            .as_ref()
+            .map(|doc| as_str_map(doc.get("data").unwrap_or(&Value::Null)))
+            .unwrap_or_default();
+
         let maps_data = maps_doc.get("data").cloned().unwrap_or(Value::Null);
 
         Ok(Raw {
@@ -316,6 +381,9 @@ impl Raw {
             zh_items: as_str_map(zh_items_doc.get("data").unwrap_or(&Value::Null)),
             item_types,
             items_raw,
+            crafts,
+            hideout,
+            zh_hideout,
         })
     }
 }
@@ -521,6 +589,98 @@ fn build_items(raw: &Raw) -> Vec<ItemInfo> {
     }
     items.sort_by(|a, b| a.name.cmp(&b.name));
     items
+}
+
+// ---------------- 藏身处配方 ----------------
+
+/// 跳蚤市场 24h 均价：优先 avg24hPrice，退化到 lastLowPrice；<= 0 或缺失视为无价格
+/// （不可上跳蚤的物品，如任务物品 / 卢布本身）。
+fn item_price(raw: &Raw, id: &str) -> Option<i64> {
+    let it = raw.items_raw.get(id)?;
+    ["avg24hPrice", "lastLowPrice"]
+        .iter()
+        .filter_map(|k| it.get(*k).and_then(|v| v.as_f64()))
+        .find(|p| *p > 0.0)
+        .map(|p| p.round() as i64)
+}
+
+/// 设施中文名：hideout 站点的 name 是文案 key（如 hideout_area_13_name），
+/// 用 regular_hideout_zh 翻成中文；查不到时退化到 normalizedName / id。
+fn station_name(raw: &Raw, station_id: &str) -> String {
+    let Some(st) = raw.hideout.get(station_id) else {
+        return station_id.to_string();
+    };
+    let key = s(st, "name").unwrap_or("");
+    if let Some(zh) = raw.zh_hideout.get(key) {
+        if !zh.trim().is_empty() {
+            return zh.trim().to_string();
+        }
+    }
+    s(st, "normalizedName")
+        .unwrap_or(station_id)
+        .to_string()
+}
+
+/// 配方里的一项物品（材料 / 产物）；缺 item id 时返回 None
+fn craft_item(raw: &Raw, v: Option<&Value>, tool: bool, quest: bool) -> Option<CraftItem> {
+    let v = v?;
+    let id = s(v, "item")?.to_string();
+    Some(CraftItem {
+        name: item_name(raw, &id),
+        category: raw.item_types.get(&id).cloned(),
+        count: v.get("count").and_then(|x| x.as_i64()).unwrap_or(1),
+        price: item_price(raw, &id),
+        tool,
+        quest,
+        id,
+    })
+}
+
+/// 从原始数据构建藏身处配方（设施中文化、材料/产物中文名 + 跳蚤均价）。
+/// 无配方数据时返回空列表，工具页显示为空。
+fn build_crafts(raw: &Raw) -> Vec<CraftInfo> {
+    let mut out: Vec<CraftInfo> = Vec::with_capacity(raw.crafts.len());
+    for c in &raw.crafts {
+        // 产物缺失的条目（数据异常）直接跳过：没有产物就没有查询意义
+        let Some(product) = craft_item(raw, c.get("productItem"), false, false) else {
+            continue;
+        };
+        let mut required: Vec<CraftItem> = Vec::new();
+        for it in arr(c, "requiredItems") {
+            let tool = it
+                .get("attributes")
+                .and_then(|a| a.get("tool"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if let Some(ci) = craft_item(raw, Some(it), tool, false) {
+                required.push(ci);
+            }
+        }
+        // 任务限定材料（需要先完成任务才能拿到），单独标出来避免误算成可购买成本
+        for it in arr(c, "requiredQuestItems") {
+            if let Some(ci) = craft_item(raw, Some(it), false, true) {
+                required.push(ci);
+            }
+        }
+        let station_id = s(c, "station").unwrap_or("").to_string();
+        out.push(CraftInfo {
+            id: s(c, "id").unwrap_or("").to_string(),
+            station: station_name(raw, &station_id),
+            station_id,
+            level: c.get("level").and_then(|v| v.as_i64()).unwrap_or(0),
+            duration: c.get("duration").and_then(|v| v.as_i64()).unwrap_or(0),
+            product,
+            required,
+        });
+    }
+    // 按「设施 → 等级 → 产物名」排序，前端列表与详情里的顺序稳定
+    out.sort_by(|a, b| {
+        a.station
+            .cmp(&b.station)
+            .then(a.level.cmp(&b.level))
+            .then(a.product.name.cmp(&b.product.name))
+    });
+    out
 }
 
 fn trader_name(raw: &Raw, trader_id: &str) -> String {
@@ -1667,6 +1827,8 @@ pub fn build_from_dir_with(
     let skeleton = build_skeleton(skeleton, &map_meta);
     progress("正在构建物品索引…");
     let items = build_items(&raw);
+    progress("正在构建藏身处配方…");
+    let crafts = build_crafts(&raw);
     progress("正在整理任务互斥关系…");
     // 互斥关系反向索引：别人完成了会让谁失败
     let mut fail_map: HashMap<String, Vec<String>> = HashMap::new();
@@ -1688,6 +1850,7 @@ pub fn build_from_dir_with(
         skeleton,
         fail_map,
         items,
+        crafts,
     })
 }
 
