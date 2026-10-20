@@ -431,7 +431,14 @@ function ItemCard({
   )
 }
 
-export function ItemsPage() {
+/**
+ * 物品目录。
+ *
+ * 现在是工具页里的一个工具（`embedded`：外层已有工具名与容器，所以不画自己的大标题），
+ * 也可以当整页独立使用（不传 `embedded`，自带标题）。
+ * 无论哪种模式都保留自身滚动区，因此外层容器必须给它确定高度（`h-full`）且不加内边距。
+ */
+export function ItemsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [items, setItems] = useState<ItemInfo[]>([])
   const [graph, setGraph] = useState<QuestGraph | null>(null)
   const [loading, setLoading] = useState(true)
@@ -633,9 +640,10 @@ export function ItemsPage() {
   return (
     <div className="h-full flex flex-col">
       {/* 头部：标题 + 搜索 + 类型（弹药另有口径） */}
-      <div className="shrink-0 px-4 pt-4 pb-3 space-y-3">
+      {/* 内嵌在工具页时上方已有工具标题栏，顶部留白收紧一点 */}
+      <div className={`shrink-0 px-4 ${embedded ? 'pt-1' : 'pt-4'} pb-3 space-y-3`}>
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-[17px] font-medium">物品</h1>
+          {!embedded && <h1 className="text-[17px] font-medium">物品</h1>}
           <span className="text-[14px] text-muted">
             共 {filtered.length} 个
           </span>

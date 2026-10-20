@@ -73,6 +73,42 @@ body {
   animation: boot-bar 1.2s ease-in-out infinite;
 }
 
+/* 显示器滤镜的滑块：轨道按通道色填充，滑块自带辉光（WebView2 / Chromium 内核） */
+.df-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    var(--df-accent, #ef9f27) 0%,
+    var(--df-accent, #ef9f27) var(--df-fill, 50%),
+    #21262d var(--df-fill, 50%),
+    #21262d 100%
+  );
+  outline: none;
+  cursor: pointer;
+}
+.df-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f2f5f8;
+  border: 2px solid var(--df-accent, #ef9f27);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.06), 0 1px 4px rgba(0, 0, 0, 0.65);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.df-range:hover::-webkit-slider-thumb {
+  transform: scale(1.1);
+  box-shadow: 0 0 0 5px rgba(255, 255, 255, 0.09), 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+.df-range:active::-webkit-slider-thumb {
+  transform: scale(1.16);
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.12), 0 1px 8px rgba(0, 0, 0, 0.75);
+}
+
 /* 版本说明（markdown 渲染）基础排版 */
 .release-notes h1,
 .release-notes h2,

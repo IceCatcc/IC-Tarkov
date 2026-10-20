@@ -12,6 +12,9 @@ mod watcher;
 // 局域网同步服务端（axum 等）仅电脑端编译；手机端是纯 WS 客户端，不编译该模块
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod lan;
+// 显示器滤镜（显卡 gamma ramp）：仅电脑端；非 Windows 的桌面平台编译为空实现
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod display;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1437,6 +1440,9 @@ pub(crate) fn emit_progress(app: &tauri::AppHandle, endpoint: &str, timestamp: &
 // 生成 JavaVM 启动符号；桌面端无影响。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 提权重启拉起的进程：Windows 会给控制台子系统的 debug 构建开一个黑框，先隐藏掉
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    display::hide_console_if_relaunched();
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     #[cfg(mobile)]
     let builder = builder
@@ -1476,6 +1482,9 @@ pub fn run() {
             // 与派生索引重建）放到后台线程，setup（Tauri 主线程）立即返回，
             // 窗口先出首帧并显示「读取中 xx」步骤。
             std::thread::spawn(move || load_in_background(handle));
+            // 显示器滤镜：gamma ramp 不跨重启 / 驱动重置保留，按存档复现一次
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            crate::display::restore_on_startup(app.handle());
             Ok(())
         })
         .invoke_handler({
@@ -1532,7 +1541,14 @@ pub fn run() {
                     sync::apply_snapshot,
                     sync::get_sync_summary,
                     lan::resolve_lan_conflict,
-                    keepawake::set_keep_screen_on
+                    keepawake::set_keep_screen_on,
+                    display::list_displays,
+                    display::get_display_filter,
+                    display::save_display_filter,
+                    display::apply_display_filter,
+                    display::reset_display_filter,
+                    display::is_elevated,
+                    display::relaunch_as_admin
                 ]
             }
             // 手机端：纯 WS 客户端，不注册局域网同步服务端命令

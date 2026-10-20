@@ -14,15 +14,15 @@ import { LanSyncModal } from './LanSyncModal'
 import { LanConnectModal } from './LanConnectModal'
 import { WinControls } from './WinControls'
 
+// 「物品」不再是独立页签：物品图鉴已并入「工具」页（ToolsPage 的 items 工具）
 const NAV_ITEMS: {
-  key: 'monitor' | 'graph' | 'map' | 'collector' | 'items' | 'tools'
+  key: 'monitor' | 'graph' | 'map' | 'collector' | 'tools'
   label: string
 }[] = [
   { key: 'monitor', label: '监控' },
   { key: 'map', label: '地图' },
   { key: 'graph', label: '任务' },
   { key: 'collector', label: '收藏家' },
-  { key: 'items', label: '物品' },
   { key: 'tools', label: '工具' },
 ]
 

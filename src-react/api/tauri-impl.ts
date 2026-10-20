@@ -34,6 +34,9 @@ import type {
   CraftInfo,
   SimplifyLogResult,
   RaidStatePayload,
+  DisplayInfo,
+  DisplayFilterParams,
+  DisplayFilterState,
 } from '../types'
 
 /**
@@ -352,6 +355,46 @@ export async function setKeepScreenOn(enable: boolean): Promise<AppSettings> {
 
 export async function openUrl(url: string): Promise<void> {
   await invoke('open_url', { url })
+}
+
+/* ---------------- 显示器滤镜（显卡 gamma ramp） ---------------- */
+
+/** 枚举已接入的显示器（非 Windows 桌面 / 浏览器端为空列表） */
+export async function listDisplays(): Promise<DisplayInfo[]> {
+  return await invoke<DisplayInfo[]>('list_displays')
+}
+
+/** 读取整机滤镜状态（含内置方案） */
+export async function getDisplayFilter(): Promise<DisplayFilterState> {
+  return await invoke<DisplayFilterState>('get_display_filter')
+}
+
+/** 只落盘不改变画面（总开关、方案增删等） */
+export async function saveDisplayFilter(state: DisplayFilterState): Promise<void> {
+  await invoke('save_display_filter', { state })
+}
+
+/** 把参数下发到一台显示器并记入存档 */
+export async function applyDisplayFilter(
+  displayId: string,
+  params: DisplayFilterParams,
+): Promise<void> {
+  await invoke('apply_display_filter', { displayId, params })
+}
+
+/** 还原显示器：省略 displayId 表示还原全部 */
+export async function resetDisplayFilter(displayId?: string): Promise<void> {
+  await invoke('reset_display_filter', { displayId: displayId ?? null })
+}
+
+/** 当前进程是否以管理员身份运行（游戏提权运行时需要同级权限才能收到全局热键） */
+export async function isElevated(): Promise<boolean> {
+  return await invoke<boolean>('is_elevated')
+}
+
+/** 以管理员身份重启本程序（弹 UAC，成功后当前进程退出） */
+export async function relaunchAsAdmin(): Promise<void> {
+  await invoke('relaunch_as_admin')
 }
 
 export async function getPlayerPosition(): Promise<PlayerPositionPayload | null> {

@@ -32,6 +32,9 @@ import type {
   CraftInfo,
   SimplifyLogResult,
   RaidStatePayload,
+  DisplayInfo,
+  DisplayFilterParams,
+  DisplayFilterState,
 } from '../types'
 
 /* ---------------- HTTP 基础 ---------------- */
@@ -437,6 +440,41 @@ export async function setKeepScreenOn(_enable: boolean): Promise<AppSettings> {
 
 export async function openUrl(url: string): Promise<void> {
   window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+/* ---------------- 显示器滤镜（仅桌面端） ---------------- */
+
+/** 浏览器端看不到本机显示器，返回空列表（界面据此提示需要桌面端） */
+export async function listDisplays(): Promise<DisplayInfo[]> {
+  return []
+}
+
+/** 浏览器端没有显示设备状态，返回空状态 */
+export async function getDisplayFilter(): Promise<DisplayFilterState> {
+  return { enabled: false, lockedRgb: true, displays: {}, presets: [] }
+}
+
+export async function saveDisplayFilter(_state: DisplayFilterState): Promise<void> {
+  throw new Error(NOT_SUPPORTED)
+}
+
+export async function applyDisplayFilter(
+  _displayId: string,
+  _params: DisplayFilterParams,
+): Promise<void> {
+  throw new Error(NOT_SUPPORTED)
+}
+
+export async function resetDisplayFilter(_displayId?: string): Promise<void> {
+  throw new Error(NOT_SUPPORTED)
+}
+
+export async function isElevated(): Promise<boolean> {
+  return false
+}
+
+export async function relaunchAsAdmin(): Promise<void> {
+  throw new Error(NOT_SUPPORTED)
 }
 
 /* ---------------- 本机能力（web 端不可用） ---------------- */

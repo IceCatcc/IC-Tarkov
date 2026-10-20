@@ -1,5 +1,7 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { CraftTool } from '../components/CraftTool'
+import { DisplayFilterTool } from '../components/DisplayFilterTool'
+import { ItemsPage } from './ItemsPage'
 
 /** 工具定义：新增工具时在 TOOLS 里加一项，并在 renderTool 里补对应组件 */
 interface ToolDef {
@@ -8,9 +10,26 @@ interface ToolDef {
   /** 工具卡片上的一句话说明 */
   desc: string
   icon: ReactNode
+  /**
+   * 工具自带整页布局（自己的滚动区、需要完整高度）：外层不再套 `px-4 pb-4` 的滚动容器，
+   * 否则会出现双层滚动 / 内层 `h-full` 被压扁。物品图鉴属于这一类。
+   */
+  full?: boolean
 }
 
 const TOOLS: ToolDef[] = [
+  {
+    key: 'items',
+    name: '物品图鉴',
+    desc: '按类型 / 口径检索物品，查看任务需求、钥匙使用位置与背包格子',
+    icon: (
+      <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="1.7">
+        <path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5z" strokeLinejoin="round" />
+        <path d="M4 7.5 12 12l8-4.5M12 12v9" strokeLinejoin="round" />
+      </svg>
+    ),
+    full: true,
+  },
   {
     key: 'craft',
     name: '配方查询',
@@ -22,21 +41,47 @@ const TOOLS: ToolDef[] = [
       </svg>
     ),
   },
+  {
+    key: 'display-filter',
+    name: '显示器滤镜',
+    desc: '直接调整显卡输出：亮度、对比度、RGB Gamma，可存成方案一键切换（全屏游戏同样生效）',
+    icon: (
+      <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="1.7">
+        <rect x="2.5" y="4" width="19" height="12.5" rx="1.8" />
+        <path d="M9 20h6M12 16.5V20" strokeLinecap="round" />
+        <path d="M7 13V9M12 13V7M17 13v-2" strokeLinecap="round" />
+      </svg>
+    ),
+  },
 ]
 
 function renderTool(key: string): ReactNode {
   switch (key) {
+    case 'items':
+      return <ItemsPage embedded />
     case 'craft':
       return <CraftTool />
+    case 'display-filter':
+      return <DisplayFilterTool />
     default:
       return null
   }
 }
 
-/** 工具页：工具卡片列表；点卡片进入工具界面，左上角返回按钮回到列表 */
+/**
+ * 工具页：工具卡片列表 ↔ 工具界面两态容器。
+ *
+ * 打开过的工具会常驻挂载（只切 `display`），返回列表或切到别的工具时不销毁——
+ * 物品图鉴的搜索 / 筛选 / 滚动位置、配方的查询结果因此都能保留。
+ */
 export function ToolsPage() {
   const [active, setActive] = useState<string | null>(null)
+  const [opened, setOpened] = useState<string[]>([])
   const tool = TOOLS.find((t) => t.key === active) ?? null
+
+  useEffect(() => {
+    if (active) setOpened((prev) => (prev.includes(active) ? prev : [...prev, active]))
+  }, [active])
 
   return (
     <div className="h-full flex flex-col">
@@ -58,11 +103,9 @@ export function ToolsPage() {
         {!tool && <span className="text-[13px] text-muted">共 {TOOLS.length} 个</span>}
       </div>
 
-      {/* 内容区：工具列表 / 当前工具界面 */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4">
-        {tool ? (
-          renderTool(tool.key)
-        ) : (
+      {/* 内容区：工具列表 + 已打开的工具（后者常驻，仅切换显隐） */}
+      <div className="flex-1 min-h-0">
+        <div className={active ? 'hidden' : 'h-full overflow-y-auto px-4 pb-4'}>
           <ul className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
             {TOOLS.map((t) => (
               <li key={t.key}>
@@ -92,7 +135,21 @@ export function ToolsPage() {
               </li>
             ))}
           </ul>
-        )}
+        </div>
+
+        {opened.map((key) => {
+          const def = TOOLS.find((t) => t.key === key)
+          if (!def) return null
+          return (
+            <div
+              key={key}
+              className={def.full ? 'h-full' : 'h-full overflow-y-auto px-4 pb-4'}
+              style={{ display: active === key ? 'block' : 'none' }}
+            >
+              {renderTool(key)}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

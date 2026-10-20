@@ -70,6 +70,71 @@ export interface AppSettings {
   uiPrefs?: Record<string, unknown>
 }
 
+/* ---------------- 显示器滤镜（显卡 gamma ramp，桌面端） ---------------- */
+
+/** 显示器描述（后端 list_displays） */
+export interface DisplayInfo {
+  /** 设备名，如 `\\.\DISPLAY1`（gamma ramp 的操作对象） */
+  id: string
+  /** 显卡输出名（如 NVIDIA GeForce RTX 4060） */
+  name: string
+  /** 显示器名（EDID，如 Generic PnP Monitor） */
+  monitor: string
+  width: number
+  height: number
+  /** 主显示器 */
+  primary: boolean
+}
+
+/** 一台显示器的滤镜参数（1 = 不改变） */
+export interface DisplayFilterParams {
+  /** 亮度：整条曲线的线性缩放 */
+  brightness: number
+  /** 对比度：围绕中灰拉伸 / 压缩 */
+  contrast: number
+  /** Gamma（>1 提亮中间调），RGB 分通道 */
+  gammaR: number
+  gammaG: number
+  gammaB: number
+}
+
+/** 全局快捷键（Windows 虚拟键码 + 修饰键） */
+export interface DisplayHotkey {
+  /** 虚拟键码（如 NumpadSubtract = 0x6D、F1 = 0x70） */
+  vk: number
+  ctrl: boolean
+  alt: boolean
+  shift: boolean
+  /** 界面显示文本（如 `Numpad-`、`Ctrl+Alt+F1`） */
+  label: string
+}
+
+/** 命名方案（预设） */
+export interface DisplayFilterPreset {
+  name: string
+  params: DisplayFilterParams
+  /** 绑定到这套方案的全局快捷键（未绑定为 null） */
+  hotkey?: DisplayHotkey | null
+}
+
+/** 整机滤镜状态（持久化于 `<数据根>/display-filter.json`） */
+export interface DisplayFilterState {
+  /** 总开关：关闭时不应用任何滤镜 */
+  enabled: boolean
+  /** RGB 三通道联动 */
+  lockedRgb: boolean
+  /** 每块显示器最后一次生效的参数，键为设备名 */
+  displays: Record<string, DisplayFilterParams>
+  presets: DisplayFilterPreset[]
+}
+
+/** `display-filter-changed` 事件载荷：全局快捷键命中后后端推来的新状态 */
+export interface DisplayFilterChangedPayload {
+  state: DisplayFilterState
+  /** 触发该次变更的方案名（命中快捷键时非空） */
+  preset: string | null
+}
+
 /** 精简日志结果（桌面端）：就地清掉游戏日志里的无关输出 */
 export interface SimplifyLogResult {
   /** 日志目录 */

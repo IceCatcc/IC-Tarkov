@@ -19,7 +19,6 @@ import { StartupSplash } from './components/StartupSplash'
 import { MonitorPage } from './pages/MonitorPage'
 import { QuestGraphPage } from './pages/QuestGraphPage'
 import { CollectorPage } from './pages/CollectorPage'
-import { ItemsPage } from './pages/ItemsPage'
 import { ToolsPage } from './pages/ToolsPage'
 import { MapPage } from './pages/MapPage'
 import SettingsModal from './components/SettingsModal'
@@ -78,12 +77,7 @@ export default function App() {
   useEffect(() => {
     if (page === 'graph') setQuestAlive(true)
   }, [page])
-  // 物品页 keepAlive：同上（缓存物品目录与任务需求聚合，切走不销毁）
-  const [itemsAlive, setItemsAlive] = useState(false)
-  useEffect(() => {
-    if (page === 'items') setItemsAlive(true)
-  }, [page])
-  // 工具页 keepAlive：同上（缓存配方数据与搜索状态）
+  // 工具页 keepAlive：同上（缓存配方数据、物品目录与搜索状态）
   const [toolsAlive, setToolsAlive] = useState(false)
   useEffect(() => {
     if (page === 'tools') setToolsAlive(true)
@@ -298,11 +292,6 @@ export default function App() {
           </div>
         )}
         {page === 'collector' && <CollectorPage />}
-        {itemsAlive && (
-          <div className="h-full" style={{ display: page === 'items' ? 'block' : 'none' }}>
-            <ItemsPage />
-          </div>
-        )}
         {toolsAlive && (
           <div className="h-full" style={{ display: page === 'tools' ? 'block' : 'none' }}>
             <ToolsPage />
