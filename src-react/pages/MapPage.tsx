@@ -52,6 +52,17 @@ import { bossImage } from '../bossImages'
 
 const ICON_BASE = 'maps/interactive/'
 
+/**
+ * 底图地址归一化。
+ *
+ * 骨架数据（`src-tauri/resources/maps-skeleton.json`）里两种写法混用：
+ * - `svgPath`：站内相对路径（`maps/svg/Customs.svg`），必须补 `/` 走本地资源；
+ * - `tilePath`：**assets.tarkov.dev 的绝对 URL**（`https://assets.tarkov.dev/maps/labs_v4/1st/{z}/{x}/{y}.png`），
+ *   再补 `/` 会变成 `/https://…` 这种无效地址 —— 没有 SVG 线稿的地图（实验室 / 破冰船 / 迷宫）
+ *   就会整片空白。
+ */
+const assetUrl = (p: string) => (/^(?:https?:)?\/\//i.test(p) ? p : `/${p}`)
+
 /** BTR 车辆图标（divIcon 的 HTML；填色由外层 style 的 color + currentColor 控制） */
 const BTR_VEHICLE_SVG =
   '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden>' +
@@ -840,7 +851,7 @@ export function MapPage() {
     // 主层底图：**地图有 SVG 线稿就只用线稿，不显示卫星图**（瓦片只留给没有线稿的地图：
     // 实验室 / 破冰船 / 迷宫）。有 SVG 时显隐交给 SVG 组，取不到 SVG 则在下面的 catch 里回退瓦片。
     if (imap.tilePath && !imap.svgPath) {
-      const tl = L.tileLayer(`/${imap.tilePath}`, tileOpts).addTo(container)
+      const tl = L.tileLayer(assetUrl(imap.tilePath), tileOpts).addTo(container)
       defaultHandle = {
         show: () => {
           if (!container.hasLayer(tl)) tl.addTo(container)
@@ -852,7 +863,7 @@ export function MapPage() {
     }
 
     if (imap.svgPath) {
-      fetch(`/${imap.svgPath}`)
+      fetch(assetUrl(imap.svgPath))
         .then((r) => {
           // 取不到时（文件缺失 / 路径不对）会拿到 404 的 HTML，必须显式判失败才能走下面的瓦片兜底
           if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -898,7 +909,7 @@ export function MapPage() {
           console.error('svg load failed', err)
           // 线稿取不到（文件缺失 / 路径不对）时回退瓦片，别让地图整片空着
           if (cancelled || !imap.tilePath) return
-          const tl = L.tileLayer(`/${imap.tilePath}`, tileOpts).addTo(container)
+          const tl = L.tileLayer(assetUrl(imap.tilePath), tileOpts).addTo(container)
           defaultHandle = {
             show: () => {
               if (!container.hasLayer(tl)) tl.addTo(container)
@@ -914,7 +925,7 @@ export function MapPage() {
     // 没有线稿组的楼层才用瓦片（如海关 4 楼、储备站 2~5 楼，上游没给这些层的线稿）。
     ;(imap.layers ?? []).forEach((lyr, i) => {
       let tl: L.TileLayer | null = null
-      const ensureTiles = () => (tl ??= L.tileLayer(`/${lyr.tilePath!}`, tileOpts))
+      const ensureTiles = () => (tl ??= L.tileLayer(assetUrl(lyr.tilePath!), tileOpts))
       floorHandles.set(i, {
         show: () => {
           // SVG 还没加载完时先按没有线稿处理（此时 map 上多半还没切过楼层）

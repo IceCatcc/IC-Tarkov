@@ -130,6 +130,7 @@ git push origin v<version>
 - **地图「图标」筛选**：分类 / 子分类由 `src-react/mapIconGroups.ts` 从当前地图数据派生（不写死清单），每个子分类一个独立 Leaflet 图层、可单独开关；开关键为 `cat:<分类>` / `sub:<分类>:<子分类>`，存于 `uiPrefs.mapPrefs.chips`，旧版扁平键（`extract_pmc` 等）在 `migrateChips` 里一次性迁移；「任务目标」的子项即进行中的任务，沿用 `untrackedQuests`。默认显隐见 `ICON_DEFAULTS`（未显式设置的子项继承所属分类）。
 - **地图底图：有 SVG 线稿就不用卫星图**（`MapPage`，用户偏好线稿）：
   - 主层：数据里同时给了 `svgPath` 与 `tilePath` 时**只加载 SVG**；`tilePath` 仅在**没有** `svgPath` 的地图上用（实验室 / 破冰船 / 迷宫）；
+  - **底图地址必须经 `assetUrl()` 归一化**（`MapPage.tsx`）：骨架数据里 `svgPath` 是站内相对路径（`maps/svg/Customs.svg`，需要补 `/`），而 `tilePath` 是 **assets.tarkov.dev 的绝对 URL**（`https://assets.tarkov.dev/maps/labs_v4/1st/{z}/{x}/{y}.png`）。统一加 `/` 会得到 `/https://…`，直接 404 —— 表现就是「有线稿的地图正常、只有瓦片的地图整片空白」；
   - 楼层：该层在 SVG 里有对应线稿组（`layers[].svgLayer` 且该 `id` 确实存在于 SVG 里）就只用线稿——主层线稿**压暗 20%** 作底（`applySvgLayer(id, true, false)`，CSS 的 `.off-level g.base-layer`）、选中层全亮，不加载该层瓦片；没有线稿组的楼层（海关 4 楼、储备站 2~5 楼，上游没给线稿）才用瓦片，此时整张线稿隐藏（`hideBase=true` / `svgRoot.style.display='none'`）；
   - 瓦片图层**懒创建**（切到该层才建），线稿可用时移除已建瓦片，避免「SVG 尚未加载完成时先按瓦片处理」留下的卫星图残留；
   - SVG 取不到时（文件缺失，`fetch` 非 2xx 显式抛错）**回退瓦片**，不让地图空着；SVG 异步加载完成后按 `floorSelRef.current` 复位当前楼层（不能直接 `showSvgMain()`，会把用户已选的楼层顶掉）。
