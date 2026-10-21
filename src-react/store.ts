@@ -14,6 +14,7 @@ import type {
   ToastKind,
   QuestMode,
   RaidStatePayload,
+  BossMonitorPayload,
 } from './types'
 import {
   getQuestDetail,
@@ -43,13 +44,21 @@ interface AppState {
   raid: RaidStatePayload | null
   setRaid: (r: RaidStatePayload | null) => void
 
+  /**
+   * 本地战局 Boss 监控快照（仅电脑端；未开启 / web / 手机端为 null）。
+   * 由 `tauri-impl` 的全局监听写入，工具页与地图页共用同一份，
+   * 避免各自重复 invoke + 重复监听。
+   */
+  boss: BossMonitorPayload | null
+  setBoss: (b: BossMonitorPayload | null) => void
+
   settings: AppSettings
   setSettings: (s: AppSettings) => void
   showSettings: boolean
   openSettings: () => void
   closeSettings: () => void
 
-  /** 全局通知队列（顶部居中堆叠，最新在下） */
+  /** 全局通知队列（底部居中堆叠，最新在最下） */
   toasts: Toast[]
   pushToast: (text: string, kind?: ToastKind) => void
   dismissToast: (id: string) => void
@@ -400,6 +409,8 @@ export const useStore = create<AppState>((set, get) => ({
   setCurrentMap: (m) => set({ currentMap: m }),
   raid: null,
   setRaid: (r) => set({ raid: r }),
+  boss: null,
+  setBoss: (b) => set({ boss: b }),
 
   settings: {
     logDir: '',

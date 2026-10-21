@@ -37,6 +37,8 @@ import type {
   DisplayInfo,
   DisplayFilterParams,
   DisplayFilterState,
+  BossMonitorPayload,
+  LoggingConfigStatus,
 } from '../types'
 
 /**
@@ -137,6 +139,65 @@ export async function initTauri(): Promise<UnlistenFn> {
       if (m) applyDetectedMode(m)
     })
     .catch(() => {})
+
+  // 本地战局 Boss 监控：确认刷新时弹顶部悬浮通知。
+  // 后端只在快照变化时 emit，这里按「会话 + 战局 + 地图」去重，避免重连 / 重扫重复提示。
+  const bossNames = new Map<string, string>()
+  getMapBosses()
+    .then((doc) => {
+      for (const [nn, list] of Object.entries(doc?.maps ?? {})) {
+        for (const b of list ?? []) {
+          bossNames.set(`${b.id.toLowerCase()}|${nn}`, b.nameZh || b.name || b.id)
+        }
+      }
+    })
+    .catch(() => {})
+  const bossToastSeen = new Set<string>()
+  let bossRaidKey = ''
+  // 快照同时写进全局 store：地图页的 Boss 刷新率面板直接据此改颜色，无需自己再 invoke
+  const { setBoss } = useStore.getState()
+  getBossMonitor()
+    .then((b) => setBoss(b))
+    .catch(() => {})
+  track(
+    await listen<BossMonitorPayload>('boss-monitor', (e) => {
+      const p = e.payload
+      setBoss(p)
+      const raidKey = `${p.session}|${p.raidId}|${p.map}`
+      if (raidKey !== bossRaidKey) {
+        // 换局 / 换图（含刚开启监控时的历史回放）：已刷新的一律不补弹通知
+        bossRaidKey = raidKey
+        bossToastSeen.clear()
+        for (const b of p.bosses ?? []) {
+          if (b.status === 'confirmed') bossToastSeen.add(`${raidKey}|${b.role.toLowerCase()}`)
+        }
+        const ready = p.btr?.readyAt ?? []
+        if (ready.length) bossToastSeen.add(`${raidKey}|btr|${ready[ready.length - 1]}`)
+        return
+      }
+      if (!p.enabled || !p.notify || p.ended || !p.map) return
+      for (const b of p.bosses ?? []) {
+        if (b.status !== 'confirmed') continue
+        const k = `${raidKey}|${b.role.toLowerCase()}`
+        if (bossToastSeen.has(k)) continue
+        bossToastSeen.add(k)
+        // 只提示本图 Boss 表里有的角色（普通 AI / 其它图的 Boss 不打扰）
+        const name = bossNames.get(`${b.role.toLowerCase()}|${p.map}`)
+        if (!name) continue
+        pushToast(`Boss 已刷新：${name}${p.mapName ? `（${p.mapName}）` : ''}`, 'boss')
+      }
+      // BTR：出发准备信号（BTR 即将沿路线发车）
+      const ready = p.btr?.readyAt ?? []
+      if (ready.length) {
+        const last = ready[ready.length - 1]
+        const k = `${raidKey}|btr|${last}`
+        if (!bossToastSeen.has(k)) {
+          bossToastSeen.add(k)
+          pushToast(`BTR 出发准备信号${p.mapName ? `（${p.mapName}）` : ''}`, 'boss')
+        }
+      }
+    }),
+  )
 
   // —— UI 偏好统一持久化到后端 settings.json（localStorage 仅作首帧缓存）——
   // 启动恢复在 App.tsx 拿到 getSettings 结果后调用 applyUiPrefs；
@@ -396,6 +457,43 @@ export async function isElevated(): Promise<boolean> {
 /** 以管理员身份重启本程序（弹 UAC，成功后当前进程退出） */
 export async function relaunchAsAdmin(): Promise<void> {
   await invoke('relaunch_as_admin')
+}
+
+/* ---------------- 本地战局 Boss 监控（桌面端） ---------------- */
+
+/** 当前监控快照（顺带让后端立即扫一次日志） */
+export async function getBossMonitor(): Promise<BossMonitorPayload> {
+  return await invoke<BossMonitorPayload>('boss_get_state')
+}
+
+/** 开关监控（关闭会清空实时状态，设置仍落盘） */
+export async function setBossMonitorEnabled(enabled: boolean): Promise<BossMonitorPayload> {
+  return await invoke<BossMonitorPayload>('boss_set_enabled', { enabled })
+}
+
+/** 是否在确认刷新时弹顶部通知 */
+export async function setBossMonitorNotify(notify: boolean): Promise<BossMonitorPayload> {
+  return await invoke<BossMonitorPayload>('boss_set_notify', { notify })
+}
+
+/** Logging.config 当前位置 / aiData 级别 / 备份情况（顺带自动探测游戏目录） */
+export async function getBossLoggingStatus(): Promise<LoggingConfigStatus> {
+  return await invoke<LoggingConfigStatus>('boss_logging_status')
+}
+
+/** 指定游戏安装目录（含 EscapeFromTarkov.exe）或直接指定 Logging.config */
+export async function setBossGameRoot(path: string): Promise<LoggingConfigStatus> {
+  return await invoke<LoggingConfigStatus>('boss_set_game_root', { path })
+}
+
+/** 一键把 aiData 的 minLevel 改成 Trace（改前备份原文件） */
+export async function applyBossLoggingConfig(): Promise<LoggingConfigStatus> {
+  return await invoke<LoggingConfigStatus>('boss_apply_logging')
+}
+
+/** 一键恢复：把备份写回 Logging.config */
+export async function restoreBossLoggingConfig(): Promise<LoggingConfigStatus> {
+  return await invoke<LoggingConfigStatus>('boss_restore_logging')
 }
 
 export async function getPlayerPosition(): Promise<PlayerPositionPayload | null> {

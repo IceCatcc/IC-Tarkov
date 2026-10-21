@@ -3,7 +3,7 @@
 export type QuestStatus = 'in_progress' | 'completed' | 'failed'
 
 /** 全局通知（顶部居中堆叠，3s 自动关闭） */
-export type ToastKind = 'info' | 'accept' | 'done' | 'map'
+export type ToastKind = 'info' | 'accept' | 'done' | 'map' | 'boss'
 export interface Toast {
   id: string
   text: string
@@ -138,6 +138,90 @@ export interface DisplayFilterChangedPayload {
   preset: string | null
   /** 本次实际作用的显示器（快捷键只改选中的那一台） */
   display: string | null
+}
+
+/* ---------------- 本地战局 Boss 监控（桌面端，读游戏日志） ---------------- */
+
+/** 单只 Boss 在当前战局里的状态 */
+export interface BossSpawnState {
+  /** 日志角色名（= tarkov.dev 的 mob id，如 bossKilla） */
+  role: string
+  /**
+   * unknown 未检测到 ·
+   * planned 预计刷新（日志已判定要刷）·
+   * not_planned 本局不刷（判定不刷）·
+   * confirmed 已刷新（实际激活）·
+   * dead 已确认死亡
+   */
+  status: 'unknown' | 'planned' | 'not_planned' | 'confirmed' | 'dead'
+  /** 生成判定行里的 BossChance */
+  chance: number | null
+  /** 该状态的日志时间 */
+  at: string | null
+  /** 首次激活坐标原文（不是当前位置） */
+  position: string | null
+  /** 首次刷新的区域名（不是当前位置） */
+  zone: string | null
+  /** 累计确认实例数 */
+  count: number
+  /** 存活估计 */
+  alive: number
+  diedAt: string | null
+}
+
+/** BTR（`shooterBTR`）状态：与 Boss 同一套判定，另有发车 / 叫车信号 */
+export interface BossBtrState {
+  /** unknown / planned / not_planned / confirmed / dead（取 shooterBTR 的状态） */
+  status: 'unknown' | 'planned' | 'not_planned' | 'confirmed' | 'dead'
+  chance: number | null
+  /** 生成判定 / 首次激活时间 */
+  at: string | null
+  /** 首次激活坐标原文 */
+  position: string | null
+  /** 出发准备信号时间（`OnReadyToDeparture`），按先后顺序 */
+  readyAt: string[]
+  /** 购买 BTR 运送的时间 */
+  taxiAt: string[]
+}
+
+/** `boss-monitor` 事件载荷 / `boss_get_state` 返回值 */
+export interface BossMonitorPayload {
+  enabled: boolean
+  notify: boolean
+  gameRoot: string
+  configPath: string
+  logDir: string
+  session: string
+  /** 当前地图 normalizedName（如 customs / factory） */
+  map: string
+  mapName: string
+  raidId: string
+  inRaid: boolean
+  ended: boolean
+  startedAt: string | null
+  /** 读到过 aiData 行 = 详细 AI 日志已生效 */
+  hasAiData: boolean
+  /** 会话目录里存在 aiData 日志文件 */
+  aiLogFound: boolean
+  diagnostic: string
+  bosses: BossSpawnState[]
+  /** BTR 装甲车状态与信号 */
+  btr: BossBtrState
+  updatedAt: string | null
+}
+
+/** Logging.config 状态（一键修改 / 恢复用） */
+export interface LoggingConfigStatus {
+  configPath: string
+  found: boolean
+  /** aiData 当前 minLevel */
+  aiDataLevel: string
+  /** aiData 是否已经是 Trace */
+  patched: boolean
+  /** 还原时会写回的原始级别（固定为 Error） */
+  restoreTarget: string
+  gameRoot: string
+  error: string | null
 }
 
 /** 精简日志结果（桌面端）：就地清掉游戏日志里的无关输出 */

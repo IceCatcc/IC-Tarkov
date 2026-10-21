@@ -35,6 +35,8 @@ import type {
   DisplayInfo,
   DisplayFilterParams,
   DisplayFilterState,
+  BossMonitorPayload,
+  LoggingConfigStatus,
 } from '../types'
 
 /* ---------------- HTTP 基础 ---------------- */
@@ -475,6 +477,67 @@ export async function isElevated(): Promise<boolean> {
 }
 
 export async function relaunchAsAdmin(): Promise<void> {
+  throw new Error(NOT_SUPPORTED)
+}
+
+/* ---------------- 本地战局 Boss 监控（仅桌面端） ---------------- */
+
+const EMPTY_BOSS_MONITOR: BossMonitorPayload = {
+  enabled: false,
+  notify: false,
+  gameRoot: '',
+  configPath: '',
+  logDir: '',
+  session: '',
+  map: '',
+  mapName: '',
+  raidId: '',
+  inRaid: false,
+  ended: false,
+  startedAt: null,
+  hasAiData: false,
+  aiLogFound: false,
+  diagnostic: '浏览器端无法读取本机游戏日志',
+  bosses: [],
+  btr: { status: 'unknown', chance: null, at: null, position: null, readyAt: [], taxiAt: [] },
+  updatedAt: null,
+}
+
+const EMPTY_LOGGING_STATUS: LoggingConfigStatus = {
+  configPath: '',
+  found: false,
+  aiDataLevel: '',
+  patched: false,
+  restoreTarget: 'Error',
+  gameRoot: '',
+  error: NOT_SUPPORTED,
+}
+
+export async function getBossMonitor(): Promise<BossMonitorPayload> {
+  return EMPTY_BOSS_MONITOR
+}
+
+export async function setBossMonitorEnabled(_enabled: boolean): Promise<BossMonitorPayload> {
+  throw new Error(NOT_SUPPORTED)
+}
+
+export async function setBossMonitorNotify(_notify: boolean): Promise<BossMonitorPayload> {
+  throw new Error(NOT_SUPPORTED)
+}
+
+export async function getBossLoggingStatus(): Promise<LoggingConfigStatus> {
+  return EMPTY_LOGGING_STATUS
+}
+
+export async function setBossGameRoot(_path: string): Promise<LoggingConfigStatus> {
+  throw new Error(NOT_SUPPORTED)
+}
+
+export async function applyBossLoggingConfig(): Promise<LoggingConfigStatus> {
+  throw new Error(NOT_SUPPORTED)
+}
+
+export async function restoreBossLoggingConfig(): Promise<LoggingConfigStatus> {
   throw new Error(NOT_SUPPORTED)
 }
 

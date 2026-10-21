@@ -45,11 +45,11 @@ body {
   background: transparent;
 }
 
-/* 全局通知淡入（顶部居中：自上滑入） */
+/* 全局通知淡入（底部居中：自下上滑） */
 @keyframes toast-in {
     from {
         opacity: 0;
-        transform: translateY(-10px);
+        transform: translateY(10px);
     }
     to {
         opacity: 1;

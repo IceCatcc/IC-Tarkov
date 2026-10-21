@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { BossMonitorTool } from '../components/BossMonitorTool'
 import { CraftTool } from '../components/CraftTool'
 import { DisplayFilterTool } from '../components/DisplayFilterTool'
 import { ItemsPage } from './ItemsPage'
@@ -42,6 +43,18 @@ const TOOLS: ToolDef[] = [
     ),
   },
   {
+    key: 'boss-monitor',
+    name: '战局 Boss 监控',
+    desc: '读本机战局日志，实时显示当前地图 Boss / BTR 是否刷新；可一键修改 / 恢复游戏日志配置（有风险，请先看警告）',
+    icon: (
+      <svg viewBox="0 0 24 24" className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="1.7">
+        <circle cx="12" cy="12" r="8.2" />
+        <circle cx="12" cy="12" r="3.2" />
+        <path d="M12 12 18 6" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     key: 'display-filter',
     name: '显示器滤镜',
     desc: '按显示器调亮度 / 对比度 / RGB Gamma，方案可绑快捷键，只作用于选中的屏幕（全屏游戏同样生效）',
@@ -61,6 +74,8 @@ function renderTool(key: string): ReactNode {
       return <ItemsPage embedded />
     case 'craft':
       return <CraftTool />
+    case 'boss-monitor':
+      return <BossMonitorTool />
     case 'display-filter':
       return <DisplayFilterTool />
     default:

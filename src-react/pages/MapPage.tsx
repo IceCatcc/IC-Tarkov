@@ -23,6 +23,7 @@ import type {
   QuestZoneObjective,
   QuestZonesDoc,
   MapBossesDoc,
+  BossSpawnState,
 } from '../types'
 import { useStore } from '../store'
 import { QuestCard } from '../components/QuestCard'
@@ -423,6 +424,30 @@ function popupHtml(
     .join('')}${checkHtml}</div>`
 }
 
+/**
+ * Boss 刷新率文字的颜色即状态（文字本身不换，避免面板跳动）：
+ * 已刷新 绿 / 预计刷新 琥珀 / 本局不刷 灰 / 已确认死亡 暗红；
+ * 没开本地战局监控时保持原来的琥珀色。
+ */
+function bossChanceStyle(
+  status: BossSpawnState['status'] | undefined,
+  live: boolean,
+): { cls: string; title: string } {
+  if (!live) return { cls: 'text-amber', title: '刷新率（未开启本地战局监控）' }
+  switch (status) {
+    case 'confirmed':
+      return { cls: 'text-[#3fb950]', title: '已确认刷新' }
+    case 'planned':
+      return { cls: 'text-amber', title: '预计刷新（日志已判定本局要刷）' }
+    case 'not_planned':
+      return { cls: 'text-muted/60', title: '本局不刷（日志判定未命中）' }
+    case 'dead':
+      return { cls: 'text-[#f85149]/70', title: '已确认死亡' }
+    default:
+      return { cls: 'text-[#c9d1d9]/70', title: '尚未检测到（等待本局日志）' }
+  }
+}
+
 /* ================= 组件 ================= */
 
 export function MapPage() {
@@ -440,6 +465,8 @@ export function MapPage() {
   const setFocusZoom = useStore((s) => s.setFocusZoom)
   const untrackedQuests = useStore((s) => s.untrackedQuests)
   const toggleQuestTracked = useStore((s) => s.toggleQuestTracked)
+  // 本地战局 Boss 监控快照（桌面端；由 tauri-impl 的全局监听写入）
+  const bossMonitor = useStore((s) => s.boss)
   // 外部定位请求（物品页钥匙「使用位置」跳转过来）：切图 + 居中到坐标，消费后清空
   const mapFocus = useStore((s) => s.mapFocus)
   const setMapFocus = useStore((s) => s.setMapFocus)
@@ -1598,6 +1625,12 @@ export function MapPage() {
   // 本图 Boss 刷新率（按刷新率降序，数据来自 map-bosses.json）
   const mapBosses = (imap && bossDoc?.maps?.[imap.key]) ?? []
 
+  // 本局实时状态（role → 状态），只认「监控开启 + 日志里的地图与当前地图一致」
+  const liveBoss = new Map<string, BossSpawnState>()
+  if (bossMonitor?.enabled && imap && bossMonitor.map === imap.key) {
+    for (const b of bossMonitor.bosses) liveBoss.set(b.role.toLowerCase(), b)
+  }
+
   // 自动聚焦面板内容（桌面工具条与移动端左下角浮层共用）
   const focusBody = (
     <>
@@ -1958,30 +1991,37 @@ export function MapPage() {
                   <div className="text-[13px] text-muted/70">本图无固定 Boss</div>
                 ) : (
                   <div className="space-y-1">
-                    {mapBosses.map((b) => (
-                      <div
-                        key={b.id}
-                        className="flex items-center justify-between gap-2 text-[14px]"
-                      >
-                        <span className="flex items-center gap-1.5 min-w-0">
-                          {bossImage(b.id) && (
-                            <img
-                              src={bossImage(b.id)!}
-                              alt=""
-                              loading="lazy"
-                              draggable={false}
-                              className="w-[18px] h-[18px] shrink-0 rounded-full object-cover bg-ink-700/60"
-                            />
-                          )}
-                          <span className="text-[#c9d1d9] truncate" title={b.nameZh}>
-                            {b.nameZh}
+                    {mapBosses.map((b) => {
+                      const live = liveBoss.get(b.id.toLowerCase())
+                      const tint = bossChanceStyle(live?.status, !!bossMonitor?.enabled)
+                      return (
+                        <div
+                          key={b.id}
+                          className="flex items-center justify-between gap-2 text-[14px]"
+                        >
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            {bossImage(b.id) && (
+                              <img
+                                src={bossImage(b.id)!}
+                                alt=""
+                                loading="lazy"
+                                draggable={false}
+                                className="w-[18px] h-[18px] shrink-0 rounded-full object-cover bg-ink-700/60"
+                              />
+                            )}
+                            <span className="text-[#c9d1d9] truncate" title={b.nameZh}>
+                              {b.nameZh}
+                            </span>
                           </span>
-                        </span>
-                        <span className="shrink-0 tabular-nums text-amber">
-                          {Math.round(b.chance * 100)}%
-                        </span>
-                      </div>
-                    ))}
+                          <span
+                            className={`shrink-0 tabular-nums transition-colors ${tint.cls}`}
+                            title={tint.title}
+                          >
+                            {Math.round(b.chance * 100)}%
+                          </span>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>

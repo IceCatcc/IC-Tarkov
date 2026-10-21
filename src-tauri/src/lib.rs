@@ -15,6 +15,9 @@ mod lan;
 // 显示器滤镜（显卡 gamma ramp）：仅电脑端；非 Windows 的桌面平台编译为空实现
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod display;
+// 本地战局 Boss 监控（读本机游戏日志 + 改 Logging.config）：仅电脑端
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod boss;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -1485,6 +1488,9 @@ pub fn run() {
             // 显示器滤镜：gamma ramp 不跨重启 / 驱动重置保留，按存档复现一次
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             crate::display::restore_on_startup(app.handle());
+            // 本地战局 Boss 监控：常驻线程每秒增量读一次日志（关闭时直接空转）
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            crate::boss::init(app.handle());
             Ok(())
         })
         .invoke_handler({
@@ -1548,7 +1554,14 @@ pub fn run() {
                     display::apply_display_filter,
                     display::reset_display_filter,
                     display::is_elevated,
-                    display::relaunch_as_admin
+                    display::relaunch_as_admin,
+                    boss::boss_get_state,
+                    boss::boss_set_enabled,
+                    boss::boss_set_notify,
+                    boss::boss_logging_status,
+                    boss::boss_set_game_root,
+                    boss::boss_apply_logging,
+                    boss::boss_restore_logging
                 ]
             }
             // 手机端：纯 WS 客户端，不注册局域网同步服务端命令
