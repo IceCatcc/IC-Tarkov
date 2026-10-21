@@ -75,6 +75,12 @@ interface AppState {
   /** 地图：自动聚焦（居中+缩放）时的目标缩放级别，由工具栏进度条调节 */
   focusZoom: number
   setFocusZoom: (v: number) => void
+  /**
+   * 地图：是否把本地战局监控里 Boss 的刷新坐标画到地图上（头像图标）。
+   * 只画日志里确认刷新的那些，随 mapPrefs 持久化。
+   */
+  bossMarkers: boolean
+  setBossMarkers: (v: boolean) => void
 
   /** 地图图标显隐（含任务目标），随 mapPrefs 一起持久化。键见 mapIconGroups.ts */
   mapChips: Record<string, boolean>
@@ -370,6 +376,7 @@ export function collectUiPrefs(): Record<string, unknown> {
       focusZoom: s.focusZoom,
       untrackedQuests: s.untrackedQuests,
       chips: s.mapChips,
+      bossMarkers: s.bossMarkers,
     },
     uiScale: s.uiScale,
     wikiWidth: s.wikiWidth,
@@ -386,6 +393,7 @@ interface UiPrefsShape {
     focusZoom?: number
     untrackedQuests?: string[]
     chips?: Record<string, boolean>
+    bossMarkers?: boolean
   }
   /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2 */
   uiScale?: number
@@ -445,6 +453,8 @@ export const useStore = create<AppState>((set, get) => ({
   setAutoCenter: (v) => set({ autoCenter: v }),
   focusZoom: 4,
   setFocusZoom: (v) => set({ focusZoom: v }),
+  bossMarkers: false,
+  setBossMarkers: (v) => set({ bossMarkers: v }),
   mapChips: { ...ICON_DEFAULTS },
   setMapChip: (key, on) => set((s) => ({ mapChips: { ...s.mapChips, [key]: on } })),
   setMapChips: (patch) => set((s) => ({ mapChips: { ...s.mapChips, ...patch } })),
@@ -789,6 +799,7 @@ export const useStore = create<AppState>((set, get) => ({
       if (typeof mp.autoZoom === 'boolean') patch.autoZoomMap = mp.autoZoom
       if (typeof mp.autoCenter === 'boolean') patch.autoCenter = mp.autoCenter
       if (typeof mp.focusZoom === 'number') patch.focusZoom = mp.focusZoom
+      if (typeof mp.bossMarkers === 'boolean') patch.bossMarkers = mp.bossMarkers
       if (Array.isArray(mp.untrackedQuests))
         patch.untrackedQuests = mp.untrackedQuests.filter((x) => typeof x === 'string')
       if (mp.chips && typeof mp.chips === 'object') {

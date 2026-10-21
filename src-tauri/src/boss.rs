@@ -910,11 +910,16 @@ pub fn boss_set_enabled(app: AppHandle, enabled: bool) -> Result<BossMonitorPayl
     let rt = runtime();
     let mut g = rt.lock().unwrap();
     g.settings.enabled = enabled;
-    if !enabled {
+    if enabled {
+        g.diagnostic = "正在连接日志…".into();
+        // 启用监控 = 需要详细 AI 日志：顺手把 Logging.config 的 aiData 调到 Trace。
+        // 失败不阻断启用（可能没配游戏目录 / 没有写权限），前端会按配置状态给出提示。
+        let _ = apply_logging_inner(&app, &mut g.settings);
+    } else {
         g.reset_scan();
         g.diagnostic = "监控已关闭".into();
-    } else {
-        g.diagnostic = "正在连接日志…".into();
+        // 关闭监控 = 不再需要详细日志：把 aiData 改回原始级别 Error
+        let _ = restore_logging_inner(&app, &mut g.settings);
     }
     g.last_emit.clear();
     save_settings(&app, &g.settings)?;
@@ -976,7 +981,21 @@ pub fn boss_set_game_root(app: AppHandle, path: String) -> Result<LoggingStatus,
 pub fn boss_apply_logging(app: AppHandle) -> Result<LoggingStatus, String> {
     let rt = runtime();
     let mut g = rt.lock().unwrap();
-    let path = resolve_config(&app, &g.settings)
+    apply_logging_inner(&app, &mut g.settings)?;
+    Ok(build_status(&app, &g.settings))
+}
+
+/// 一键恢复：固定把 aiData 的 minLevel 写回原始级别 `Error`。
+#[tauri::command]
+pub fn boss_restore_logging(app: AppHandle) -> Result<LoggingStatus, String> {
+    let rt = runtime();
+    let mut g = rt.lock().unwrap();
+    restore_logging_inner(&app, &mut g.settings)?;
+    Ok(build_status(&app, &g.settings))
+}
+
+fn apply_logging_inner(app: &AppHandle, s: &mut BossSettings) -> Result<(), String> {
+    let path = resolve_config(app, s)
         .ok_or("找不到 Logging.config：请选择游戏安装目录（含 EscapeFromTarkov.exe）")?;
     let text = std::fs::read_to_string(&path)
         .map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
@@ -989,22 +1008,19 @@ pub fn boss_apply_logging(app: AppHandle) -> Result<LoggingStatus, String> {
         std::fs::write(&path, next)
             .map_err(|e| format!("写入 {} 失败：{e}（可能需要管理员权限）", path.display()))?;
     }
-    g.settings.config_path = path.display().to_string();
+    s.config_path = path.display().to_string();
     if let Some(parent) = path.parent() {
-        g.settings.game_root = parent.display().to_string();
+        s.game_root = parent.display().to_string();
     }
-    save_settings(&app, &g.settings)?;
-    Ok(build_status(&app, &g.settings))
+    save_settings(app, s)?;
+    Ok(())
 }
 
-/// 一键恢复：固定把 aiData 的 minLevel 写回原始级别 `Error`。
-/// 不依赖任何记录或备份；但只在当前值仍是本工具写入的 `Trace` 时才动手 ——
-/// 已被手动改过（例如自己调成 Debug）就拒绝自动还原，避免把用户设置降回去。
-#[tauri::command]
-pub fn boss_restore_logging(app: AppHandle) -> Result<LoggingStatus, String> {
-    let rt = runtime();
-    let mut g = rt.lock().unwrap();
-    let path = resolve_config(&app, &g.settings)
+/// 把 aiData 写回 `Error`。不依赖任何记录或备份；但只在当前值仍是本工具写入的
+/// `Trace` 时才动手 —— 已被手动改过（例如自己调成 Debug）就拒绝还原，
+/// 避免把用户设置降回去（参考实现 tarkov-boss 也拒绝自动恢复被外部改动的配置）。
+fn restore_logging_inner(app: &AppHandle, s: &mut BossSettings) -> Result<(), String> {
+    let path = resolve_config(app, s)
         .ok_or("找不到 Logging.config：请选择游戏安装目录（含 EscapeFromTarkov.exe）")?;
     let text = std::fs::read_to_string(&path)
         .map_err(|e| format!("读取 {} 失败：{e}", path.display()))?;
@@ -1020,9 +1036,9 @@ pub fn boss_restore_logging(app: AppHandle) -> Result<LoggingStatus, String> {
         std::fs::write(&path, next)
             .map_err(|e| format!("写入 {} 失败：{e}（可能需要管理员权限）", path.display()))?;
     }
-    g.settings.config_path = path.display().to_string();
-    save_settings(&app, &g.settings)?;
-    Ok(build_status(&app, &g.settings))
+    s.config_path = path.display().to_string();
+    save_settings(app, s)?;
+    Ok(())
 }
 
 fn remember_config(app: &AppHandle, s: &mut BossSettings, st: &LoggingStatus) {

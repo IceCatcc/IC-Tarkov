@@ -47,7 +47,7 @@ import {
   subKey,
   type IconGroup,
 } from '../mapIconGroups'
-import { bossImage } from '../bossImages'
+import { bossImage, isBossRole } from '../bossImages'
 
 /* ================= 常量 ================= */
 
@@ -309,6 +309,17 @@ function pos(p: Position): L.LatLngExpression {
   return [p.z, p.x]
 }
 
+/**
+ * 日志里的坐标原文 `x, y, z`（捕获时已去掉括号）→ Leaflet latLng。
+ * 与截图定位同一口径：取游戏坐标的 x / z（y 是高度，地图是二维的）。
+ */
+function logPosLatLng(raw: string | null | undefined): L.LatLng | null {
+  if (!raw) return null
+  const parts = raw.split(',').map((s) => Number.parseFloat(s.trim()))
+  if (parts.length < 3 || !parts.every((n) => Number.isFinite(n))) return null
+  return L.latLng(parts[2], parts[0])
+}
+
 /** 骨架 bounds -> 未旋转投影空间的 LatLngBounds */
 function getBounds(b: [[number, number], [number, number]]): L.LatLngBounds {
   return L.latLngBounds(
@@ -467,6 +478,8 @@ export function MapPage() {
   const toggleQuestTracked = useStore((s) => s.toggleQuestTracked)
   // 本地战局 Boss 监控快照（桌面端；由 tauri-impl 的全局监听写入）
   const bossMonitor = useStore((s) => s.boss)
+  // 「绘制刷新位置」开关在工具页（战局 Boss 监控）里切换，这里只读结果
+  const bossMarkers = useStore((s) => s.bossMarkers)
   // 外部定位请求（物品页钥匙「使用位置」跳转过来）：切图 + 居中到坐标，消费后清空
   const mapFocus = useStore((s) => s.mapFocus)
   const setMapFocus = useStore((s) => s.setMapFocus)
@@ -628,6 +641,8 @@ export function MapPage() {
   shotRef.current = shotPos
   const playerMarkerRef = useRef<L.Marker | null>(null)
   const questLayerRef = useRef<L.LayerGroup | null>(null)
+  // 本地战局 Boss 刷新位置图层（与图标筛选独立，由「绘制刷新位置」开关控制）
+  const bossLayerRef = useRef<L.LayerGroup | null>(null)
   // BTR 图层与「每秒位置更新」函数（面板通过回调驱动，不触发本组件重渲染）
   const btrLayerRef = useRef<L.LayerGroup | null>(null)
   const btrUpdateRef = useRef<((s: BtrLayerState) => void) | null>(null)
@@ -1187,6 +1202,8 @@ export function MapPage() {
     syncFnsRef.current = [syncAll]
     // 暴露给「跳转定位」：按子图层键拿 LayerGroup，才能找到目标标记并打开 popup
     subLayersRef.current = new Map([...subLayers].map(([k, v]) => [k, v.lg]))
+    // Boss 刷新位置：独立图层（不受图标分类筛选影响），叠在其它标记之上
+    bossLayerRef.current = L.layerGroup().addTo(container)
 
     return () => {
       cancelled = true
@@ -1195,6 +1212,7 @@ export function MapPage() {
       mapRef.current = null
       playerMarkerRef.current = null
       questLayerRef.current = null
+      bossLayerRef.current = null
       syncFnsRef.current = []
       subLayersRef.current = null
       floorApplyRef.current = null
@@ -1209,6 +1227,58 @@ export function MapPage() {
   useEffect(() => {
     syncFnsRef.current.forEach((fn) => fn())
   }, [chips])
+
+  /* ---------- 本地战局 Boss 刷新位置（日志坐标 → 地图上的头像图标） ---------- */
+
+  useEffect(() => {
+    const layer = bossLayerRef.current
+    // markers 变化会重建整张地图（连同这个图层），因此也在依赖里
+    if (!layer || !imap || !markers) return
+    layer.clearLayers()
+    if (!bossMarkers || !bossMonitor?.enabled) return
+    // 只画当前正在打的这张图（日志地图与选中地图不一致时不画，避免坐标错位）
+    if (bossMonitor.map !== imap.key) return
+    const mb = imap.bounds
+    const bounds =
+      mb && mb.length === 2
+        ? L.latLngBounds(L.latLng(mb[0][1], mb[0][0]), L.latLng(mb[1][1], mb[1][0]))
+        : null
+    for (const b of bossMonitor.bosses) {
+      const role = b.role.toLowerCase()
+      const isBtr = role === 'shooterbtr'
+      // 只画真 Boss 与 BTR（日志里的 pmc / assault / marksman 等普通 AI 不画）
+      if (!isBtr && !isBossRole(role)) continue
+      // 只画确认刷新的（含已确认死亡，淡显）；「预计刷新」还没有坐标
+      if (b.status !== 'confirmed' && b.status !== 'dead') continue
+      const ll = logPosLatLng(b.position)
+      if (!ll) continue
+      // 坐标不在这张图的世界范围内（旧战局数据 / 解析异常）就不画
+      if (bounds && !bounds.contains(ll)) continue
+      const name =
+        bossDoc?.maps?.[imap.key]?.find((x) => x.id.toLowerCase() === role)?.nameZh ||
+        (isBtr ? 'BTR' : b.role)
+      const img = bossImage(b.role)
+      const dead = b.status === 'dead'
+      layer.addLayer(
+        L.marker(ll, {
+          zIndexOffset: 9000,
+          icon: L.divIcon({
+            className: `map-boss-live${dead ? ' is-dead' : ''}${isBtr ? ' is-btr' : ''}`,
+            html: img
+              ? `<img src="${img}" alt="" draggable="false" />`
+              : isBtr
+                ? `<span class="map-boss-live-btr">BTR</span>`
+                : `<span class="map-boss-live-fallback">?</span>`,
+            iconSize: [34, 34],
+            iconAnchor: [17, 17],
+          }),
+        }).bindTooltip(`${name}${dead ? '（已死亡）' : '（已刷新）'}`, {
+          direction: 'top',
+          offset: [0, -16],
+        }),
+      )
+    }
+  }, [imap, markers, bossMonitor, bossMarkers, bossDoc])
 
   /* ---------- keepAlive：切回地图页（或从隐藏恢复）时重算尺寸并复位视图 ---------- */
   useEffect(() => {

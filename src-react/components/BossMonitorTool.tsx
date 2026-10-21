@@ -13,7 +13,7 @@ import {
 } from '../tauri'
 import { useStore } from '../store'
 import { isMobile, isWeb } from '../platform'
-import { bossImage } from '../bossImages'
+import { bossImage, isBossRole } from '../bossImages'
 import type {
   BossSpawnState,
   LoggingConfigStatus,
@@ -96,6 +96,9 @@ export function BossMonitorTool() {
   const unsupported = isWeb() || isMobile()
   // 快照由 tauri-impl 的全局监听写进 store，地图页共用同一份
   const monitor = useStore((s) => s.boss)
+  // 地图绘制开关（随 mapPrefs.bossMarkers 持久化，地图页只读结果）
+  const bossMarkers = useStore((s) => s.bossMarkers)
+  const setBossMarkers = useStore((s) => s.setBossMarkers)
   const [cfg, setCfg] = useState<LoggingConfigStatus | null>(null)
   const [bossDoc, setBossDoc] = useState<MapBossesDoc | null>(null)
   const [skeleton, setSkeleton] = useState<SkeletonDoc | null>(null)
@@ -166,9 +169,9 @@ export function BossMonitorTool() {
     const extras = (monitor?.bosses ?? [])
       .filter(
         (b) =>
-          !b.role.toLowerCase().startsWith('pmc') &&
-          // BTR 单列成一块，不混在 Boss 列表里
-          b.role.toLowerCase() !== 'shooterbtr' &&
+          // 只列真 Boss：日志里的 pmc / assault / marksman / follower 等普通 AI 不进来
+          // （BTR 有独立状态卡，不混在 Boss 列表里）
+          isBossRole(b.role) &&
           !known.some((r) => r.id.toLowerCase() === b.role.toLowerCase()),
       )
       .map((b) => ({ id: b.role, name: b.role, chance: null as number | null, live: b }))
@@ -187,8 +190,10 @@ export function BossMonitorTool() {
     if (!monitor) return
     if (!monitor.enabled) {
       const ok = await confirm(
-        '本功能会修改游戏的 Logging.config。读取本机游戏日志，\n' +
-          '官方未对该行为作出说明：未知是否会造成封号影响，风险自负。\n\n确定开启监控？',
+        '开启后会自动把游戏 Logging.config 中 aiData 的日志级别改成 Trace，' +
+          '关闭监控时再自动改回 Error（都需重启游戏才生效）。\n' +
+          '本功能只读取本机日志与改日志级别，但官方未对该行为作出说明：' +
+          '未知是否会造成封号影响，风险自负。\n\n确定开启监控？',
         { title: '开启本地战局 Boss 监控', kind: 'warning' },
       )
       if (!ok) return
@@ -198,8 +203,28 @@ export function BossMonitorTool() {
     try {
       const next = await setBossMonitorEnabled(!monitor.enabled)
       useStore.getState().setBoss(next)
-      if (!next.enabled) setFeedback({ kind: 'warn', text: '监控已关闭，实时状态已清空' })
-      else setFeedback({ kind: 'ok', text: '监控已开启：进入本地战局后自动开始读取' })
+      // 开关会同步修改 / 还原 Logging.config，刷新配置状态并按结果给出提示
+      const st = await getBossLoggingStatus().catch(() => null)
+      if (st) setCfg(st)
+      if (next.enabled) {
+        if (st?.patched) {
+          setFeedback({ kind: 'ok', text: '监控已开启：日志配置已改为 Trace（重启游戏后生效）' })
+        } else {
+          setFeedback({
+            kind: 'warn',
+            text: `监控已开启，但日志配置未能自动修改${
+              st?.error ? `：${st.error}` : '（可能没有写入权限）'
+            }`,
+          })
+        }
+      } else if (st && !st.patched && st.aiDataLevel.toLowerCase() === st.restoreTarget.toLowerCase()) {
+        setFeedback({ kind: 'ok', text: `监控已关闭：日志配置已恢复为 ${st.restoreTarget}` })
+      } else {
+        setFeedback({
+          kind: 'warn',
+          text: '监控已关闭，但日志配置未能自动恢复（可在下方手动点「恢复原配置」）',
+        })
+      }
     } catch (e) {
       setError(String(e))
     } finally {
@@ -358,7 +383,7 @@ export function BossMonitorTool() {
             <Switch checked={enabled} disabled={busy === 'toggle'} onChange={toggleMonitor} />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3 border-t border-line/50 bg-[#0f141b]/40 px-4 py-2 text-[11px] text-muted/70">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/50 bg-[#0f141b]/40 px-4 py-2 text-[11px] text-muted/70">
           <label className="flex cursor-pointer select-none items-center gap-2">
             <input
               type="checkbox"
@@ -367,7 +392,19 @@ export function BossMonitorTool() {
               onChange={toggleNotify}
               className="accent-amber"
             />
-            刷新时弹顶部悬浮通知（仅「确认刷新」提示）
+            刷新时弹底部悬浮通知（仅「确认刷新」提示）
+          </label>
+          <label
+            className="flex cursor-pointer select-none items-center gap-2"
+            title="把日志里确认刷新的 Boss / BTR 按坐标画在地图上（Boss 用头像，BTR 用蓝色字样），已确认死亡的淡显"
+          >
+            <input
+              type="checkbox"
+              checked={bossMarkers}
+              onChange={(e) => setBossMarkers(e.target.checked)}
+              className="accent-amber"
+            />
+            在地图上绘制刷新位置
           </label>
           <span className="ml-auto truncate font-mono text-[10.5px] text-muted/50">
             {monitor?.session ? `会话 ${monitor.session}` : '尚未检测到日志会话'}
@@ -615,6 +652,7 @@ export function BossMonitorTool() {
         <ul className="list-disc space-y-1 pl-4">
           <li>仅在**本地运行**的战局里有效（PvE / 离线）；在线战局由服务器托管，本机日志不会输出 AI 生成细节。</li>
           <li>「预计刷新」来自日志里的生成判定（roll），与是否已经激活是两件事，因此能区分「本局不刷」与「刷了但还没激活」。</li>
+          <li>开启监控会自动把 <Code>aiData</Code> 调到 <Code>Trace</Code>，关闭时自动改回 <Code>Error</Code>（都需重启游戏生效）；下方配置卡的两个按钮可手动补做。</li>
           <li>日志目录取自「设置」里配置的路径（通常为 <Code>%LOCALAPPDATA%\Temp\Battlestate Games\EscapeFromTarkov\Logs</Code>）。</li>
           <li>BTR 与 Boss 走同一套日志判定（生成判定 / 实际激活），另单独记录「出发准备信号」与购车记录；不发车信号时也可能已经出现，以状态徽标为准。</li>
           <li>关闭监控会清空实时状态，但不会动游戏日志与 Logging.config。</li>

@@ -236,6 +236,7 @@ export async function initTauri(): Promise<UnlistenFn> {
     'focusZoom',
     'untrackedQuests',
     'mapChips',
+    'bossMarkers',
     'uiScale',
     'wikiWidth',
     'wikiSite',

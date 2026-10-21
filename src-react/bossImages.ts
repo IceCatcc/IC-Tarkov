@@ -52,3 +52,24 @@ export function bossImage(id?: string | null): string | null {
   if (!id) return null
   return BY_ID[id] ?? null
 }
+
+/**
+ * 日志角色名不带 `boss` 前缀、但确实是 Boss 的少数例外。
+ * - `sectantPriest`：邪教徒祭司
+ * - `blackDivision`：黑色守望（事件 Boss）
+ */
+const NON_PREFIX_BOSSES = new Set(['sectantpriest', 'blackdivision'])
+
+/**
+ * 是否是真 Boss 的日志角色。
+ *
+ * aiData 日志里除了 Boss，还会出现 pmcBEAR / pmcUSEC / assault / marksman /
+ * follower* / shooterBTR 等普通 AI；地图绘制只认 Boss。
+ * EFT 里 Boss 的角色名绝大多数以 `boss` 开头（bossKilla / bossKnight / bossTagilla …），
+ * 邪教徒祭司等个别例外列在 `NON_PREFIX_BOSSES`，其余一律不算。
+ */
+export function isBossRole(role?: string | null): boolean {
+  if (!role) return false
+  const lower = role.toLowerCase()
+  return lower.startsWith('boss') || NON_PREFIX_BOSSES.has(lower)
+}
