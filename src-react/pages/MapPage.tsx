@@ -2014,8 +2014,9 @@ export function MapPage() {
                 ▼
               </span>
             </button>
+            {/* 地图选单：双列排布（地图有十几张，单列要滚很久） */}
             {mapMenuOpen && (
-              <div className="absolute left-0 top-[calc(100%+6px)] z-[610] w-[120px] max-h-[calc(45dvh/var(--ui-scale,1))] overflow-y-auto py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
+              <div className="absolute left-0 top-[calc(100%+6px)] z-[610] grid w-[212px] grid-cols-2 gap-0.5 max-h-[calc(45dvh/var(--ui-scale,1))] overflow-y-auto p-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
                 {skeleton.groups
                   .filter((g) => g.maps.some((m) => m.projection === 'interactive'))
                   .map((g) => (
@@ -2027,7 +2028,7 @@ export function MapPage() {
                         setMapMenuOpen(false)
                       }}
                       title={g.nameZh || g.normalizedName}
-                      className={`w-full text-left px-1.5 py-1.5 text-[13px] truncate ${
+                      className={`w-full text-left px-1.5 py-1.5 rounded text-[13px] truncate ${
                         selected === g.normalizedName
                           ? 'text-[#d4a174] bg-amber/10'
                           : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
