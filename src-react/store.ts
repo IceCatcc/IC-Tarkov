@@ -76,8 +76,8 @@ interface AppState {
   focusZoom: number
   setFocusZoom: (v: number) => void
   /**
-   * 地图：是否把本地战局监控里 Boss 的刷新坐标画到地图上（头像图标）。
-   * 只画日志里确认刷新的那些，随 mapPrefs 持久化。
+   * 地图：是否把本地战局监控里 Boss 的刷新位置标到地图上（头像图标 + 文字小标签）。
+   * 只画日志里确认刷新的那些（含已死亡）；「预计刷新」没有坐标，只在刷新率面板里标状态。
    */
   bossMarkers: boolean
   setBossMarkers: (v: boolean) => void

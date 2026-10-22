@@ -518,6 +518,10 @@ export async function getBossMonitor(): Promise<BossMonitorPayload> {
   return EMPTY_BOSS_MONITOR
 }
 
+export async function rescanBossMonitor(): Promise<BossMonitorPayload> {
+  return EMPTY_BOSS_MONITOR
+}
+
 export async function setBossMonitorEnabled(_enabled: boolean): Promise<BossMonitorPayload> {
   throw new Error(NOT_SUPPORTED)
 }

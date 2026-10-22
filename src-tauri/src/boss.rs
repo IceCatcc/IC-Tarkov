@@ -22,7 +22,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -45,6 +45,11 @@ const ORIGINAL_AI_LEVEL: &str = "Error";
 /// `RaidId:6728..., Count:0, Locations:bigmap -> factory4_day -> `
 static RE_RAID: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"RaidId:([^,]+),.*Locations:([^\r\n]*)").unwrap());
+/// 只有地图链、没有可用 RaidId 时的兜底（行内字段顺序不同 / 缺逗号等情况）。
+/// 口径与 `parser.rs` 的 `RE_LOCATION` 一致：只取 `Locations:` 后的地图链。
+static RE_LOCATION: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"Locations:([A-Za-z0-9_\-]*(?:\s*->\s*[A-Za-z0-9_\-]*)*)").unwrap()
+});
 /// `Init Boss wave:bossKilla ShallSpawn:True BossChance:30`
 static RE_PLAN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"Init Boss wave:(\w+) ShallSpawn:(True|False)(?:[^\r\n]*?BossChance:(\d+))?")
@@ -229,6 +234,13 @@ struct Runtime {
     btr_ready: Vec<String>,
     /// BTR 运送购买时间（`Service PlayerTaxi ...`）
     btr_taxi: Vec<String>,
+    /// 最后处理过的进图行（`Locations` / `MatchingCompleted`）的日志时间。
+    /// 兜底检查据此判断「尾部那条进图记录是不是已经处理过」，同时也保证不倒退回旧局。
+    last_entry_ts: String,
+    /// 兜底检查用：上次看到的 application 日志签名（文件名 + 大小 + mtime）
+    fallback_sig: String,
+    /// 兜底检查用：上次执行时间（节流）
+    fallback_at: Option<Instant>,
 }
 
 impl Default for Runtime {
@@ -251,6 +263,9 @@ impl Default for Runtime {
             pending_dispose: None,
             btr_ready: Vec::new(),
             btr_taxi: Vec::new(),
+            last_entry_ts: String::new(),
+            fallback_sig: String::new(),
+            fallback_at: None,
         }
     }
 }
@@ -269,6 +284,70 @@ impl Runtime {
         self.pending_dispose = None;
         self.btr_ready.clear();
         self.btr_taxi.clear();
+        self.last_entry_ts.clear();
+        self.fallback_sig.clear();
+        self.fallback_at = None;
+    }
+
+    /// 记下已处理的进图行时间（只增不减，兜底检查靠它避免重复 / 回退）
+    fn note_entry(&mut self, ts: &str) {
+        if ts > self.last_entry_ts.as_str() {
+            self.last_entry_ts = ts.to_string();
+        }
+    }
+
+    /// `MatchingCompleted:` = 匹配完成，准备进图。
+    ///
+    /// **只在「当前没有有效战局」时开新局**：日志里 `Locations:` 行有时早于这一行，
+    /// 早先按「5 秒内不重置」判断，一旦两行间隔超过 5 秒就会把刚识别的战局清空
+    /// （表现为「进图漏了 / 地图变回未进入战局」）。现在改看战局本身是否存在：
+    /// 已有地图且未结束就认为还是同一局，换局交给 RaidId 变化判定。
+    fn on_matching_completed(&mut self, ts: &str) {
+        let stale = self.raid.map.is_empty() || self.raid.ended;
+        if stale {
+            self.begin_raid(ts);
+        }
+        self.raid.in_raid = true;
+        if self.raid.started_at.is_none() {
+            self.raid.started_at = Some(ts.to_string());
+        }
+        self.note_entry(ts);
+    }
+
+    /// `RaidId:..., Locations:<链>`（或仅 `Locations:<链>`）：进图 / 转移。
+    /// 地图链取**最后一个**非空段（转移时是「源 -> 目标」）。
+    fn on_locations(&mut self, line: &str, ts: &str) {
+        let (raid_id, chain) = match RE_RAID.captures(line) {
+            Some(c) => (Some(c[1].trim().to_string()), c[2].to_string()),
+            // 兜底：拿不到 RaidId 时只用地图链（字段顺序不同 / 缺逗号的老版本）
+            None => match RE_LOCATION.captures(line) {
+                Some(c) => (None, c[1].to_string()),
+                None => return,
+            },
+        };
+        let current = chain
+            .split("->")
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .last()
+            .unwrap_or("");
+        if current.is_empty() {
+            return;
+        }
+        if let Some(id) = &raid_id {
+            // 同一会话里换了 RaidId：上一局已结束，开新局
+            if !self.raid.raid_id.is_empty() && self.raid.raid_id != *id {
+                self.begin_raid(ts);
+            }
+            self.raid.raid_id = id.clone();
+        }
+        if self.raid.started_at.is_none() {
+            self.raid.started_at = Some(ts.to_string());
+        }
+        self.raid.map = canon_map(current);
+        self.raid.ended = false;
+        self.raid.in_raid = true;
+        self.note_entry(ts);
     }
 
     /// 新战局边界：清空 Boss / BTR 状态，只保留本局起点时间
@@ -318,46 +397,14 @@ impl Runtime {
 
         match kind {
             FileKind::Application => {
-                // 战局边界：匹配完成 → 新的一局。
-                // 少数版本里 Locations 行会紧跟 / 甚至先于匹配行出现，短时间内不重复重置，
-                // 否则会把刚写进来的当前地图与 Boss 状态清掉。
+                // 战局边界：匹配完成 → 新的一局（已有有效战局时只当作「已进图」）
                 if line.contains("MatchingCompleted:") {
-                    let fresh = self
-                        .raid
-                        .started_at
-                        .as_deref()
-                        .map_or(false, |s| within_secs(s, &ts, 5));
-                    if !fresh {
-                        self.begin_raid(&ts);
-                    }
+                    self.on_matching_completed(&ts);
                     return;
                 }
+                // 进图 / 地图转移：`RaidId:..., Locations:<链>`
                 if line.contains("Locations:") {
-                    if let Some(c) = RE_RAID.captures(line) {
-                        let raid_id = c[1].trim().to_string();
-                        // 转移时是「源 -> 目标」链，最后一个非空段才是当前地图
-                        // （与 parser.rs 的 RE_LOCATION 口径保持一致）
-                        let chain = c[2].trim().trim_end_matches(',');
-                        let current = chain
-                            .split("->")
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty())
-                            .last()
-                            .unwrap_or("");
-                        if !current.is_empty() {
-                            if !self.raid.raid_id.is_empty() && self.raid.raid_id != raid_id {
-                                // 同一会话里换了 RaidId：上一局已结束，开新局
-                                self.begin_raid(&ts);
-                            }
-                            if self.raid.started_at.is_none() {
-                                self.raid.started_at = Some(ts.clone());
-                            }
-                            self.raid.raid_id = raid_id;
-                            self.raid.map = canon_map(current);
-                            self.raid.ended = false;
-                            self.raid.in_raid = true;
-                        }
-                    }
+                    self.on_locations(line, &ts);
                 }
                 if line.contains("GameStarted:") {
                     self.raid.in_raid = true;
@@ -647,10 +694,26 @@ fn poll(app: &AppHandle, rt: &mut Runtime) {
     files.sort_by(|a, b| a.1.cmp(&b.1));
     rt.ai_log_found = files.iter().any(|(k, _)| *k == FileKind::Ai);
 
+    let mut batches: Vec<(FileKind, Vec<String>)> = Vec::new();
     for (kind, path) in files {
-        for line in read_new_lines(rt, &path) {
-            rt.handle_line(kind, &line);
+        let lines = read_new_lines(rt, &path);
+        if !lines.is_empty() {
+            batches.push((kind, lines));
         }
+    }
+    replay_in_order(rt, batches);
+
+    // 兜底检查：application 日志变了就再看一眼尾部有没有漏掉的进图记录
+    // （先开游戏再开程序、日志轮转、会话切换、进图行间隔过远等情况）
+    let sig = app_sig(&dir);
+    if sig != rt.fallback_sig
+        && rt
+            .fallback_at
+            .map_or(true, |t| t.elapsed().as_secs() >= FALLBACK_SECS)
+    {
+        rt.fallback_at = Some(Instant::now());
+        rt.fallback_sig = sig;
+        fallback_entry_check(rt, &dir);
     }
 
     rt.diagnostic = if !rt.ai_log_found {
@@ -658,7 +721,11 @@ fn poll(app: &AppHandle, rt: &mut Runtime) {
     } else if !rt.has_ai_data {
         "已找到 aiData 日志，但还没有 AI 记录（改完日志配置需重启游戏才生效）".into()
     } else if rt.raid.map.is_empty() {
-        "日志已连接 · 等待进入战局".into()
+        if rt.raid.in_raid {
+            "已检测到进图信号 · 日志里还没有地图（Locations）信息".into()
+        } else {
+            "日志已连接 · 等待进入战局".into()
+        }
     } else if rt.raid.ended {
         "战局已结束 · 等待下一局".into()
     } else {
@@ -666,6 +733,56 @@ fn poll(app: &AppHandle, rt: &mut Runtime) {
     };
 
     rt.emit_if_changed(app);
+}
+
+/// 把一次轮询里多个日志文件的新行**按日志时间合并**后投递。
+///
+/// 文件是按名字分类读出来的（application / aiData / backend），如果按文件依次投递，
+/// 一次回放就会把「本会话所有战局」的 AI 行都算到最后一次战局头上。
+/// 归并后各局状态互相独立，最后一次战局即「最近一次进图记录」。
+/// 每轮只取一小段（`CHUNK`），避免回放几百 MB 日志时把内存打爆。
+fn replay_in_order(rt: &mut Runtime, batches: Vec<(FileKind, Vec<String>)>) {
+    const CHUNK: usize = 4096;
+    if batches.len() < 2 {
+        // 只有一个文件时不必归并
+        if let Some((kind, lines)) = batches.into_iter().next() {
+            for line in lines {
+                rt.handle_line(kind, &line);
+            }
+        }
+        return;
+    }
+    let mut cursors = vec![0usize; batches.len()];
+    loop {
+        let mut window: Vec<(String, FileKind, String)> = Vec::new();
+        for (i, (kind, lines)) in batches.iter().enumerate() {
+            let start = cursors[i];
+            if start >= lines.len() {
+                continue;
+            }
+            let end = (start + CHUNK).min(lines.len());
+            // 没有时间戳的行（如 BTR 发车信号）沿用同文件上一行的时间作为排序键
+            let mut ts = if start == 0 {
+                String::new()
+            } else {
+                ts_key(&lines[start - 1]).unwrap_or("").to_string()
+            };
+            for line in &lines[start..end] {
+                if let Some(t) = ts_key(line) {
+                    ts = t.to_string();
+                }
+                window.push((ts.clone(), *kind, line.clone()));
+            }
+            cursors[i] = end;
+        }
+        if window.is_empty() {
+            break;
+        }
+        window.sort_by(|a, b| a.0.cmp(&b.0));
+        for (_, kind, line) in window {
+            rt.handle_line(kind, &line);
+        }
+    }
 }
 
 /// 读取文件新增的完整行；不完整的一行留在 tail 里等下次拼接。
@@ -713,6 +830,109 @@ fn read_new_lines(rt: &mut Runtime, path: &Path) -> Vec<String> {
     rt.tails.insert(key, if tail.len() > 2_000_000 { String::new() } else { tail });
     lines.retain(|l| !l.is_empty());
     lines
+}
+
+/* ---------------- 兜底检查 ---------------- */
+
+/// 兜底检查的最小间隔（秒）：避免每秒都去读日志尾部
+const FALLBACK_SECS: u64 = 3;
+/// 兜底检查每次往回读的块大小 / 最多回看多少字节
+const FALLBACK_CHUNK: u64 = 2 * 1024 * 1024;
+const FALLBACK_MAX: u64 = 16 * 1024 * 1024;
+
+/// application 日志的「文件名 + 大小 + mtime」签名。没变化就不用重复兜底检查。
+fn app_sig(dir: &Path) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            let name = p
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if kind_of(&name) != Some(FileKind::Application) {
+                continue;
+            }
+            let meta = std::fs::metadata(&p).ok();
+            let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let mtime = meta
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            parts.push(format!("{name}:{len}:{mtime}"));
+        }
+    }
+    parts.sort();
+    parts.join("|")
+}
+
+/// 日志里最后一条进图记录（`Locations:` 或 `MatchingCompleted:`）。
+/// 从文件末尾往前分块读（`FALLBACK_CHUNK`），最多回看 `FALLBACK_MAX`，
+/// 起点落在行中间时丢掉残行。
+fn tail_last_entry(path: &Path) -> Option<String> {
+    let mut f = std::fs::File::open(path).ok()?;
+    let size = f.metadata().ok()?.len();
+    let mut end = size;
+    let mut scanned = 0u64;
+    while end > 0 && scanned < FALLBACK_MAX {
+        let start = end.saturating_sub(FALLBACK_CHUNK);
+        f.seek(SeekFrom::Start(start)).ok()?;
+        let mut buf = Vec::new();
+        f.by_ref().take(end - start).read_to_end(&mut buf).ok()?;
+        let text = String::from_utf8_lossy(&buf).into_owned();
+        // 起点可能落在行中间：丢掉首个残行（除非已经读到文件开头）
+        let body = if start == 0 {
+            text.as_str()
+        } else {
+            text.split_once('\n').map(|x| x.1).unwrap_or("")
+        };
+        for line in body.lines().rev() {
+            if line.contains("Locations:") || line.contains("MatchingCompleted:") {
+                return Some(line.to_string());
+            }
+        }
+        scanned += end - start;
+        end = start;
+    }
+    None
+}
+
+/// 兜底检查：不依赖增量偏移，直接看 application 日志**末尾**的最后一条进图记录。
+///
+/// 增量读取本身不会丢行，但下面这些情况仍会让状态与实际脱节：
+/// 日志轮转后偏移失效、程序打开得太晚（先开游戏再开本程序）、会话目录被换掉、
+/// `Locations` 与 `MatchingCompleted` 相隔太久等。
+/// 只在「比已处理的那条更新」时才采纳（`last_entry_ts` 单调），
+/// 因此重复执行不会把上一局重新灌回来，也不会清掉「已结束」标记。
+fn fallback_entry_check(rt: &mut Runtime, dir: &Path) {
+    let mut apps: Vec<PathBuf> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            let name = p
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if kind_of(&name) == Some(FileKind::Application) {
+                apps.push(p);
+            }
+        }
+    }
+    if apps.is_empty() {
+        return;
+    }
+    // 轮转后的文件带序号（application_000.log / _001.log …），按名字排最后的最新
+    apps.sort();
+    let Some(path) = apps.last() else { return };
+    let Some(line) = tail_last_entry(path) else {
+        return;
+    };
+    let ts = timestamp_of(&line);
+    // 只采纳「比已处理的那条更新」的记录：既不重复，也不回退到上一局
+    if ts > rt.last_entry_ts {
+        rt.handle_line(FileKind::Application, &line);
+    }
 }
 
 /// 找到最新会话目录（`log_yyyy.MM.dd_H-mm-ss_xxx`）。
@@ -808,30 +1028,23 @@ fn push_recent(v: &mut Vec<String>, ts: String) {
     }
 }
 
-fn timestamp_of(line: &str) -> String {
+/// 行首的日志时间戳（`yyyy-MM-dd HH:mm:ss.fff`），没有则 None
+fn ts_key(line: &str) -> Option<&str> {
     if line.len() >= 23 && line.as_bytes().get(4) == Some(&b'-') {
-        line[..23].to_string()
+        line.get(..23)
     } else {
-        now()
+        None
     }
+}
+
+fn timestamp_of(line: &str) -> String {
+    ts_key(line).map(|s| s.to_string()).unwrap_or_else(now)
 }
 
 fn now() -> String {
     chrono::Local::now()
         .format("%Y-%m-%d %H:%M:%S")
         .to_string()
-}
-
-/// 两个日志时间戳（`yyyy-MM-dd HH:mm:ss.fff`）相差是否在 secs 之内；解析失败按「否」处理
-fn within_secs(a: &str, b: &str, secs: i64) -> bool {
-    let fmt = "%Y-%m-%d %H:%M:%S%.3f";
-    match (
-        chrono::NaiveDateTime::parse_from_str(a, fmt),
-        chrono::NaiveDateTime::parse_from_str(b, fmt),
-    ) {
-        (Ok(x), Ok(y)) => (y - x).num_seconds().abs() <= secs,
-        _ => false,
-    }
 }
 
 /// 日志里的 location id（bigmap / factory4_day …）→ tarkov.dev 的 normalizedName
@@ -897,10 +1110,15 @@ fn save_settings(app: &AppHandle, s: &BossSettings) -> Result<(), String> {
     std::fs::write(&p, text).map_err(|e| format!("保存 Boss 监控设置失败：{e}"))
 }
 
+/// 当前快照。`force` = 清掉增量偏移，从会话日志开头重新回放
+/// （进图检测漏了时的手动兜底；也能立刻把「最近一次进图记录」捞回来）。
 #[tauri::command]
-pub fn boss_get_state(app: AppHandle) -> BossMonitorPayload {
+pub fn boss_get_state(app: AppHandle, force: Option<bool>) -> BossMonitorPayload {
     let rt = runtime();
     let mut g = rt.lock().unwrap();
+    if force.unwrap_or(false) {
+        g.reset_scan();
+    }
     poll(&app, &mut g);
     g.snapshot()
 }

@@ -340,11 +340,35 @@ img.extract-req-icon {
         drop-shadow(0 0 6px rgba(39, 224, 192, 0.6));
 }
 
-/* 本地战局 Boss 刷新位置：Boss 头像 + 红色描边发光；已确认死亡的淡显 */
+/* 本地战局 Boss 状态标记：Boss 头像 + 描边发光 + 下方文字小标签
+   （已刷新 绿 / 已死亡 灰淡显；标签本身就是文字，不只靠颜色区分。
+   「预计刷新 / 本局不刷」不在地图上画，改在右侧 Boss 刷新率面板里用小标签标出） */
 .map-boss-live {
     background: transparent;
     border: none;
     box-shadow: none;
+}
+/* 标签挂在图标正下方：marker 元素自身由 Leaflet 定位，标签用绝对定位溢出到图标外 */
+.map-boss-live-tag {
+    position: absolute;
+    top: 35px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0 4px;
+    border-radius: 4px;
+    border: 1px solid rgba(63, 185, 80, 0.75);
+    background: rgba(13, 17, 23, 0.9);
+    color: #7ee787;
+    font-size: 10px;
+    line-height: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+    pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+.map-boss-live.is-dead .map-boss-live-tag {
+    border-color: rgba(139, 148, 158, 0.7);
+    color: rgba(201, 209, 217, 0.85);
 }
 .map-boss-live img {
     display: block;

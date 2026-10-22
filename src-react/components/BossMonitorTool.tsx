@@ -6,6 +6,7 @@ import {
   getBossMonitor,
   getMapBosses,
   getMapsSkeleton,
+  rescanBossMonitor,
   restoreBossLoggingConfig,
   setBossGameRoot,
   setBossMonitorEnabled,
@@ -133,6 +134,19 @@ export function BossMonitorTool() {
       cancelled = true
     }
   }, [unsupported])
+
+  /** 兜底重扫：从日志开头重新解析（进图检测漏了时手动补救） */
+  const rescan = useCallback(async () => {
+    setBusy('rescan')
+    setError(null)
+    try {
+      useStore.getState().setBoss(await rescanBossMonitor())
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }, [])
 
   const mapNames = useMemo(() => {
     const out: Record<string, string> = {}
@@ -342,8 +356,8 @@ export function BossMonitorTool() {
             </div>
             <div className="mt-1 text-[12px] leading-relaxed text-muted/85">
               本功能只读取本机游戏日志，并可修改游戏的 <Code>Logging.config</Code>（日志级别），
-              不读写游戏内存、不注入进程、不修改游戏资源。但任何第三方工具都无法保证安全，
-              是否使用（尤其是线上战局）请自行判断并承担风险。
+              不读写游戏内存、不注入进程、不修改游戏资源。本功能仅在本地战局（PvE & 离线）中生效，
+              在线战局无法使用。但任何第三方工具都无法保证安全，是否使用请自行判断并承担风险。
             </div>
           </div>
         </div>
@@ -368,7 +382,7 @@ export function BossMonitorTool() {
           <div className="min-w-0">
             <div className="text-[14px] text-[#e6edf3]">本地战局 Boss 监控</div>
             <div className="mt-0.5 text-[11px] leading-snug text-muted/80">
-              读本机战局日志 · Boss / BTR 刷新 · 仅本地 PvE / 离线战局有效
+              读本机战局日志 · Boss / BTR 刷新 · 仅本地 PvE & 离线战局有效
             </div>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-3">
@@ -396,7 +410,7 @@ export function BossMonitorTool() {
           </label>
           <label
             className="flex cursor-pointer select-none items-center gap-2"
-            title="把日志里确认刷新的 Boss / BTR 按坐标画在地图上（Boss 用头像，BTR 用蓝色字样），已确认死亡的淡显"
+            title="把日志里确认刷新的 Boss / BTR 按坐标画在地图上（图标下方带「已刷新 / 已死亡」文字小标签）；「预计刷新」没有坐标，不画在地图上，改在右侧 Boss 刷新率面板里标出"
           >
             <input
               type="checkbox"
@@ -404,7 +418,7 @@ export function BossMonitorTool() {
               onChange={(e) => setBossMarkers(e.target.checked)}
               className="accent-amber"
             />
-            在地图上绘制刷新位置
+            在地图上标注 Boss 状态
           </label>
           <span className="ml-auto truncate font-mono text-[10.5px] text-muted/50">
             {monitor?.session ? `会话 ${monitor.session}` : '尚未检测到日志会话'}
@@ -428,18 +442,18 @@ export function BossMonitorTool() {
       {/* 当前战局 */}
       <Section
         title="当前战局"
-        hint={mapLabel ? `${mapLabel}${monitor?.ended ? ' · 已结束' : ''}` : undefined}
+        hint={
+          mapLabel ? `${mapLabel}${monitor?.ended ? ' · 最近一局（已结束）' : ''}` : undefined
+        }
         icon={<IconRadar />}
         right={
           <button
-            onClick={() =>
-              getBossMonitor()
-                .then((m) => useStore.getState().setBoss(m))
-                .catch(() => {})
-            }
-            className="rounded border border-line/80 px-2 py-1 text-[11px] text-muted hover:border-amber/50 hover:text-[#d4a174]"
+            onClick={rescan}
+            disabled={!enabled || busy === 'rescan'}
+            title="从日志开头重新扫描一遍（进图没被识别出来时点这里）"
+            className="rounded border border-line/80 px-2 py-1 text-[11px] text-muted hover:border-amber/50 hover:text-[#d4a174] disabled:opacity-50"
           >
-            刷新
+            {busy === 'rescan' ? '扫描中…' : '重新扫描'}
           </button>
         }
       >
@@ -451,7 +465,13 @@ export function BossMonitorTool() {
           <span className="text-muted">
             状态：
             <span className={monitor?.inRaid ? 'text-[#3fb950]' : 'text-muted/70'}>
-              {monitor?.inRaid ? '战局进行中' : enabled ? '待机' : '监控已关闭'}
+              {monitor?.inRaid
+                ? '战局进行中'
+                : !enabled
+                  ? '监控已关闭'
+                  : monitor?.ended
+                    ? '最近一局已结束'
+                    : '待机'}
             </span>
           </span>
           {monitor?.startedAt && (
@@ -471,7 +491,7 @@ export function BossMonitorTool() {
           <div className="px-4 py-8 text-center text-[12px] leading-relaxed text-muted/70">
             {map
               ? '数据里这张地图没有固定 Boss。'
-              : '尚未检测到战局：进入本地（PvE / 离线）战局后会自动开始监控。'}
+              : '尚未检测到战局：进入本地（PvE & 离线）战局后会自动开始监控；人已在局内却显示这里时，点右上「重新扫描」，程序也会在日志更新后几秒内自动兜底重查。'}
           </div>
         ) : (
           <ul className="divide-y divide-line/40">
@@ -650,11 +670,24 @@ export function BossMonitorTool() {
       <div className="rounded-xl border border-line/70 bg-ink-800/40 px-3.5 py-3 text-[11.5px] leading-relaxed text-muted/70">
         <div className="mb-1 text-[12px] text-[#e6edf3]">说明</div>
         <ul className="list-disc space-y-1 pl-4">
-          <li>仅在**本地运行**的战局里有效（PvE / 离线）；在线战局由服务器托管，本机日志不会输出 AI 生成细节。</li>
+          <li>
+            仅对<strong className="font-semibold text-[#e6edf3]">本地战局</strong>生效（PvE & 离线战局）。
+            在线战局（PvP 等由服务器托管的战局）完全不支持：本机日志不会输出 Boss / BTR 的生成与激活细节。
+          </li>
           <li>「预计刷新」来自日志里的生成判定（roll），与是否已经激活是两件事，因此能区分「本局不刷」与「刷了但还没激活」。</li>
+          <li>
+            勾选「在地图上标注 Boss 状态」后，已刷新 / 已死亡的 Boss 会按日志坐标画在地图上，
+            图标下方带文字小标签；「预计刷新」还没有坐标、不在地图上占位，
+            改在右侧「地图信息 → Boss 刷新率」面板里用小标签标出；百分比优先用日志里的实际刷新率，
+            日志还没判定时退回 tarkov.dev 上游数据（来源于 wiki），鼠标悬停可看到当前是哪种口径。
+          </li>
           <li>开启监控会自动把 <Code>aiData</Code> 调到 <Code>Trace</Code>，关闭时自动改回 <Code>Error</Code>（都需重启游戏生效）；下方配置卡的两个按钮可手动补做。</li>
           <li>日志目录取自「设置」里配置的路径（通常为 <Code>%LOCALAPPDATA%\Temp\Battlestate Games\EscapeFromTarkov\Logs</Code>）。</li>
           <li>BTR 与 Boss 走同一套日志判定（生成判定 / 实际激活），另单独记录「出发准备信号」与购车记录；不发车信号时也可能已经出现，以状态徽标为准。</li>
+          <li>
+            进图识别靠本地日志推断，偶尔会滞后 / 漏掉：程序会在日志更新后自动兜底重查，
+            也可点「当前战局」右上角的 <Code>重新扫描</Code> 从日志开头完整回放一遍。
+          </li>
           <li>关闭监控会清空实时状态，但不会动游戏日志与 Logging.config。</li>
         </ul>
       </div>

@@ -459,6 +459,45 @@ function bossChanceStyle(
   }
 }
 
+/**
+ * Boss 状态小标签：与颜色并用，避免只靠颜色区分。
+ * 未开启监控 / 日志里还没判定时不显示（返回 null）。
+ */
+function bossStatusTag(
+  status: BossSpawnState['status'] | undefined,
+  live: boolean,
+): { text: string; cls: string; title: string } | null {
+  if (!live || !status) return null
+  switch (status) {
+    case 'confirmed':
+      return {
+        text: '已刷新',
+        cls: 'border-[#3fb950]/50 bg-[#3fb950]/15 text-[#7ee787]',
+        title: '已确认刷新（日志里 Boss 已激活）',
+      }
+    case 'planned':
+      return {
+        text: '预计刷新',
+        cls: 'border-amber/50 bg-amber/15 text-[#d4a174]',
+        title: '预计刷新（日志已判定本局要刷，尚未激活）',
+      }
+    case 'not_planned':
+      return {
+        text: '本局不刷',
+        cls: 'border-line/80 bg-white/[0.04] text-muted/70',
+        title: '本局不刷（日志判定未命中）',
+      }
+    case 'dead':
+      return {
+        text: '已死亡',
+        cls: 'border-[#f85149]/40 bg-[#f85149]/10 text-[#ff9b95]',
+        title: '已确认死亡',
+      }
+    default:
+      return null
+  }
+}
+
 /* ================= 组件 ================= */
 
 export function MapPage() {
@@ -1248,7 +1287,9 @@ export function MapPage() {
       const isBtr = role === 'shooterbtr'
       // 只画真 Boss 与 BTR（日志里的 pmc / assault / marksman 等普通 AI 不画）
       if (!isBtr && !isBossRole(role)) continue
-      // 只画确认刷新的（含已确认死亡，淡显）；「预计刷新」还没有坐标
+      // 只画确认刷新的（含已确认死亡，淡显）。
+      // 「预计刷新 / 本局不刷」阶段日志里没有坐标，不在地图上占位：
+      // 这两种状态改在「地图信息 → Boss 刷新率」面板里用小标签标出。
       if (b.status !== 'confirmed' && b.status !== 'dead') continue
       const ll = logPosLatLng(b.position)
       if (!ll) continue
@@ -1259,20 +1300,23 @@ export function MapPage() {
         (isBtr ? 'BTR' : b.role)
       const img = bossImage(b.role)
       const dead = b.status === 'dead'
+      // 状态不只靠颜色：图标下方挂一个文字小标签
+      const tag = dead ? '已死亡' : '已刷新'
+      const iconHtml = img
+        ? `<img src="${img}" alt="" draggable="false" />`
+        : isBtr
+          ? `<span class="map-boss-live-btr">BTR</span>`
+          : `<span class="map-boss-live-fallback">?</span>`
       layer.addLayer(
         L.marker(ll, {
           zIndexOffset: 9000,
           icon: L.divIcon({
             className: `map-boss-live${dead ? ' is-dead' : ''}${isBtr ? ' is-btr' : ''}`,
-            html: img
-              ? `<img src="${img}" alt="" draggable="false" />`
-              : isBtr
-                ? `<span class="map-boss-live-btr">BTR</span>`
-                : `<span class="map-boss-live-fallback">?</span>`,
+            html: `${iconHtml}<span class="map-boss-live-tag">${tag}</span>`,
             iconSize: [34, 34],
             iconAnchor: [17, 17],
           }),
-        }).bindTooltip(`${name}${dead ? '（已死亡）' : '（已刷新）'}`, {
+        }).bindTooltip(`${name}（${tag}）`, {
           direction: 'top',
           offset: [0, -16],
         }),
@@ -2052,7 +2096,7 @@ export function MapPage() {
           onWheel={(e) => e.stopPropagation()}
         >
           {infoOpen && (
-            <div className="pointer-events-none w-[180px] max-h-[calc(60dvh/var(--ui-scale,1))] overflow-y-auto rounded-xl border border-line bg-ink-800/60 shadow-xl p-2.5 space-y-2.5">
+            <div className="pointer-events-none w-[210px] max-h-[calc(60dvh/var(--ui-scale,1))] overflow-y-auto rounded-xl border border-line bg-ink-800/60 shadow-xl p-2.5 space-y-2.5">
               {/* 游戏时间：塔科夫 7 倍速时钟（本地计算，见 components/GameClock.tsx） */}
               <GameClock />
               <div>
@@ -2064,30 +2108,48 @@ export function MapPage() {
                     {mapBosses.map((b) => {
                       const live = liveBoss.get(b.id.toLowerCase())
                       const tint = bossChanceStyle(live?.status, !!bossMonitor?.enabled)
+                      // 状态小标签（预计刷新 / 已刷新 / 已死亡 / 本局不刷），不只靠颜色区分
+                      const tag = bossStatusTag(live?.status, !!bossMonitor?.enabled)
+                      // 刷新率口径：日志里的 `BossChance` 是本局实际用的百分数（0~100），优先用它；
+                      // 日志还没判定时退回 tarkov.dev 上游数据（小数 0~1，其口径源自 wiki），
+                      // tooltip 里要标清当前显示的是哪一种。
+                      const liveChance = live?.chance ?? null
+                      const pct =
+                        liveChance != null
+                          ? `${Math.round(liveChance)}%`
+                          : `${Math.round(b.chance * 100)}%`
+                      const pctTitle = `${tint.title} · ${
+                        liveChance != null
+                          ? '实际刷新率（本局日志判定）'
+                          : '来源 wiki（tarkov.dev 上游数据）'
+                      }`
                       return (
-                        <div
-                          key={b.id}
-                          className="flex items-center justify-between gap-2 text-[14px]"
-                        >
-                          <span className="flex items-center gap-1.5 min-w-0">
-                            {bossImage(b.id) && (
-                              <img
-                                src={bossImage(b.id)!}
-                                alt=""
-                                loading="lazy"
-                                draggable={false}
-                                className="w-[18px] h-[18px] shrink-0 rounded-full object-cover bg-ink-700/60"
-                              />
-                            )}
-                            <span className="text-[#c9d1d9] truncate" title={b.nameZh}>
-                              {b.nameZh}
-                            </span>
+                        <div key={b.id} className="flex items-start gap-1.5 text-[14px]">
+                          {bossImage(b.id) && (
+                            <img
+                              src={bossImage(b.id)!}
+                              alt=""
+                              loading="lazy"
+                              draggable={false}
+                              className="mt-0.5 w-[18px] h-[18px] shrink-0 rounded-full object-cover bg-ink-700/60"
+                            />
+                          )}
+                          <span className="min-w-0 flex-1 truncate text-[#c9d1d9]" title={b.nameZh}>
+                            {b.nameZh}
                           </span>
+                          {tag && (
+                            <span
+                              className={`shrink-0 rounded border px-1 py-px text-[10px] leading-[14px] ${tag.cls}`}
+                              title={tag.title}
+                            >
+                              {tag.text}
+                            </span>
+                          )}
                           <span
                             className={`shrink-0 tabular-nums transition-colors ${tint.cls}`}
-                            title={tint.title}
+                            title={pctTitle}
                           >
-                            {Math.round(b.chance * 100)}%
+                            {pct}
                           </span>
                         </div>
                       )

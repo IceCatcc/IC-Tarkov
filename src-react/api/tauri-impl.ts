@@ -467,6 +467,14 @@ export async function getBossMonitor(): Promise<BossMonitorPayload> {
   return await invoke<BossMonitorPayload>('boss_get_state')
 }
 
+/**
+ * 强制重扫：清掉增量偏移，从会话日志开头重新回放。
+ * 进图检测漏了（状态还是「等待进入战局」但人已经在局内）时的手动兜底。
+ */
+export async function rescanBossMonitor(): Promise<BossMonitorPayload> {
+  return await invoke<BossMonitorPayload>('boss_get_state', { force: true })
+}
+
 /** 开关监控（关闭会清空实时状态，设置仍落盘） */
 export async function setBossMonitorEnabled(enabled: boolean): Promise<BossMonitorPayload> {
   return await invoke<BossMonitorPayload>('boss_set_enabled', { enabled })
