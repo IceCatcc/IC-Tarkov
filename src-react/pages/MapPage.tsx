@@ -1846,89 +1846,12 @@ export function MapPage() {
               图标 {chipsOpen ? '▾' : '▴'}
             </button>
         </div>
-        {/* 右上角浮动按钮组：聚焦 + 层级切换。
-            层级 z 需高于右下角「地图信息」浮窗（z-600），否则展开的楼层选单会被它盖住 */}
-        <div className="absolute right-3 top-3 z-[620] flex items-start gap-1.5">
-          {/* 聚焦（层级切换左侧） */}
-          <div ref={focusRef} className="relative flex flex-col items-end gap-1.5">
-            <button
-              onClick={() => {
-                setFocusOpen((v) => !v)
-                setChipsOpen(false)
-              }}
-              title="自动聚焦：定位后自动居中地图（可选自动缩放）"
-              className={`px-2.5 py-1.5 rounded border bg-ink-800/80 shadow-lg text-[13px] transition-colors ${
-                focusOpen
-                  ? 'border-amber text-[#d4a174] bg-amber/10'
-                  : 'border-line text-[#e6edf3] hover:border-amber/70'
-              }`}
-            >
-              聚焦
-            </button>
-            {focusOpen && (
-              <div className="w-60 rounded-md border border-line bg-ink-800 p-3 shadow-lg shadow-black/40">
-                {focusBody}
-              </div>
-            )}
-          </div>
-          {/* 层级切换：地图右上浮动按钮（tarkov.dev 风格，自定义非原生组件） */}
-          {floors.length > 0 && (
-          // 面板改为 absolute 浮层：展开时不撑宽容器，否则会把左边的「聚焦」按钮顶开
-          <div ref={floorRef} className="relative flex flex-col items-end gap-1.5">
-            <button
-              onClick={() => setFloorOpen((o) => !o)}
-              title="切换地图层级"
-              className="min-w-[86px] flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M12 3 2 8l10 5 10-5-10-5Z"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="m2 14 10 5 10-5"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                  opacity="0.55"
-                />
-              </svg>
-              {floorSel === -1 ? '主层' : floorNameZh(floors[floorSel]?.name)}
-              <span
-                className="text-[11px] opacity-70 transition-transform"
-                style={{ transform: floorOpen ? 'rotate(180deg)' : 'none' }}
-              >
-                ▼
-              </span>
-            </button>
-
-            {floorOpen && (
-              <div className="absolute right-0 top-[calc(100%+6px)] z-[610] min-w-[110px] py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
-                {floorItems.map(({ lyr, i }) => (
-                  <button
-                    key={lyr?.name ?? 'main'}
-                    onClick={() => {
-                      setFloorSel(i)
-                      setFloorOpen(false)
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 text-[14px] whitespace-nowrap ${
-                      floorSel === i
-                        ? 'text-[#d4a174] bg-amber/10'
-                        : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
-                    }`}
-                  >
-                    {lyr ? floorNameZh(lyr.name) : '主层'}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          )}
+        {/* 右上角：塔科夫游戏时间（固定显示，不随任何面板收起） */}
+        <div className="absolute right-3 top-3 z-[600] cursor-default select-none rounded border border-line bg-ink-800/80 px-2.5 py-1.5 shadow-lg backdrop-blur-sm">
+          <GameClock />
         </div>
 
-        {/* 左上角浮窗行：任务 + 地图选单 */}
+        {/* 左上角浮窗行：任务 + 地图选单 + 层级 + 聚焦（后两者原在右上角，已并入本行） */}
         <div
           className="absolute left-3 top-3 z-[600] flex items-start gap-1.5"
           onWheel={(e) => e.stopPropagation()}
@@ -2040,6 +1963,83 @@ export function MapPage() {
               </div>
             )}
           </div>
+          {/* 层级切换：紧跟地图选单。z-[620] 高于右下角「地图信息」浮窗（z-600），
+              展开的楼层选单不会被它盖住 */}
+          {floors.length > 0 && (
+            <div ref={floorRef} className="relative z-[620] flex flex-col items-start gap-1.5">
+              <button
+                onClick={() => setFloorOpen((o) => !o)}
+                title="切换地图层级"
+                className="min-w-[86px] flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 3 2 8l10 5 10-5-10-5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="m2 14 10 5 10-5"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
+                    opacity="0.55"
+                  />
+                </svg>
+                {floorSel === -1 ? '主层' : floorNameZh(floors[floorSel]?.name)}
+                <span
+                  className="text-[11px] opacity-70 transition-transform"
+                  style={{ transform: floorOpen ? 'rotate(180deg)' : 'none' }}
+                >
+                  ▼
+                </span>
+              </button>
+
+              {floorOpen && (
+                <div className="absolute left-0 top-[calc(100%+6px)] z-[610] min-w-[110px] py-1 rounded-md border border-line bg-ink-800/80 shadow-xl backdrop-blur-sm">
+                  {floorItems.map(({ lyr, i }) => (
+                    <button
+                      key={lyr?.name ?? 'main'}
+                      onClick={() => {
+                        setFloorSel(i)
+                        setFloorOpen(false)
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 text-[14px] whitespace-nowrap ${
+                        floorSel === i
+                          ? 'text-[#d4a174] bg-amber/10'
+                          : 'text-muted hover:text-[#e6edf3] hover:bg-ink-700/60'
+                      }`}
+                    >
+                      {lyr ? floorNameZh(lyr.name) : '主层'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {/* 聚焦：排在层级选单之后（自动居中 / 自动缩放 / 聚焦缩放） */}
+          <div ref={focusRef} className="relative flex flex-col items-start gap-1.5">
+            <button
+              onClick={() => {
+                setFocusOpen((v) => !v)
+                setChipsOpen(false)
+              }}
+              title="自动聚焦：定位后自动居中地图（可选自动缩放）"
+              className={`px-2.5 py-1.5 rounded border bg-ink-800/80 shadow-lg text-[13px] transition-colors ${
+                focusOpen
+                  ? 'border-amber text-[#d4a174] bg-amber/10'
+                  : 'border-line text-[#e6edf3] hover:border-amber/70'
+              }`}
+            >
+              聚焦
+            </button>
+            {focusOpen && (
+              <div className="w-60 rounded-md border border-line bg-ink-800 p-3 shadow-lg shadow-black/40">
+                {focusBody}
+              </div>
+            )}
+          </div>
           {/* BTR 路线跟踪：仅森林 / 街区 / 灯塔有路线数据。
               面板收起后组件仍挂载（计时 / 地图绘制不中断），要彻底结束用面板里的「停止」 */}
           {btrMap && (
@@ -2098,8 +2098,6 @@ export function MapPage() {
         >
           {infoOpen && (
             <div className="pointer-events-none w-[210px] max-h-[calc(60dvh/var(--ui-scale,1))] overflow-y-auto rounded-xl border border-line bg-ink-800/60 shadow-xl p-2.5 space-y-2.5">
-              {/* 游戏时间：塔科夫 7 倍速时钟（本地计算，见 components/GameClock.tsx） */}
-              <GameClock />
               <div>
                 <div className="text-[13px] text-muted mb-1">Boss 刷新率</div>
                 {mapBosses.length === 0 ? (
@@ -2162,7 +2160,7 @@ export function MapPage() {
           )}
           <button
             onClick={() => setInfoOpen((o) => !o)}
-            title="地图信息：Boss 刷新率 / 游戏时间"
+            title="地图信息：Boss 刷新率"
             className="pointer-events-auto flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-line bg-ink-800/80 shadow-lg text-[14px] text-[#e6edf3] hover:border-amber/70 transition-colors"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>

@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 
 /**
- * 塔科夫游戏内时间（并入地图页右下角「地图信息」面板）。
+ * 塔科夫游戏内时间（固定显示在地图页右上角，不随「地图信息」面板收起）。
  *
  * 算法（纯本地计算，不依赖任何后端接口）：
  *   游戏时间 = (UTC 秒数 × 7 + 偏移量) % 86400
- * 即游戏内时间流速为现实的 7 倍，并带 +3 小时偏移；
- * 另有一套相差 12 小时的时间（游戏时间 + 12h），一并展示。
+ * 即游戏内时间流速为现实的 7 倍，并带 +3 小时偏移。
+ * 同时显示相差 12 小时的两套时间，**两者同等展示**（不分主次、不用不同颜色 / 字号）。
  * 1000 / 7 ≈ 143ms 一跳，游戏秒逐秒跳动。
  */
 
@@ -48,17 +48,17 @@ export function GameClock() {
     return () => window.clearInterval(t)
   }, [visible])
 
+  // 两行：标题 + 两个时间（相差 12 小时），两者同样式，不分主次
   const g1 = gameTimeSec(now)
   const g2 = (g1 + DAY_SEC / 2) % DAY_SEC
 
   return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between gap-2 text-[14px]">
-        <span className="text-[13px] text-muted">游戏时间</span>
-        <span className="shrink-0 tabular-nums text-amber">{fmtHMS(g1)}</span>
-      </div>
-      <div className="flex items-center justify-end gap-2 text-[14px]">
-        <span className="shrink-0 tabular-nums text-amber">{fmtHMS(g2)}</span>
+    <div className="leading-tight">
+      <div className="text-[11px] text-muted/70">游戏时间</div>
+      <div className="mt-0.5 flex items-center gap-1.5 tabular-nums text-[15px] text-[#e6edf3]">
+        <span>{fmtHMS(g1)}</span>
+        <span className="text-muted/40">/</span>
+        <span>{fmtHMS(g2)}</span>
       </div>
     </div>
   )
