@@ -486,6 +486,8 @@ export async function relaunchAsAdmin(): Promise<void> {
 const EMPTY_BOSS_MONITOR: BossMonitorPayload = {
   enabled: false,
   notify: false,
+  cleanAi: false,
+  cleanNote: '',
   gameRoot: '',
   configPath: '',
   logDir: '',
@@ -527,6 +529,10 @@ export async function setBossMonitorEnabled(_enabled: boolean): Promise<BossMoni
 }
 
 export async function setBossMonitorNotify(_notify: boolean): Promise<BossMonitorPayload> {
+  throw new Error(NOT_SUPPORTED)
+}
+
+export async function setBossMonitorClean(_clean: boolean): Promise<BossMonitorPayload> {
   throw new Error(NOT_SUPPORTED)
 }
 

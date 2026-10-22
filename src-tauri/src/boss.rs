@@ -39,6 +39,9 @@ const CONFIG_NAME: &str = "Logging.config";
 /// 本工具只会把它提到 `Trace`，还原时直接写回 `Error`，
 /// 因此不需要记录修改前的值，也不需要备份整份配置文件。
 const ORIGINAL_AI_LEVEL: &str = "Error";
+/// 自动清理 AI 日志的触发大小：aiData 超过它才截断。
+/// 不设成每轮都清，是为了减少「刚读完、还没来得及清」这段窗口里丢行的概率。
+const CLEAN_LIMIT: u64 = 16 * 1024 * 1024;
 
 /* ---------------- 日志行匹配 ---------------- */
 
@@ -67,6 +70,15 @@ static RE_ZONE: Lazy<Regex> = Lazy::new(|| {
 static RE_ZONE_OLD: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"\bgroupId:(\w+)\s+\[Boss\]\s+_defWildSpawnType:(\w+)\s+cause:initial").unwrap()
 });
+/// 本局护卫数量：`SpawnWave   BornZone:ZoneScavBase, ShallSpawn:True, EscortCount:4,
+/// BossType:bossBully, EscortType:followerBully`
+/// （`ShallSpawn:False` 的行也会输出，但它不是本局实际刷的，忽略）
+static RE_ESCORT: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"SpawnWave\s+BornZone:([^,]*),\s*ShallSpawn:(True|False),\s*EscortCount:(\d+),\s*BossType:(\w+),\s*EscortType:(\w*)",
+    )
+    .unwrap()
+});
 /// `Logging.config` 里 aiData 规则：fileName 在前
 static RE_AI_LEVEL: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#""fileName"\s*:\s*"aiData"[^{}]*?"minLevel"\s*:\s*"([^"]*)""#).unwrap());
@@ -83,6 +95,8 @@ pub struct BossSettings {
     pub enabled: bool,
     /// 确认刷新时是否弹顶部悬浮通知
     pub notify: bool,
+    /// 解析后是否自动清理 aiData 日志内容（只清 AI 详细日志，其它日志一律不动）
+    pub clean_ai: bool,
     /// 游戏安装目录（含 EscapeFromTarkov.exe / Logging.config）
     pub game_root: String,
     /// 上次定位到的 Logging.config（自动探测结果也记在这里）
@@ -94,6 +108,7 @@ impl Default for BossSettings {
         Self {
             enabled: false,
             notify: true,
+            clean_ai: false,
             game_root: String::new(),
             config_path: String::new(),
         }
@@ -119,9 +134,15 @@ pub struct BossSpawnState {
     pub zone: Option<String>,
     /// 累计确认的实例数
     pub count: u32,
-    /// 存活估计（激活 +1、确认死亡 -1）
+    /// 存活估计（以日志的存活名单为准，名单没覆盖到时用激活 / 死亡配对推算）
     pub alive: u32,
     pub died_at: Option<String>,
+    /// 本局该 Boss 的护卫类型（日志 `SpawnWave ... EscortType:followerBully`）
+    pub escort_type: Option<String>,
+    /// 本局该 Boss 的护卫总数（日志 `SpawnWave ... EscortCount:4`）
+    pub escort_total: u32,
+    /// 护卫剩余存活（按存活名单里该护卫角色的实时数量统计）
+    pub escort_alive: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -129,6 +150,10 @@ pub struct BossSpawnState {
 pub struct BossMonitorPayload {
     pub enabled: bool,
     pub notify: bool,
+    /// 解析后是否自动清理 aiData 日志
+    pub clean_ai: bool,
+    /// 最近一次自动清理的结果（界面提示用；没清理过为空）
+    pub clean_note: String,
     pub game_root: String,
     pub config_path: String,
     /// 当前使用的日志目录（settings.json 里配置的那个）
@@ -228,6 +253,9 @@ struct Runtime {
     zone_by_role: HashMap<String, String>,
     /// 已计数过的激活（同一 bot 重复 activate 不重复加实例）
     seen_bots: HashSet<String>,
+    /// 在「存活名单」里出现过的角色：它们缺席时才能断定「全灭」，
+    /// 从没进过名单的角色（还没刷 / 远处未激活）不能据此清零
+    seen_in_list: HashSet<String>,
     /// 最近一次 `bot dispose` 的 botId（紧随其后的 BotDied 与之配对）
     pending_dispose: Option<String>,
     /// BTR 出发准备信号时间（`OnReadyToDeparture`）
@@ -241,6 +269,8 @@ struct Runtime {
     fallback_sig: String,
     /// 兜底检查用：上次执行时间（节流）
     fallback_at: Option<Instant>,
+    /// 最近一次自动清理 aiData 日志的结果（给界面看；不随 reset_scan 清空）
+    clean_note: String,
 }
 
 impl Default for Runtime {
@@ -260,12 +290,14 @@ impl Default for Runtime {
             bot_role: HashMap::new(),
             zone_by_role: HashMap::new(),
             seen_bots: HashSet::new(),
+            seen_in_list: HashSet::new(),
             pending_dispose: None,
             btr_ready: Vec::new(),
             btr_taxi: Vec::new(),
             last_entry_ts: String::new(),
             fallback_sig: String::new(),
             fallback_at: None,
+            clean_note: String::new(),
         }
     }
 }
@@ -281,6 +313,7 @@ impl Runtime {
         self.bot_role.clear();
         self.zone_by_role.clear();
         self.seen_bots.clear();
+        self.seen_in_list.clear();
         self.pending_dispose = None;
         self.btr_ready.clear();
         self.btr_taxi.clear();
@@ -359,9 +392,53 @@ impl Runtime {
         self.bot_role.clear();
         self.zone_by_role.clear();
         self.seen_bots.clear();
+        self.seen_in_list.clear();
         self.pending_dispose = None;
         self.btr_ready.clear();
         self.btr_taxi.clear();
+    }
+
+    /// 用日志里的「存活名单」刷新各角色的存活数。
+    ///
+    /// 行形如：`[checklist] [AllAlivePotentialEnemiesPlayers] [SelectPoints.baseCase] for assault
+    /// hard allAlivePlayersList: 15:bossBully, 17:pmcBEAR, 26:followerBully, ...`
+    ///
+    /// 只覆盖名单里出现的角色；某角色一旦在名单里出现过，后续缺席才视为全灭
+    /// （从未出现过 = 还没刷 / 不在本局，不能清零）。
+    fn on_alive_list(&mut self, line: &str) {
+        let Some(list) = line.split("allAlivePlayersList:").nth(1) else {
+            return;
+        };
+        let mut counts: HashMap<String, u32> = HashMap::new();
+        for part in list.split(',') {
+            let Some((_, role)) = part.trim().split_once(':') else {
+                continue;
+            };
+            let role = role.trim().to_ascii_lowercase();
+            if !role.is_empty() {
+                *counts.entry(role).or_insert(0) += 1;
+            }
+        }
+        if counts.is_empty() {
+            return;
+        }
+        for role in counts.keys() {
+            self.seen_in_list.insert(role.clone());
+        }
+        let seen = &self.seen_in_list;
+        for b in self.raid.bosses.iter_mut() {
+            let role = b.role.to_ascii_lowercase();
+            if let Some(&n) = counts.get(&role) {
+                b.alive = n;
+            } else if seen.contains(&role) {
+                b.alive = 0;
+            }
+            // 名单里又出现说明还活着（之前死亡配对错了 / 同局复活）
+            if b.alive > 0 && b.status == "dead" {
+                b.status = "confirmed".into();
+                b.died_at = None;
+            }
+        }
     }
 
     fn boss_index(&mut self, role: &str) -> usize {
@@ -418,6 +495,37 @@ impl Runtime {
                     || line.contains("Bot activate")
                 {
                     self.has_ai_data = true;
+                }
+
+                // 0) 存活名单：每只 AI 决策时都会打印一份「全部存活敌人」（id:role），
+                //    这是存活数最准的来源（`bot dispose` 与 `BotDied` 不一定成对，
+                //    缺一条就会把死掉的算成还活着，护卫剩余数尤其明显）。
+                if line.contains("allAlivePlayersList:") {
+                    self.on_alive_list(line);
+                    return;
+                }
+
+                // 0) 本局护卫数量：`SpawnWave   BornZone:ZoneScavBase, ShallSpawn:True,
+                //    EscortCount:4, BossType:bossBully, EscortType:followerBully`
+                //    `ShallSpawn:False` 的行也输出，但它不是本局实际刷的，忽略。
+                if let Some(c) = RE_ESCORT.captures(line) {
+                    if c[2].eq_ignore_ascii_case("True") {
+                        let zone = c[1].trim().to_string();
+                        let total: u32 = c[3].parse().unwrap_or(0);
+                        let role = c[4].to_string();
+                        let escort = c[5].to_string();
+                        let i = self.boss_index(&role);
+                        let b = &mut self.raid.bosses[i];
+                        if !escort.is_empty() {
+                            b.escort_type = Some(escort);
+                        }
+                        // 同一 Boss 可能有多条波次行：取最大，避免后面的 0 把已确认的数量抹掉
+                        b.escort_total = b.escort_total.max(total);
+                        if b.zone.is_none() && !zone.is_empty() {
+                            b.zone = Some(zone);
+                        }
+                    }
+                    return;
                 }
 
                 // 1) 生成判定（roll）：本局这只有没有刷
@@ -562,9 +670,24 @@ impl Runtime {
     }
 
     fn snapshot(&self) -> BossMonitorPayload {
+        // 护卫剩余存活：按「该 Boss 的护卫角色」在当前存活名单里的数量实时汇总
+        let mut bosses = self.raid.bosses.clone();
+        for b in bosses.iter_mut() {
+            if let Some(t) = b.escort_type.clone() {
+                b.escort_alive = self
+                    .raid
+                    .bosses
+                    .iter()
+                    .filter(|x| x.role.eq_ignore_ascii_case(&t))
+                    .map(|x| x.alive)
+                    .sum();
+            }
+        }
         BossMonitorPayload {
             enabled: self.settings.enabled,
             notify: self.settings.notify,
+            clean_ai: self.settings.clean_ai,
+            clean_note: self.clean_note.clone(),
             game_root: self.settings.game_root.clone(),
             config_path: self.settings.config_path.clone(),
             log_dir: self.log_dir.clone(),
@@ -578,7 +701,7 @@ impl Runtime {
             has_ai_data: self.has_ai_data,
             ai_log_found: self.ai_log_found,
             diagnostic: self.diagnostic.clone(),
-            bosses: self.raid.bosses.clone(),
+            bosses,
             btr: self.btr_state(),
             updated_at: self.updated_at.clone(),
         }
@@ -716,6 +839,9 @@ fn poll(app: &AppHandle, rt: &mut Runtime) {
         fallback_entry_check(rt, &dir);
     }
 
+    // 自动清理：本轮解析完之后按需截断 aiData 日志（其它日志不动）
+    maybe_clean_ai(rt, &dir);
+
     rt.diagnostic = if !rt.ai_log_found {
         "未找到 aiData 日志：请先在下方一键修改日志配置，然后重启游戏".into()
     } else if !rt.has_ai_data {
@@ -817,6 +943,11 @@ fn read_new_lines(rt: &mut Runtime, path: &Path) -> Vec<String> {
 
     let mut text = rt.tails.remove(&key).unwrap_or_default();
     text.push_str(&String::from_utf8_lossy(&buf));
+    // 自动清理把文件截断成 0 后，若游戏不是以「追加」模式写（保留自己的文件指针），
+    // 下一批写入前会留下一段全 0 的空洞。这里直接抹掉 NUL，避免残片污染解析。
+    if text.contains('\0') {
+        text = text.replace('\0', "");
+    }
     let mut lines: Vec<String> = text
         .split('\n')
         .map(|s| s.trim_end_matches('\r').to_string())
@@ -830,6 +961,65 @@ fn read_new_lines(rt: &mut Runtime, path: &Path) -> Vec<String> {
     rt.tails.insert(key, if tail.len() > 2_000_000 { String::new() } else { tail });
     lines.retain(|l| !l.is_empty());
     lines
+}
+
+/* ---------------- 自动清理 AI 日志 ---------------- */
+
+/// 解析完新行后按需清理 `aiData` 日志：**只截断 AI 详细日志，其它日志一字不动**。
+///
+/// 游戏对日志文件是以「追加」方式打开的，并且带写共享，因此进程外可以
+/// `set_len(0)` 清空；万一被独占锁住（open 失败）就跳过，备注里写明原因，
+/// 下一轮继续尝试。清空后把该文件的读取偏移归零并丢掉半行残留，
+/// 下一轮从 0 开始读——游戏的下一次写入会从文件头继续。
+fn maybe_clean_ai(rt: &mut Runtime, dir: &Path) {
+    if !rt.settings.clean_ai {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if !p.is_file() {
+            continue;
+        }
+        let name = p
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if kind_of(&name) != Some(FileKind::Ai) {
+            continue;
+        }
+        let Ok(meta) = std::fs::metadata(&p) else {
+            continue;
+        };
+        if meta.len() < CLEAN_LIMIT {
+            continue;
+        }
+        let key = p.display().to_string();
+        match truncate_to_empty(&p) {
+            Ok(freed) => {
+                rt.offsets.insert(key.clone(), 0);
+                rt.tails.remove(&key);
+                rt.clean_note = format!("已清理 aiData 日志（释放 {}）", mb(freed));
+            }
+            Err(e) => rt.clean_note = format!("aiData 日志暂时清不掉（{e}），下一轮重试"),
+        }
+    }
+}
+
+/// 把文件截断为 0 字节，返回释放的字节数。
+/// Rust 的 `OpenOptions` 在 Windows 上默认带读 / 写 / 删除三种共享标志，
+/// 所以只要游戏本身不是独占打开，这里就能拿到写句柄。
+fn truncate_to_empty(path: &Path) -> std::io::Result<u64> {
+    let f = std::fs::OpenOptions::new().write(true).open(path)?;
+    let len = f.metadata()?.len();
+    f.set_len(0)?;
+    Ok(len)
+}
+
+fn mb(n: u64) -> String {
+    format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
 }
 
 /* ---------------- 兜底检查 ---------------- */
@@ -1150,6 +1340,21 @@ pub fn boss_set_notify(app: AppHandle, notify: bool) -> Result<BossMonitorPayloa
     let rt = runtime();
     let mut g = rt.lock().unwrap();
     g.settings.notify = notify;
+    save_settings(&app, &g.settings)?;
+    g.last_emit.clear();
+    poll(&app, &mut g);
+    Ok(g.snapshot())
+}
+
+/// 解析后是否自动清理 aiData 日志（只清 AI 详细日志，不动其它日志）。
+#[tauri::command]
+pub fn boss_set_clean(app: AppHandle, clean: bool) -> Result<BossMonitorPayload, String> {
+    let rt = runtime();
+    let mut g = rt.lock().unwrap();
+    g.settings.clean_ai = clean;
+    if !clean {
+        g.clean_note.clear();
+    }
     save_settings(&app, &g.settings)?;
     g.last_emit.clear();
     poll(&app, &mut g);

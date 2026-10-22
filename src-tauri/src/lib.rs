@@ -1558,6 +1558,7 @@ pub fn run() {
                     boss::boss_get_state,
                     boss::boss_set_enabled,
                     boss::boss_set_notify,
+                    boss::boss_set_clean,
                     boss::boss_logging_status,
                     boss::boss_set_game_root,
                     boss::boss_apply_logging,

@@ -485,6 +485,11 @@ export async function setBossMonitorNotify(notify: boolean): Promise<BossMonitor
   return await invoke<BossMonitorPayload>('boss_set_notify', { notify })
 }
 
+/** 解析后是否自动清理 aiData 日志（只清 AI 详细日志，其它日志不动） */
+export async function setBossMonitorClean(clean: boolean): Promise<BossMonitorPayload> {
+  return await invoke<BossMonitorPayload>('boss_set_clean', { clean })
+}
+
 /** Logging.config 当前位置 / aiData 级别 / 备份情况（顺带自动探测游戏目录） */
 export async function getBossLoggingStatus(): Promise<LoggingConfigStatus> {
   return await invoke<LoggingConfigStatus>('boss_logging_status')

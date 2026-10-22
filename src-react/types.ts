@@ -164,9 +164,15 @@ export interface BossSpawnState {
   zone: string | null
   /** 累计确认实例数 */
   count: number
-  /** 存活估计 */
+  /** 存活估计（以日志存活名单为准，名单没覆盖到时用激活 / 死亡配对推算） */
   alive: number
   diedAt: string | null
+  /** 本局护卫类型（日志 `SpawnWave ... EscortType:followerBully`） */
+  escortType: string | null
+  /** 本局护卫总数（日志 `SpawnWave ... EscortCount:4`） */
+  escortTotal: number
+  /** 护卫剩余存活（按存活名单里该护卫角色的数量实时统计） */
+  escortAlive: number
 }
 
 /** BTR（`shooterBTR`）状态：与 Boss 同一套判定，另有发车 / 叫车信号 */
@@ -188,6 +194,10 @@ export interface BossBtrState {
 export interface BossMonitorPayload {
   enabled: boolean
   notify: boolean
+  /** 解析后是否自动清理 aiData 日志（只清 AI 详细日志，其它日志不动） */
+  cleanAi: boolean
+  /** 最近一次自动清理的结果文案（没清理过为空） */
+  cleanNote: string
   gameRoot: string
   configPath: string
   logDir: string

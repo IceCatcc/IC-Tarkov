@@ -9,6 +9,7 @@ import {
   rescanBossMonitor,
   restoreBossLoggingConfig,
   setBossGameRoot,
+  setBossMonitorClean,
   setBossMonitorEnabled,
   setBossMonitorNotify,
 } from '../tauri'
@@ -259,6 +260,20 @@ export function BossMonitorTool() {
     }
   }
 
+  /** 解析后自动清理 aiData 日志（只清 AI 详细日志，其它日志不动） */
+  const toggleClean = async () => {
+    if (!monitor) return
+    setBusy('clean')
+    setError(null)
+    try {
+      useStore.getState().setBoss(await setBossMonitorClean(!monitor.cleanAi))
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const pickRoot = async () => {
     try {
       const selected = await open({
@@ -397,33 +412,42 @@ export function BossMonitorTool() {
             <Switch checked={enabled} disabled={busy === 'toggle'} onChange={toggleMonitor} />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/50 bg-[#0f141b]/40 px-4 py-2 text-[11px] text-muted/70">
-          <label className="flex cursor-pointer select-none items-center gap-2">
-            <input
-              type="checkbox"
-              checked={!!monitor?.notify}
-              disabled={busy === 'notify'}
-              onChange={toggleNotify}
-              className="accent-amber"
-            />
-            刷新时弹底部悬浮通知（仅「确认刷新」提示）
-          </label>
-          <label
-            className="flex cursor-pointer select-none items-center gap-2"
+        <div className="flex flex-wrap items-center gap-2 border-t border-line/50 bg-[#0f141b]/40 px-3.5 py-2.5">
+          <ToggleChip
+            checked={!!monitor?.notify}
+            disabled={busy === 'notify'}
+            onChange={toggleNotify}
+            label="刷新通知"
+            hint={monitor?.notify ? '已开启' : '已关闭'}
+            title="Boss / BTR 确认刷新时弹底部悬浮通知（只提示本图 Boss 表里有的角色与 BTR 发车信号）"
+            icon={<IconBell />}
+          />
+          <ToggleChip
+            checked={bossMarkers}
+            onChange={() => setBossMarkers(!bossMarkers)}
+            label="地图标注"
+            hint={bossMarkers ? '已开启' : '已关闭'}
             title="把日志里确认刷新的 Boss / BTR 按坐标画在地图上（图标下方带「已刷新 / 已死亡」文字小标签）；「预计刷新」没有坐标，不画在地图上，改在右侧 Boss 刷新率面板里标出"
-          >
-            <input
-              type="checkbox"
-              checked={bossMarkers}
-              onChange={(e) => setBossMarkers(e.target.checked)}
-              className="accent-amber"
-            />
-            在地图上标注 Boss 状态
-          </label>
+            icon={<IconPin />}
+          />
+          <ToggleChip
+            checked={!!monitor?.cleanAi}
+            disabled={busy === 'clean'}
+            onChange={toggleClean}
+            label="自动清理 AI 日志"
+            hint={monitor?.cleanAi ? '已开启' : '已关闭'}
+            title="解析完之后自动截断 aiData 日志内容（只动 AI 详细日志，application / backend 等一律不碰）。游戏以追加 + 写共享方式打开日志，通常可以在游戏运行时清空；若被独占锁住会跳过并在下方提示，下一轮重试"
+            icon={<IconBroom />}
+          />
           <span className="ml-auto truncate font-mono text-[10.5px] text-muted/50">
             {monitor?.session ? `会话 ${monitor.session}` : '尚未检测到日志会话'}
           </span>
         </div>
+        {!!monitor?.cleanAi && !!monitor.cleanNote && (
+          <div className="border-t border-line/40 bg-[#0f141b]/20 px-3.5 py-1.5 text-[10.5px] text-muted/60">
+            {monitor.cleanNote}
+          </div>
+        )}
       </div>
 
       {error && <Notice title="操作失败" text={error} tone="err" />}
@@ -499,6 +523,14 @@ export function BossMonitorTool() {
               const live = r.live
               const st = STATUS_STYLE[(live?.status as SpawnStatus) ?? 'unknown'] ?? STATUS_STYLE.unknown
               const img = bossImage(r.id)
+              // 护卫：总数来自日志 `SpawnWave ... EscortCount`，剩余取存活名单里的实时计数。
+              // 只在 Boss 已刷新 / 已死亡后显示：还没刷时护卫一个都没激活，显示 0/4 会误导。
+              const guards =
+                live &&
+                live.escortTotal > 0 &&
+                (live.status === 'confirmed' || live.status === 'dead')
+                  ? { total: live.escortTotal, alive: live.escortAlive }
+                  : null
               return (
                 <li key={r.id} className="flex items-center gap-3 px-3.5 py-2.5">
                   {img ? (
@@ -519,6 +551,20 @@ export function BossMonitorTool() {
                       <span className="truncate text-[13px] text-[#e6edf3]" title={r.id}>
                         {r.name}
                       </span>
+                      {guards && (
+                        <span
+                          className={`shrink-0 rounded border border-line/70 px-1.5 py-px text-[10px] tabular-nums ${
+                            guards.alive > 0
+                              ? 'bg-[#3fb950]/10 text-[#7ee787]'
+                              : 'bg-white/[0.04] text-muted/55'
+                          }`}
+                          title={`护卫：剩余存活 ${guards.alive} / 本局 ${
+                            guards.total
+                          } 名${live?.escortType ? `（${live.escortType}）` : ''}`}
+                        >
+                          {guards.alive}/{guards.total}
+                        </span>
+                      )}
                       <span className={`shrink-0 rounded border px-1.5 py-px text-[10px] ${st.cls}`}>
                         <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${st.dot}`} />
                         {st.label}
@@ -683,7 +729,19 @@ export function BossMonitorTool() {
           </li>
           <li>开启监控会自动把 <Code>aiData</Code> 调到 <Code>Trace</Code>，关闭时自动改回 <Code>Error</Code>（都需重启游戏生效）；下方配置卡的两个按钮可手动补做。</li>
           <li>日志目录取自「设置」里配置的路径（通常为 <Code>%LOCALAPPDATA%\Temp\Battlestate Games\EscapeFromTarkov\Logs</Code>）。</li>
+          <li>
+            开启「自动清理 AI 日志」后，每轮解析完成时若 <Code>aiData</Code> 日志超过 16 MB 就把它截断为 0
+            （只清 AI 详细日志，<Code>application</Code> / <Code>backend</Code> 等一字不动）。游戏是以追加方式打开日志的，
+            带写共享，因此通常可以在游戏运行中直接清空；若被独占锁住则跳过，开关下方会提示原因，下一轮继续重试。
+            截断瞬间正在写入的极少量行可能丢失，后续的生成判定 / 激活行仍会正常补上。
+          </li>
           <li>BTR 与 Boss 走同一套日志判定（生成判定 / 实际激活），另单独记录「出发准备信号」与购车记录；不发车信号时也可能已经出现，以状态徽标为准。</li>
+          <li>
+            Boss 名后的「2/4」= 本局该 Boss 的<b>护卫剩余存活 / 护卫总数</b>：总数取自日志
+            <Code>SpawnWave ... EscortCount:N</Code>，剩余按日志里的存活名单
+            （<Code>allAlivePlayersList</Code>）中该护卫角色（<Code>EscortType</Code>）的数量实时统计，
+            Boss 还没刷新时不显示（护卫一个都没激活，标 0/N 会误导）。
+          </li>
           <li>
             进图识别靠本地日志推断，偶尔会滞后 / 漏掉：程序会在日志更新后自动兜底重查，
             也可点「当前战局」右上角的 <Code>重新扫描</Code> 从日志开头完整回放一遍。
@@ -831,5 +889,96 @@ function IconFile() {
       <path d="M6 3.5h7l5 5V20a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 6 20z" strokeLinejoin="round" />
       <path d="M13 3.5V9h5" strokeLinejoin="round" />
     </svg>
+  )
+}
+
+function IconBell() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <path d="M6.5 10.2a5.5 5.5 0 0 1 11 0v3l1.3 2.4H5.2L6.5 13.2z" strokeLinejoin="round" />
+      <path d="M10 18.4a2 2 0 0 0 4 0" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function IconPin() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <path d="M12 21s6.2-6.4 6.2-11a6.2 6.2 0 1 0-12.4 0C5.8 14.6 12 21 12 21Z" strokeLinejoin="round" />
+      <circle cx="12" cy="10" r="2.2" />
+    </svg>
+  )
+}
+
+function IconBroom() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <path d="M14.5 3.5 20 9" strokeLinecap="round" />
+      <path d="m16.6 4.9 2.5 2.5-7.3 7.3-2.5-2.5z" strokeLinejoin="round" />
+      <path d="M9.3 12.2c-1.6 1.6-3.4 5.2-4.4 8.4 3.2-1 6.8-2.8 8.4-4.4z" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/**
+ * 顶部卡片里的开关片：把原来裸露的复选框换成带描边、图标与状态文案的小卡片，
+ * 开启态用琥珀描边 + 发光 + 实心勾选框，一眼能看出当前是否启用。
+ */
+function ToggleChip({
+  checked,
+  disabled,
+  onChange,
+  label,
+  hint,
+  title,
+  icon,
+}: {
+  checked: boolean
+  disabled?: boolean
+  onChange: () => void
+  label: string
+  hint?: string
+  title?: string
+  icon?: ReactNode
+}) {
+  return (
+    <label
+      title={title}
+      className={`group flex select-none items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[11.5px] transition-all ${
+        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+      } ${
+        checked
+          ? 'border-amber/60 bg-amber/[0.12] text-[#e6edf3] shadow-[0_0_14px_-6px_rgba(239,159,39,.9)]'
+          : 'border-line/70 bg-[#161b22]/60 text-muted/75 hover:border-amber/40 hover:text-[#e6edf3]'
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={onChange}
+        className="sr-only"
+      />
+      <span
+        className={`grid h-4 w-4 shrink-0 place-items-center rounded-[4px] border transition-colors ${
+          checked
+            ? 'border-amber bg-amber text-[#161b22]'
+            : 'border-line/80 bg-transparent text-transparent group-hover:border-amber/60'
+        }`}
+      >
+        <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="3.6">
+          <path d="M5 12.5 9.8 17.3 19 6.9" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+      {icon && <span className={checked ? 'text-[#d4a174]' : 'text-muted/60'}>{icon}</span>}
+      <span className="whitespace-nowrap">{label}</span>
+      {hint && (
+        <span
+          className={`whitespace-nowrap text-[10px] ${checked ? 'text-[#d4a174]' : 'text-muted/45'}`}
+        >
+          {hint}
+        </span>
+      )}
+    </label>
   )
 }
