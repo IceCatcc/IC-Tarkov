@@ -1555,6 +1555,8 @@ pub fn run() {
                     display::reset_display_filter,
                     display::is_elevated,
                     display::relaunch_as_admin,
+                    display::get_auto_admin,
+                    display::set_auto_admin,
                     boss::boss_get_state,
                     boss::boss_set_enabled,
                     boss::boss_set_notify,

@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import {
   applyDisplayFilter,
+  getAutoAdmin,
   getDisplayFilter,
   isElevated,
   listDisplays,
   relaunchAsAdmin,
   resetDisplayFilter,
   saveDisplayFilter,
+  setAutoAdmin,
 } from '../tauri'
 import { listenEvent } from '../api/shell'
 import { isMobile, isWeb } from '../platform'
@@ -153,12 +155,16 @@ export function DisplayFilterTool() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [params, setParams] = useState<DisplayFilterParams>(IDENTITY)
   const [presetName, setPresetName] = useState('')
+  /** 当前参数来自哪套方案（套用 / 快捷键命中 / 同名另存后置位）：该行的按钮变成「保存」 */
+  const [appliedPreset, setAppliedPreset] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(null)
   /** 正在等待用户按键绑定的方案名 */
   const [capturing, setCapturing] = useState<string | null>(null)
   const [elevated, setElevated] = useState(false)
+  /** 「始终以管理员身份启动」是否已写入注册表（下次启动生效，与本次是否提权无关） */
+  const [autoAdmin, setAutoAdminState] = useState(false)
 
   // 变更很快（拖滑块），状态同时写 ref 供防抖回调读到最新值
   const filterRef = useRef<DisplayFilterState | null>(null)
@@ -183,11 +189,12 @@ export function DisplayFilterTool() {
       return
     }
     let alive = true
-    Promise.all([listDisplays(), getDisplayFilter(), isElevated()])
-      .then(([ds, st, admin]) => {
+    Promise.all([listDisplays(), getDisplayFilter(), isElevated(), getAutoAdmin()])
+      .then(([ds, st, admin, auto]) => {
         if (!alive) return
         setDisplays(ds)
         setElevated(admin)
+        setAutoAdminState(auto)
         commitFilter(st)
         // 优先恢复上次选中的显示器；没有记录（首次打开 / 设备已拔掉）时退回主显示器
         const first =
@@ -292,6 +299,8 @@ export function DisplayFilterTool() {
     setSelectedId(id)
     const cur = filterRef.current
     setParamsAll(cur?.displays[id] ?? IDENTITY)
+    // 换了显示器，当前参数不再来自刚才套用的方案：收起「保存」，避免误写回
+    setAppliedPreset(null)
     setStatus(null)
     // 选中项落盘：所有修改（含快捷键触发的）都只作用于这一台
     if (cur && cur.selected !== id) {
@@ -364,6 +373,8 @@ export function DisplayFilterTool() {
       commitFilter(p.state)
       const id = selectedIdRef.current
       setParamsAll(id ? p.state.displays[id] ?? IDENTITY : IDENTITY)
+      // 快捷键命中等同于一次「套用」：该方案的按钮切成「保存」
+      if (p.preset) setAppliedPreset(p.preset)
       setStatus({
         kind: 'ok',
         text: p.preset
@@ -386,6 +397,23 @@ export function DisplayFilterTool() {
     try {
       setStatus({ kind: 'warn', text: '正在以管理员身份重启…' })
       await relaunchAsAdmin()
+    } catch (e) {
+      setStatus({ kind: 'err', text: String(e) })
+    }
+  }
+
+  /** 写 / 删注册表里的 exe 兼容性标记（`HKCU`，不需要提权，也不改 exe 文件） */
+  const toggleAutoAdmin = async () => {
+    const next = !autoAdmin
+    try {
+      const applied = await setAutoAdmin(next)
+      setAutoAdminState(applied)
+      setStatus({
+        kind: 'ok',
+        text: applied
+          ? '已设置：以后启动会弹 UAC 以管理员身份运行（本次不受影响）'
+          : '已取消：以后启动不再自动请求管理员权限',
+      })
     } catch (e) {
       setStatus({ kind: 'err', text: String(e) })
     }
@@ -472,10 +500,42 @@ export function DisplayFilterTool() {
     }
   }
 
+  /**
+   * 把当前的参数写回某个已有方案（保留它的快捷键与位置）。
+   *
+   * 与「另存」区分：这里改的就是这套方案本身，用于「套用后微调再存回」的场景。
+   */
+  const updatePreset = (name: string) => {
+    const cur = filterRef.current
+    if (!cur) return
+    const exist = cur.presets.some((p) => p.name === name)
+    if (!exist) {
+      setStatus({ kind: 'err', text: `方案「${name}」不存在，可能已被删除` })
+      return
+    }
+    const presets = cur.presets.map((p) =>
+      p.name === name ? { ...p, params: { ...paramsRef.current } } : p,
+    )
+    const nextState: DisplayFilterState = { ...cur, presets }
+    commitFilter(nextState)
+    saveDisplayFilter(nextState)
+      .then(() => setStatus({ kind: 'ok', text: `方案「${name}」已更新为当前参数` }))
+      .catch((e) => setStatus({ kind: 'err', text: String(e) }))
+  }
+
+  /** 套用方案：把参数推到当前显示器，并把「套用」按钮切成「保存」（见 appliedPreset） */
+  const applyPreset = (name: string, params: DisplayFilterParams) => {
+    pushParams({ ...params }, selectedId ? [selectedId] : [])
+    setAppliedPreset(name)
+    setStatus({ kind: 'ok', text: `已套用「${name}」，可继续微调后点「保存」写回该方案` })
+  }
+
+  /** 另存为新方案（同名则覆盖，等于改名前的「保存当前参数」） */
   const savePreset = () => {
     const name = presetName.trim()
     const cur = filterRef.current
     if (!name || !cur) return
+    const overwrite = cur.presets.some((p) => p.name === name)
     const presets = [
       ...cur.presets.filter((p) => p.name !== name),
       { name, params: { ...paramsRef.current } },
@@ -484,7 +544,11 @@ export function DisplayFilterTool() {
     commitFilter(nextState)
     saveDisplayFilter(nextState).catch(() => {})
     setPresetName('')
-    setStatus({ kind: 'ok', text: `方案「${name}」已保存` })
+    if (overwrite) setAppliedPreset(name)
+    setStatus({
+      kind: 'ok',
+      text: overwrite ? `已覆盖同名方案「${name}」` : `已另存为「${name}」`,
+    })
   }
 
   const removePreset = (name: string) => {
@@ -493,6 +557,7 @@ export function DisplayFilterTool() {
     const nextState = { ...cur, presets: cur.presets.filter((p) => p.name !== name) }
     commitFilter(nextState)
     saveDisplayFilter(nextState).catch(() => {})
+    if (appliedPreset === name) setAppliedPreset(null)
   }
 
   if (unsupported) {
@@ -715,7 +780,7 @@ export function DisplayFilterTool() {
           {/* 配置方案 + 全局快捷键 */}
           <Section
             title="配置方案与快捷键"
-            hint="点按键框后按组合键绑定 · Delete 解除"
+            hint="套用后该行变「保存」可写回微调 · 点按键框绑定快捷键"
             icon={<IconPreset />}
           >
             <div className="divide-y divide-line/40">
@@ -748,12 +813,23 @@ export function DisplayFilterTool() {
                     >
                       {capturingThis ? '按键…' : bound ? p.hotkey?.label : '未绑定'}
                     </button>
-                    <button
-                      onClick={() => pushParams({ ...p.params }, selectedId ? [selectedId] : [])}
-                      className="h-6 shrink-0 rounded border border-line/80 px-2 text-[11px] text-muted transition-colors hover:border-amber/50 hover:text-[#d4a174]"
-                    >
-                      套用
-                    </button>
+                    {appliedPreset === p.name ? (
+                      <button
+                        onClick={() => updatePreset(p.name)}
+                        title="把当前参数写回这套方案（快捷键绑定保持不变）"
+                        className="h-6 shrink-0 rounded border border-amber/45 bg-amber/10 px-2 text-[11px] text-[#d4a174] transition-colors hover:bg-amber/20"
+                      >
+                        保存
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => applyPreset(p.name, p.params)}
+                        title="把该方案套用到当前显示器，之后可微调并点「保存」写回"
+                        className="h-6 shrink-0 rounded border border-line/80 px-2 text-[11px] text-muted transition-colors hover:border-amber/50 hover:text-[#d4a174]"
+                      >
+                        套用
+                      </button>
+                    )}
                     <button
                       onClick={() => removePreset(p.name)}
                       title="删除方案"
@@ -766,7 +842,7 @@ export function DisplayFilterTool() {
               })}
               {(filter?.presets ?? []).length === 0 && (
                 <div className="px-3 py-2 text-[11.5px] text-muted/60">
-                  还没有方案，调好参数后在下面保存。
+                  还没有方案：调好参数后，在下面输入名称并「另存当前参数」。
                 </div>
               )}
             </div>
@@ -785,10 +861,24 @@ export function DisplayFilterTool() {
                 <button
                   onClick={savePreset}
                   disabled={!presetName.trim()}
+                  title="以新名称另存一套方案；同名会覆盖。要改已有方案请点该行的「套用」再「保存」"
                   className="h-8 shrink-0 rounded-md border border-amber/40 bg-amber/10 px-3 text-[12px] text-[#d4a174] transition-colors hover:bg-amber/20 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  保存当前参数
+                  另存当前参数
                 </button>
+              </div>
+
+              {/* 「始终以管理员身份启动」：写注册表里的 exe 兼容性标记，下次启动生效 */}
+              <div className="flex items-start gap-2 rounded-lg border border-line/60 bg-ink-800/50 px-2.5 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] text-[#e6edf3]">始终以管理员身份启动</div>
+                  <div className="mt-0.5 text-[10.5px] leading-relaxed text-muted/70">
+                    等同于右键程序 → 属性 → 兼容性 → 勾选「以管理员身份运行」：写入当前用户的
+                    Windows 兼容性标记，<span className="text-[#d4a174]">下次启动</span>
+                    会自动弹 UAC。不改动程序文件，取消勾选即恢复。
+                  </div>
+                </div>
+                <Switch checked={autoAdmin} onChange={toggleAutoAdmin} />
               </div>
 
               {/* 快捷键状态 + 提权提示 */}
@@ -810,7 +900,9 @@ export function DisplayFilterTool() {
                 ) : (
                   <>
                     <span className="text-amber/80">
-                      · 游戏以管理员身份运行时，本程序需同样提权才能收到按键
+                      {autoAdmin
+                        ? '· 已设为自动提权，但本次启动未提权（被命令行 / 计划任务拉起时不会生效）'
+                        : '· 游戏以管理员身份运行时，本程序需同样提权才能收到按键'}
                     </span>
                     <button
                       onClick={elevate}

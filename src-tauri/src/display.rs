@@ -12,6 +12,9 @@
 
 use std::collections::HashMap;
 
+#[cfg(target_os = "windows")]
+use std::ffi::c_void;
+
 // ---------------- 参数 ----------------
 
 /// 一台显示器的滤镜参数（1.0 = 不改变）
@@ -347,6 +350,48 @@ mod win {
         pub fn GetConsoleWindow() -> *mut c_void;
     }
 
+    #[link(name = "advapi32")]
+    extern "system" {
+        /// 打开已有注册表键（不存在时返回非 0）
+        pub fn RegOpenKeyExW(
+            hkey: *mut c_void,
+            sub_key: *const u16,
+            options: u32,
+            sam_desired: u32,
+            result: *mut *mut c_void,
+        ) -> i32;
+        /// 打开或创建注册表键（写兼容性标记时 Layers 键可能还不存在）
+        pub fn RegCreateKeyExW(
+            hkey: *mut c_void,
+            sub_key: *const u16,
+            reserved: u32,
+            class: *const u16,
+            options: u32,
+            sam_desired: u32,
+            security: *const c_void,
+            result: *mut *mut c_void,
+            disposition: *mut u32,
+        ) -> i32;
+        pub fn RegSetValueExW(
+            hkey: *mut c_void,
+            value_name: *const u16,
+            reserved: u32,
+            ty: u32,
+            data: *const u8,
+            cb: u32,
+        ) -> i32;
+        pub fn RegQueryValueExW(
+            hkey: *mut c_void,
+            value_name: *const u16,
+            reserved: *mut u32,
+            ty: *mut u32,
+            data: *mut u8,
+            cb: *mut u32,
+        ) -> i32;
+        pub fn RegDeleteValueW(hkey: *mut c_void, value_name: *const u16) -> i32;
+        pub fn RegCloseKey(hkey: *mut c_void) -> i32;
+    }
+
     #[link(name = "shell32")]
     extern "system" {
         /// 以指定动词启动进程（`runas` = 触发 UAC 提权）
@@ -383,6 +428,17 @@ mod win {
 
     /// `ShowWindow` 的隐藏命令
     pub const SW_HIDE: i32 = 0;
+
+    /// `HKEY_CURRENT_USER`（预定义句柄，值固定）
+    pub const HKEY_CURRENT_USER: usize = 0x8000_0001;
+    /// `KEY_QUERY_VALUE`
+    pub const KEY_QUERY_VALUE: u32 = 0x0001;
+    /// `KEY_SET_VALUE`
+    pub const KEY_SET_VALUE: u32 = 0x0002;
+    /// `REG_SZ`
+    pub const REG_SZ: u32 = 1;
+    /// `ERROR_FILE_NOT_FOUND`（删除不存在的值时会返回它）
+    pub const ERROR_FILE_NOT_FOUND: i32 = 2;
 
     pub const WM_HOTKEY: u32 = 0x0312;
     pub const PM_REMOVE: u32 = 0x0001;
@@ -832,5 +888,184 @@ pub fn relaunch_as_admin(app: tauri::AppHandle) -> Result<(), String> {
     {
         let _ = app;
         Err("仅 Windows 支持以管理员身份重启".to_string())
+    }
+}
+
+/* ---------------- 「始终以管理员身份启动」（exe 兼容性标记） ---------------- */
+
+/// exe 兼容性标记的注册表位置：与资源管理器「属性 → 兼容性 → 以管理员身份运行此程序」
+/// 写的是同一处。`HKCU` 只对当前用户生效，写入**不需要提权**，也不改 exe 文件本身。
+#[cfg(target_os = "windows")]
+const LAYERS_KEY: &str = r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";
+
+/// 「以管理员身份运行」这一层的名字
+#[cfg(target_os = "windows")]
+const RUN_AS_ADMIN_LAYER: &str = "RUNASADMIN";
+
+/// 当前 exe 的路径（兼容性标记用完整路径当值名）
+#[cfg(target_os = "windows")]
+fn exe_path() -> Result<String, String> {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| format!("读取当前程序路径失败：{e}"))
+}
+
+/// 把层字符串拆成层名列表（去掉开头的 `~`，按大小写不敏感去重）
+#[cfg(target_os = "windows")]
+fn layer_names(raw: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for token in raw.split_whitespace().filter(|t| *t != "~") {
+        if !out.iter().any(|x| x.eq_ignore_ascii_case(token)) {
+            out.push(token.to_string());
+        }
+    }
+    out
+}
+
+/// 读当前 exe 的兼容性层字符串；键或值不存在都当空串（= 从没设过兼容性标记）
+#[cfg(target_os = "windows")]
+fn read_layers() -> Result<String, String> {
+    let key = to_wide(LAYERS_KEY);
+    let name = to_wide(&exe_path()?);
+    unsafe {
+        let mut hkey: *mut c_void = std::ptr::null_mut();
+        let rc = win::RegOpenKeyExW(
+            win::HKEY_CURRENT_USER as *mut c_void,
+            key.as_ptr(),
+            0,
+            win::KEY_QUERY_VALUE,
+            &mut hkey,
+        );
+        if rc != 0 {
+            return Ok(String::new());
+        }
+        // 先问长度再取值（两次调用之间外部改动忽略）
+        let mut ty = 0u32;
+        let mut len = 0u32;
+        let rc = win::RegQueryValueExW(
+            hkey,
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut ty,
+            std::ptr::null_mut(),
+            &mut len,
+        );
+        if rc != 0 || len == 0 {
+            win::RegCloseKey(hkey);
+            return Ok(String::new());
+        }
+        let mut buf = vec![0u8; len as usize];
+        let rc = win::RegQueryValueExW(
+            hkey,
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut ty,
+            buf.as_mut_ptr(),
+            &mut len,
+        );
+        win::RegCloseKey(hkey);
+        if rc != 0 {
+            return Ok(String::new());
+        }
+        // REG_SZ：UTF-16LE，多数情况不带宽字符结尾的 NUL
+        let units: Vec<u16> = buf[..len as usize]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        Ok(String::from_utf16_lossy(&units)
+            .trim_end_matches('\0')
+            .to_string())
+    }
+}
+
+/// 写入（`Some`）或删除（`None`）当前 exe 的兼容性层字符串
+#[cfg(target_os = "windows")]
+fn write_layers(value: Option<&str>) -> Result<(), String> {
+    let key = to_wide(LAYERS_KEY);
+    let name = to_wide(&exe_path()?);
+    unsafe {
+        let mut hkey: *mut c_void = std::ptr::null_mut();
+        // 用 Create 而不是 Open：从没设过兼容性标记时 Layers 键可能整体不存在
+        let rc = win::RegCreateKeyExW(
+            win::HKEY_CURRENT_USER as *mut c_void,
+            key.as_ptr(),
+            0,
+            std::ptr::null(),
+            0,
+            win::KEY_SET_VALUE,
+            std::ptr::null(),
+            &mut hkey,
+            std::ptr::null_mut(),
+        );
+        if rc != 0 {
+            return Err(format!("打开注册表键失败（错误码 {rc}）"));
+        }
+        let rc = match value {
+            Some(v) => {
+                // REG_SZ 不含结尾 NUL
+                let data: Vec<u8> = v.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+                win::RegSetValueExW(
+                    hkey,
+                    name.as_ptr(),
+                    0,
+                    win::REG_SZ,
+                    data.as_ptr(),
+                    data.len() as u32,
+                )
+            }
+            None => win::RegDeleteValueW(hkey, name.as_ptr()),
+        };
+        win::RegCloseKey(hkey);
+        // 删一个本来就不存在的值 = 已经是想要的状态
+        if rc != 0 && rc != win::ERROR_FILE_NOT_FOUND {
+            return Err(format!("写入注册表失败（错误码 {rc}）"));
+        }
+        Ok(())
+    }
+}
+
+/// 是否已设置「始终以管理员身份启动」
+#[tauri::command]
+pub fn get_auto_admin() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        Ok(layer_names(&read_layers()?)
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(RUN_AS_ADMIN_LAYER)))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false)
+    }
+}
+
+/// 设置「始终以管理员身份启动」：写当前用户注册表里的 exe 兼容性标记，**下次启动生效**
+///
+/// 返回写入后的实际状态，前端以返回值刷新开关（避免界面与注册表不一致）。
+/// 不影响当前进程——本次是否已提权仍由 `is_elevated` 判断：勾上了却没提权
+/// （例如被计划任务 / 直接 CreateProcess 拉起）时，界面提示用「以管理员身份重启」。
+#[tauri::command]
+pub fn set_auto_admin(enabled: bool) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut names: Vec<String> = layer_names(&read_layers()?)
+            .into_iter()
+            .filter(|t| !t.eq_ignore_ascii_case(RUN_AS_ADMIN_LAYER))
+            .collect();
+        if enabled {
+            names.insert(0, RUN_AS_ADMIN_LAYER.to_string());
+        }
+        if names.is_empty() {
+            // 只删我们这一项，同一 exe 的其它兼容性层（如 HIGHDPIAWARE）原样保留
+            write_layers(None)?;
+        } else {
+            write_layers(Some(&format!("~ {}", names.join(" "))))?;
+        }
+        Ok(enabled)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = enabled;
+        Err("仅 Windows 支持设置以管理员身份启动".to_string())
     }
 }

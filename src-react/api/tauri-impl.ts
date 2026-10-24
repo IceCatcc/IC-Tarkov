@@ -473,6 +473,16 @@ export async function relaunchAsAdmin(): Promise<void> {
   await invoke('relaunch_as_admin')
 }
 
+/** 是否已设置「始终以管理员身份启动」（当前用户注册表里的 exe 兼容性标记） */
+export async function getAutoAdmin(): Promise<boolean> {
+  return await invoke<boolean>('get_auto_admin')
+}
+
+/** 设置「始终以管理员身份启动」：写注册表，下次启动生效；返回写入后的实际状态 */
+export async function setAutoAdmin(enabled: boolean): Promise<boolean> {
+  return await invoke<boolean>('set_auto_admin', { enabled })
+}
+
 /* ---------------- 本地战局 Boss 监控（桌面端） ---------------- */
 
 /** 当前监控快照（顺带让后端立即扫一次日志） */

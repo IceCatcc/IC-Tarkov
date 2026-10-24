@@ -481,6 +481,14 @@ export async function relaunchAsAdmin(): Promise<void> {
   throw new Error(NOT_SUPPORTED)
 }
 
+export async function getAutoAdmin(): Promise<boolean> {
+  return false
+}
+
+export async function setAutoAdmin(_enabled: boolean): Promise<boolean> {
+  throw new Error(NOT_SUPPORTED)
+}
+
 /* ---------------- 本地战局 Boss 监控（仅桌面端） ---------------- */
 
 const EMPTY_BOSS_MONITOR: BossMonitorPayload = {
