@@ -155,9 +155,21 @@ export async function initTauri(): Promise<UnlistenFn> {
   const bossToastSeen = new Set<string>()
   let bossRaidKey = ''
   // 快照同时写进全局 store：地图页的 Boss 刷新率面板直接据此改颜色，无需自己再 invoke
-  const { setBoss } = useStore.getState()
+  const { setBoss, setCurrentMapId: setMapIdByBoss } = useStore.getState()
+  /**
+   * 监控识别到「本局进的是哪张图」时，等同于一次 map-changed：
+   * 写 currentMapId 让地图页自动切图。日志监听的 map-changed 可能因为
+   * 目录配置不同 / 启动首扫被跳过而不触发，这条是兜底（也是本地战局的主路径）。
+   * 这里不发「进入地图」提示，避免与真正的 map-changed 重复弹。
+   */
+  const followBossMap = (p: BossMonitorPayload | null | undefined) => {
+    if (p?.enabled && p.inRaid && p.map) setMapIdByBoss(p.map)
+  }
   getBossMonitor()
-    .then((b) => setBoss(b))
+    .then((b) => {
+      setBoss(b)
+      followBossMap(b)
+    })
     .catch(() => {})
   track(
     await listen<BossMonitorPayload>('boss-monitor', (e) => {
@@ -167,6 +179,7 @@ export async function initTauri(): Promise<UnlistenFn> {
       if (raidKey !== bossRaidKey) {
         // 换局 / 换图（含刚开启监控时的历史回放）：已刷新的一律不补弹通知
         bossRaidKey = raidKey
+        followBossMap(p)
         bossToastSeen.clear()
         for (const b of p.bosses ?? []) {
           if (b.status === 'confirmed') bossToastSeen.add(`${raidKey}|${b.role.toLowerCase()}`)

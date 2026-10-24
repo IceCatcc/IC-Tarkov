@@ -341,8 +341,9 @@ img.extract-req-icon {
 }
 
 /* 本地战局 Boss 状态标记：Boss 头像 + 描边发光 + 下方文字小标签
-   （已刷新 绿 / 已死亡 灰淡显；标签本身就是文字，不只靠颜色区分。
-   「预计刷新 / 本局不刷」不在地图上画，改在右侧 Boss 刷新率面板里用小标签标出） */
+   （已刷新 红色描边 + 「已刷新」；已死亡是头像淡显、右下角叠红色「✕」小徽标。
+   标签本身就是文字，不只靠颜色区分。「预计刷新 / 本局不刷」没有坐标，不在地图上画，
+   状态看地图页的「战局 Boss」浮窗与工具页列表） */
 .map-boss-live {
     background: transparent;
     border: none;
@@ -386,6 +387,25 @@ img.extract-req-icon {
     opacity: 0.45;
     border-color: rgba(139, 148, 158, 0.7);
     filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+}
+/* 已死亡（有头像时）：主体仍是 Boss 头像（沿用上面的淡显），右下角叠红色 ✕ 小徽标 */
+.map-boss-x-badge {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: rgba(13, 17, 23, 0.95);
+    border: 1px solid rgba(248, 81, 73, 0.95);
+    color: #f85149;
+    font-size: 10px;
+    line-height: 1;
+    font-weight: 700;
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+    pointer-events: none;
 }
 /* BTR 没有头像，用蓝色 BTR 字样标记（与 BtrPanel 的配色一致） */
 .map-boss-live-btr {

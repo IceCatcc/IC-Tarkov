@@ -23,12 +23,12 @@ import type {
   QuestZoneObjective,
   QuestZonesDoc,
   MapBossesDoc,
-  BossSpawnState,
 } from '../types'
 import { useStore } from '../store'
 import { QuestCard } from '../components/QuestCard'
 import { MapIconPanel } from '../components/MapIconPanel'
 import { GameClock } from '../components/GameClock'
+import { BossMonitorMapPanel } from '../components/BossMonitorMapPanel'
 import { BtrPanel, BtrIcon, type BtrLayerState } from '../components/BtrPanel'
 import {
   btrColor,
@@ -435,69 +435,6 @@ function popupHtml(
     .join('')}${checkHtml}</div>`
 }
 
-/**
- * Boss 刷新率文字的颜色即状态（文字本身不换，避免面板跳动）：
- * 已刷新 绿 / 预计刷新 琥珀 / 本局不刷 灰 / 已确认死亡 暗红；
- * 没开本地战局监控时保持原来的琥珀色。
- */
-function bossChanceStyle(
-  status: BossSpawnState['status'] | undefined,
-  live: boolean,
-): { cls: string; title: string } {
-  if (!live) return { cls: 'text-amber', title: '刷新率（未开启本地战局监控）' }
-  switch (status) {
-    case 'confirmed':
-      return { cls: 'text-[#3fb950]', title: '已确认刷新' }
-    case 'planned':
-      return { cls: 'text-amber', title: '预计刷新（日志已判定本局要刷）' }
-    case 'not_planned':
-      return { cls: 'text-muted/60', title: '本局不刷（日志判定未命中）' }
-    case 'dead':
-      return { cls: 'text-[#f85149]/70', title: '已确认死亡' }
-    default:
-      return { cls: 'text-[#c9d1d9]/70', title: '尚未检测到（等待本局日志）' }
-  }
-}
-
-/**
- * Boss 状态小标签：与颜色并用，避免只靠颜色区分。
- * 未开启监控 / 日志里还没判定时不显示（返回 null）。
- */
-function bossStatusTag(
-  status: BossSpawnState['status'] | undefined,
-  live: boolean,
-): { text: string; cls: string; title: string } | null {
-  if (!live || !status) return null
-  switch (status) {
-    case 'confirmed':
-      return {
-        text: '已刷新',
-        cls: 'border-[#3fb950]/50 bg-[#3fb950]/15 text-[#7ee787]',
-        title: '已确认刷新（日志里 Boss 已激活）',
-      }
-    case 'planned':
-      return {
-        text: '预计刷新',
-        cls: 'border-amber/50 bg-amber/15 text-[#d4a174]',
-        title: '预计刷新（日志已判定本局要刷，尚未激活）',
-      }
-    case 'not_planned':
-      return {
-        text: '本局不刷',
-        cls: 'border-line/80 bg-white/[0.04] text-muted/70',
-        title: '本局不刷（日志判定未命中）',
-      }
-    case 'dead':
-      return {
-        text: '已死亡',
-        cls: 'border-[#f85149]/40 bg-[#f85149]/10 text-[#ff9b95]',
-        title: '已确认死亡',
-      }
-    default:
-      return null
-  }
-}
-
 /* ================= 组件 ================= */
 
 export function MapPage() {
@@ -519,6 +456,8 @@ export function MapPage() {
   const bossMonitor = useStore((s) => s.boss)
   // 「绘制刷新位置」开关在工具页（战局 Boss 监控）里切换，这里只读结果
   const bossMarkers = useStore((s) => s.bossMarkers)
+  // 死亡坐标是否单独画（红色 ✕ + 小头像）；关掉就退回「激活坐标 + 淡显头像」
+  const bossDeathMarkers = useStore((s) => s.bossDeathMarkers)
   // 外部定位请求（物品页钥匙「使用位置」跳转过来）：切图 + 居中到坐标，消费后清空
   const mapFocus = useStore((s) => s.mapFocus)
   const setMapFocus = useStore((s) => s.setMapFocus)
@@ -666,6 +605,10 @@ export function MapPage() {
       useStore.getState().setCurrentMap(nn)
     }
   }, [currentMapId, markers, selectable])
+
+  /* 战局监控识别到新地图时也会切图：由 `api/tauri-impl.ts` 的 boss-monitor 监听
+     写入 `currentMapId`（口径与 map-changed 相同），再走上面这条 effect。
+     这里不再单独处理，避免两处切换逻辑打架。 */
 
   /* 地图时间已移除：接口长期无数据，面板里只会显示「暂不可用」还占位置。
      相关的时钟状态、1s 定时器与 10 分钟一次的网络同步一并去掉。 */
@@ -1287,11 +1230,15 @@ export function MapPage() {
       const isBtr = role === 'shooterbtr'
       // 只画真 Boss 与 BTR（日志里的 pmc / assault / marksman 等普通 AI 不画）
       if (!isBtr && !isBossRole(role)) continue
-      // 只画确认刷新的（含已确认死亡，淡显）。
+      // 只画确认刷新的（已死亡用死亡坐标画「✕」）。
       // 「预计刷新 / 本局不刷」阶段日志里没有坐标，不在地图上占位：
-      // 这两种状态改在「地图信息 → Boss 刷新率」面板里用小标签标出。
+      // 这两种状态看地图页的「战局 Boss」浮窗 / 工具页列表。
       if (b.status !== 'confirmed' && b.status !== 'dead') continue
-      const ll = logPosLatLng(b.position)
+      const dead = b.status === 'dead'
+      // 已死亡且开了「阵亡标记」时优先用死亡坐标（BotDied pos，靠 bot dispose 配对）；
+      // 关掉开关或没有配对到死亡坐标时退回激活坐标
+      const deathLl = dead && bossDeathMarkers ? logPosLatLng(b.diedPosition) : null
+      const ll = deathLl ?? logPosLatLng(b.position)
       if (!ll) continue
       // 坐标不在这张图的世界范围内（旧战局数据 / 解析异常）就不画
       if (bounds && !bounds.contains(ll)) continue
@@ -1299,11 +1246,15 @@ export function MapPage() {
         bossDoc?.maps?.[imap.key]?.find((x) => x.id.toLowerCase() === role)?.nameZh ||
         (isBtr ? 'BTR' : b.role)
       const img = bossImage(b.role)
-      const dead = b.status === 'dead'
       // 状态不只靠颜色：图标下方挂一个文字小标签
       const tag = dead ? '已死亡' : '已刷新'
+      // 已死亡、开了「阵亡标记」且能拿到头像时：主体仍是 Boss 头像（淡显），
+      // 右下角叠一个红色 ✕ 小徽标表示阵亡点
+      const xBadge = !!deathLl && !!img
       const iconHtml = img
-        ? `<img src="${img}" alt="" draggable="false" />`
+        ? `<img src="${img}" alt="" draggable="false" />${
+            xBadge ? '<span class="map-boss-x-badge">✕</span>' : ''
+          }`
         : isBtr
           ? `<span class="map-boss-live-btr">BTR</span>`
           : `<span class="map-boss-live-fallback">?</span>`
@@ -1311,18 +1262,20 @@ export function MapPage() {
         L.marker(ll, {
           zIndexOffset: 9000,
           icon: L.divIcon({
-            className: `map-boss-live${dead ? ' is-dead' : ''}${isBtr ? ' is-btr' : ''}`,
+            className: `map-boss-live${dead ? ' is-dead' : ''}${
+              xBadge ? ' is-dead-x' : ''
+            }${isBtr ? ' is-btr' : ''}`,
             html: `${iconHtml}<span class="map-boss-live-tag">${tag}</span>`,
             iconSize: [34, 34],
             iconAnchor: [17, 17],
           }),
-        }).bindTooltip(`${name}（${tag}）`, {
+        }).bindTooltip(`${name}（${tag}）${dead && deathLl ? ' · 阵亡位置' : ''}`, {
           direction: 'top',
           offset: [0, -16],
         }),
       )
     }
-  }, [imap, markers, bossMonitor, bossMarkers, bossDoc])
+  }, [imap, markers, bossMonitor, bossMarkers, bossDeathMarkers, bossDoc])
 
   /* ---------- keepAlive：切回地图页（或从隐藏恢复）时重算尺寸并复位视图 ---------- */
   useEffect(() => {
@@ -1739,11 +1692,6 @@ export function MapPage() {
   // 本图 Boss 刷新率（按刷新率降序，数据来自 map-bosses.json）
   const mapBosses = (imap && bossDoc?.maps?.[imap.key]) ?? []
 
-  // 本局实时状态（role → 状态），只认「监控开启 + 日志里的地图与当前地图一致」
-  const liveBoss = new Map<string, BossSpawnState>()
-  if (bossMonitor?.enabled && imap && bossMonitor.map === imap.key) {
-    for (const b of bossMonitor.bosses) liveBoss.set(b.role.toLowerCase(), b)
-  }
 
   // 自动聚焦面板内容（桌面工具条与移动端左下角浮层共用）
   const focusBody = (
@@ -1850,6 +1798,9 @@ export function MapPage() {
         <div className="absolute right-3 top-3 z-[600] cursor-default select-none rounded border border-line bg-ink-800/80 px-2.5 py-1.5 shadow-lg backdrop-blur-sm">
           <GameClock />
         </div>
+
+        {/* 战局 Boss 浮窗：本地监控开启时才有，可在地图容器内拖动（与「地图信息」解耦） */}
+        <BossMonitorMapPanel monitor={bossMonitor} bossDoc={bossDoc} selectedMap={selected} />
 
         {/* 左上角浮窗行：任务 + 地图选单 + 层级 + 聚焦（后两者原在右上角，已并入本行） */}
         <div
@@ -2097,62 +2048,37 @@ export function MapPage() {
           onWheel={(e) => e.stopPropagation()}
         >
           {infoOpen && (
-            <div className="pointer-events-none w-[210px] max-h-[calc(60dvh/var(--ui-scale,1))] overflow-y-auto rounded-xl border border-line bg-ink-800/60 shadow-xl p-2.5 space-y-2.5">
+            <div className="pointer-events-none w-[180px] max-h-[calc(60dvh/var(--ui-scale,1))] overflow-y-auto rounded-xl border border-line bg-ink-800/60 shadow-xl p-2.5 space-y-2.5">
               <div>
                 <div className="text-[13px] text-muted mb-1">Boss 刷新率</div>
                 {mapBosses.length === 0 ? (
                   <div className="text-[13px] text-muted/70">本图无固定 Boss</div>
                 ) : (
                   <div className="space-y-1">
-                    {mapBosses.map((b) => {
-                      const live = liveBoss.get(b.id.toLowerCase())
-                      const tint = bossChanceStyle(live?.status, !!bossMonitor?.enabled)
-                      // 状态小标签（预计刷新 / 已刷新 / 已死亡 / 本局不刷），不只靠颜色区分
-                      const tag = bossStatusTag(live?.status, !!bossMonitor?.enabled)
-                      // 刷新率口径：日志里的 `BossChance` 是本局实际用的百分数（0~100），优先用它；
-                      // 日志还没判定时退回 tarkov.dev 上游数据（小数 0~1，其口径源自 wiki），
-                      // tooltip 里要标清当前显示的是哪一种。
-                      const liveChance = live?.chance ?? null
-                      const pct =
-                        liveChance != null
-                          ? `${Math.round(liveChance)}%`
-                          : `${Math.round(b.chance * 100)}%`
-                      const pctTitle = `${tint.title} · ${
-                        liveChance != null
-                          ? '实际刷新率（本局日志判定）'
-                          : '来源 wiki（tarkov.dev 上游数据）'
-                      }`
-                      return (
-                        <div key={b.id} className="flex items-start gap-1.5 text-[14px]">
+                    {mapBosses.map((b) => (
+                      <div key={b.id} className="flex items-center justify-between gap-2 text-[14px]">
+                        <span className="flex items-center gap-1.5 min-w-0">
                           {bossImage(b.id) && (
                             <img
                               src={bossImage(b.id)!}
                               alt=""
                               loading="lazy"
                               draggable={false}
-                              className="mt-0.5 w-[18px] h-[18px] shrink-0 rounded-full object-cover bg-ink-700/60"
+                              className="w-[18px] h-[18px] shrink-0 rounded-full object-cover bg-ink-700/60"
                             />
                           )}
-                          <span className="min-w-0 flex-1 truncate text-[#c9d1d9]" title={b.nameZh}>
+                          <span className="text-[#c9d1d9] truncate" title={b.nameZh}>
                             {b.nameZh}
                           </span>
-                          {tag && (
-                            <span
-                              className={`shrink-0 rounded border px-1 py-px text-[10px] leading-[14px] ${tag.cls}`}
-                              title={tag.title}
-                            >
-                              {tag.text}
-                            </span>
-                          )}
-                          <span
-                            className={`shrink-0 tabular-nums transition-colors ${tint.cls}`}
-                            title={pctTitle}
-                          >
-                            {pct}
-                          </span>
-                        </div>
-                      )
-                    })}
+                        </span>
+                        <span
+                          className="shrink-0 tabular-nums text-amber"
+                          title="tarkov.dev 上游刷新率（来源 wiki）"
+                        >
+                          {Math.round(b.chance * 100)}%
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

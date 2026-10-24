@@ -16,6 +16,7 @@ import {
 import { useStore } from '../store'
 import { isMobile, isWeb } from '../platform'
 import { bossImage, isBossRole } from '../bossImages'
+import { BTR_MAPS, BTR_STATUS, STATUS_STYLE } from '../bossStatus'
 import type {
   BossSpawnState,
   LoggingConfigStatus,
@@ -24,46 +25,6 @@ import type {
 } from '../types'
 
 type SpawnStatus = BossSpawnState['status']
-
-const STATUS_STYLE: Record<SpawnStatus, { label: string; cls: string; dot: string }> = {
-  confirmed: {
-    label: '已刷新',
-    cls: 'border-[#3fb950]/45 bg-[#3fb950]/10 text-[#3fb950]',
-    dot: 'bg-[#3fb950] shadow-[0_0_6px_#3fb950]',
-  },
-  planned: {
-    label: '预计刷新',
-    cls: 'border-amber/45 bg-amber/10 text-[#d4a174]',
-    dot: 'bg-amber shadow-[0_0_6px_rgba(239,159,39,.9)]',
-  },
-  not_planned: {
-    label: '本局不刷',
-    cls: 'border-line bg-ink-700/60 text-muted',
-    dot: 'bg-muted/60',
-  },
-  dead: {
-    label: '已确认死亡',
-    cls: 'border-line/70 bg-ink-700/30 text-muted/70',
-    dot: 'bg-muted/40',
-  },
-  unknown: {
-    label: '未检测',
-    cls: 'border-line/60 bg-transparent text-muted/60',
-    dot: 'bg-muted/30',
-  },
-}
-
-/** 有 BTR 的地图（normalizedName） */
-const BTR_MAPS = ['woods', 'streets-of-tarkov', 'lighthouse']
-
-/** BTR 的状态文案（与 Boss 共用样式，但「已刷新」对装甲车读起来别扭） */
-const BTR_STATUS: Record<SpawnStatus, { label: string; cls: string; dot: string }> = {
-  confirmed: { ...STATUS_STYLE.confirmed, label: '已出现' },
-  planned: { ...STATUS_STYLE.planned, label: '预计出现' },
-  not_planned: { ...STATUS_STYLE.not_planned, label: '本局不刷' },
-  dead: { ...STATUS_STYLE.dead, label: '已离场 / 被毁' },
-  unknown: { ...STATUS_STYLE.unknown, label: '未检测' },
-}
 
 /** 日志时间戳 `yyyy-MM-dd HH:mm:ss.fff` → `HH:mm:ss` */
 function clock(ts?: string | null): string {
@@ -101,6 +62,9 @@ export function BossMonitorTool() {
   // 地图绘制开关（随 mapPrefs.bossMarkers 持久化，地图页只读结果）
   const bossMarkers = useStore((s) => s.bossMarkers)
   const setBossMarkers = useStore((s) => s.setBossMarkers)
+  // 死亡坐标单独开关（mapPrefs.bossDeathMarkers）
+  const bossDeathMarkers = useStore((s) => s.bossDeathMarkers)
+  const setBossDeathMarkers = useStore((s) => s.setBossDeathMarkers)
   const [cfg, setCfg] = useState<LoggingConfigStatus | null>(null)
   const [bossDoc, setBossDoc] = useState<MapBossesDoc | null>(null)
   const [skeleton, setSkeleton] = useState<SkeletonDoc | null>(null)
@@ -427,8 +391,17 @@ export function BossMonitorTool() {
             onChange={() => setBossMarkers(!bossMarkers)}
             label="地图标注"
             hint={bossMarkers ? '已开启' : '已关闭'}
-            title="把日志里确认刷新的 Boss / BTR 按坐标画在地图上（图标下方带「已刷新 / 已死亡」文字小标签）；「预计刷新」没有坐标，不画在地图上，改在右侧 Boss 刷新率面板里标出"
+            title="把日志里确认刷新的 Boss / BTR 按坐标画在地图上（图标下方带「已刷新 / 已死亡」文字小标签）；「预计刷新」没有坐标，不画在地图上，状态看地图页的「战局 Boss」浮窗"
             icon={<IconPin />}
+          />
+          <ToggleChip
+            checked={bossDeathMarkers}
+            disabled={!bossMarkers}
+            onChange={() => setBossDeathMarkers(!bossDeathMarkers)}
+            label="阵亡标记"
+            hint={!bossMarkers ? '随地图标注' : bossDeathMarkers ? '已开启' : '已关闭'}
+            title="已死亡的 Boss 按日志里的阵亡坐标（BotDied）画：红色 ✕ 为主体、头像缩小叠在右下角。关闭后退回原来的样子：在首次激活坐标画淡显头像 +「已死亡」标签"
+            icon={<IconCross />}
           />
           <ToggleChip
             checked={!!monitor?.cleanAi}
@@ -722,10 +695,10 @@ export function BossMonitorTool() {
           </li>
           <li>「预计刷新」来自日志里的生成判定（roll），与是否已经激活是两件事，因此能区分「本局不刷」与「刷了但还没激活」。</li>
           <li>
-            勾选「在地图上标注 Boss 状态」后，已刷新 / 已死亡的 Boss 会按日志坐标画在地图上，
-            图标下方带文字小标签；「预计刷新」还没有坐标、不在地图上占位，
-            改在右侧「地图信息 → Boss 刷新率」面板里用小标签标出；百分比优先用日志里的实际刷新率，
-            日志还没判定时退回 tarkov.dev 上游数据（来源于 wiki），鼠标悬停可看到当前是哪种口径。
+            勾选「地图标注」后，已刷新的 Boss 会按日志坐标画在地图上，图标下方带文字小标签；
+            「预计刷新 / 本局不刷」没有坐标、不在地图上占位，状态看地图页右上角的「战局 Boss」浮窗。
+            再勾「阵亡标记」时，已死亡的 Boss 按 <Code>BotDied</Code> 的阵亡坐标画（红色 ✕ + 右下角小头像）；
+            关掉则在首次激活坐标画淡显头像。
           </li>
           <li>开启监控会自动把 <Code>aiData</Code> 调到 <Code>Trace</Code>，关闭时自动改回 <Code>Error</Code>（都需重启游戏生效）；下方配置卡的两个按钮可手动补做。</li>
           <li>日志目录取自「设置」里配置的路径（通常为 <Code>%LOCALAPPDATA%\Temp\Battlestate Games\EscapeFromTarkov\Logs</Code>）。</li>
@@ -906,6 +879,14 @@ function IconPin() {
     <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.9">
       <path d="M12 21s6.2-6.4 6.2-11a6.2 6.2 0 1 0-12.4 0C5.8 14.6 12 21 12 21Z" strokeLinejoin="round" />
       <circle cx="12" cy="10" r="2.2" />
+    </svg>
+  )
+}
+
+function IconCross() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2">
+      <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
     </svg>
   )
 }

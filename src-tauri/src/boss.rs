@@ -137,6 +137,9 @@ pub struct BossSpawnState {
     /// 存活估计（以日志的存活名单为准，名单没覆盖到时用激活 / 死亡配对推算）
     pub alive: u32,
     pub died_at: Option<String>,
+    /// 死亡坐标原文 `x, y, z`（来自 `BotDied pos:(...)` 与紧邻 `bot dispose:<id>` 的配对；
+    /// 只记录「成对」的那次死亡，despawn 的 dispose 没有 BotDied，不会有坐标）
+    pub died_position: Option<String>,
     /// 本局该 Boss 的护卫类型（日志 `SpawnWave ... EscortType:followerBully`）
     pub escort_type: Option<String>,
     /// 本局该 Boss 的护卫总数（日志 `SpawnWave ... EscortCount:4`）
@@ -437,6 +440,7 @@ impl Runtime {
             if b.alive > 0 && b.status == "dead" {
                 b.status = "confirmed".into();
                 b.died_at = None;
+                b.died_position = None;
             }
         }
     }
@@ -593,6 +597,7 @@ impl Runtime {
                             if b.status == "dead" {
                                 b.status = "confirmed".into();
                                 b.died_at = None;
+                                b.died_position = None;
                             }
                         }
                     }
@@ -605,6 +610,8 @@ impl Runtime {
                     return;
                 }
                 if line.contains("BotDied") {
+                    // 死亡坐标：`BotDied pos:(x, y, z)`（行内没有 bot id，靠 dispose 配对）
+                    let death_pos = RE_POS.captures(line).map(|m| m[1].to_string());
                     if let Some(bot) = self.pending_dispose.take() {
                         if let Some(role) = self.bot_role.get(&bot).cloned() {
                             if let Some(i) = self
@@ -615,6 +622,7 @@ impl Runtime {
                             {
                                 let b = &mut self.raid.bosses[i];
                                 b.alive = b.alive.saturating_sub(1);
+                                b.died_position = death_pos;
                                 if b.alive == 0 {
                                     b.status = "dead".into();
                                     b.died_at = Some(ts.clone());

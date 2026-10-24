@@ -167,6 +167,8 @@ export interface BossSpawnState {
   /** 存活估计（以日志存活名单为准，名单没覆盖到时用激活 / 死亡配对推算） */
   alive: number
   diedAt: string | null
+  /** 死亡坐标原文 `x, y, z`（`BotDied pos:(...)` 与 `bot dispose:<id>` 配对得到，没有则为 null） */
+  diedPosition: string | null
   /** 本局护卫类型（日志 `SpawnWave ... EscortType:followerBully`） */
   escortType: string | null
   /** 本局护卫总数（日志 `SpawnWave ... EscortCount:4`） */

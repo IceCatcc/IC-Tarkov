@@ -261,13 +261,13 @@ fn process_file(
                 if !emit {
                     continue;
                 }
-                // 实时事件更新当前地图（并去重：地图未变不重复 emit）
-                let changed = {
+                // 实时事件更新当前地图（`apply_location` 的返回值只表示「状态是否变化」，
+                // **不能**拿来决定要不要发事件，见下）
+                {
                     let binding = app.state::<AppState>();
-                    binding.with_active(|md| md.apply_location(&location_id))
-                };
+                    binding.with_active(|md| md.apply_location(&location_id));
+                }
                 // 战局起点：每次进图（含同一张图连打两局、转场到新图）都重置。
-                // 地图未变化时 map-changed 不 emit，但 raid-changed 必须发，否则第二局没有计时基准。
                 let raid = {
                     let binding = app.state::<AppState>();
                     let mut r = binding.raid.lock().unwrap();
@@ -278,12 +278,14 @@ fn process_file(
                     r.clone()
                 };
                 let _ = app.emit("raid-changed", &raid);
-                if changed {
-                    let _ = app.emit(
-                        "map-changed",
-                        serde_json::json!({ "locationId": location_id, "timestamp": timestamp }),
-                    );
-                }
+                // 每条「进图行」都发 map-changed，**不再按 locationId 去重**：
+                // `current_map` 是持久化值（上次会话也会写），连打同一张图时
+                // `apply_location` 返回 false，若因此不发事件，地图页就永远不跟随，
+                // 「进入地图」提示也不会弹。日志偏移保证同一行只处理一次，重复发不存在。
+                let _ = app.emit(
+                    "map-changed",
+                    serde_json::json!({ "locationId": location_id, "timestamp": timestamp }),
+                );
             }
             parser::RawEvent::RaidEnd { timestamp } => {
                 // 初始扫描不处理：历史日志里的出图行与当前状态无关

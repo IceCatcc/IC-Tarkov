@@ -81,6 +81,12 @@ interface AppState {
    */
   bossMarkers: boolean
   setBossMarkers: (v: boolean) => void
+  /**
+   * 地图：已死亡的 Boss 是否按「阵亡坐标」画（红色 ✕ + 小头像）。
+   * 关掉时退回原来的样子：在首次激活坐标上画淡显头像 + 「已死亡」标签。
+   */
+  bossDeathMarkers: boolean
+  setBossDeathMarkers: (v: boolean) => void
 
   /** 地图图标显隐（含任务目标），随 mapPrefs 一起持久化。键见 mapIconGroups.ts */
   mapChips: Record<string, boolean>
@@ -377,6 +383,7 @@ export function collectUiPrefs(): Record<string, unknown> {
       untrackedQuests: s.untrackedQuests,
       chips: s.mapChips,
       bossMarkers: s.bossMarkers,
+      bossDeathMarkers: s.bossDeathMarkers,
     },
     uiScale: s.uiScale,
     wikiWidth: s.wikiWidth,
@@ -394,6 +401,7 @@ interface UiPrefsShape {
     untrackedQuests?: string[]
     chips?: Record<string, boolean>
     bossMarkers?: boolean
+    bossDeathMarkers?: boolean
   }
   /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2 */
   uiScale?: number
@@ -455,6 +463,8 @@ export const useStore = create<AppState>((set, get) => ({
   setFocusZoom: (v) => set({ focusZoom: v }),
   bossMarkers: false,
   setBossMarkers: (v) => set({ bossMarkers: v }),
+  bossDeathMarkers: true,
+  setBossDeathMarkers: (v) => set({ bossDeathMarkers: v }),
   mapChips: { ...ICON_DEFAULTS },
   setMapChip: (key, on) => set((s) => ({ mapChips: { ...s.mapChips, [key]: on } })),
   setMapChips: (patch) => set((s) => ({ mapChips: { ...s.mapChips, ...patch } })),
@@ -800,6 +810,8 @@ export const useStore = create<AppState>((set, get) => ({
       if (typeof mp.autoCenter === 'boolean') patch.autoCenter = mp.autoCenter
       if (typeof mp.focusZoom === 'number') patch.focusZoom = mp.focusZoom
       if (typeof mp.bossMarkers === 'boolean') patch.bossMarkers = mp.bossMarkers
+      if (typeof mp.bossDeathMarkers === 'boolean')
+        patch.bossDeathMarkers = mp.bossDeathMarkers
       if (Array.isArray(mp.untrackedQuests))
         patch.untrackedQuests = mp.untrackedQuests.filter((x) => typeof x === 'string')
       if (mp.chips && typeof mp.chips === 'object') {

@@ -159,7 +159,9 @@ impl ModeData {
     /// 任务列表同步等进度事件：仅向前端发事件，不再计入活动流（实时/历史均不显示）
     pub fn apply_progress(&mut self, _endpoint: &str, _ts: &str) {}
 
-    /// 更新当前所在地图；返回是否发生变化（变化时前端需要 emit map-changed）
+    /// 更新当前所在地图；返回状态是否发生变化。
+    /// 注意：**不要**用返回值决定要不要发 `map-changed` —— `current_map` 是持久化值，
+    /// 连打同一张图时返回 false，按它去重会让地图页不跟随进图（见 `watcher.rs`）。
     pub fn apply_location(&mut self, location_id: &str) -> bool {
         let changed = self.current_map.as_deref() != Some(location_id);
         if changed {
