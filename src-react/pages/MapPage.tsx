@@ -1227,9 +1227,11 @@ export function MapPage() {
         : null
     for (const b of bossMonitor.bosses) {
       const role = b.role.toLowerCase()
-      const isBtr = role === 'shooterbtr'
-      // 只画真 Boss 与 BTR（日志里的 pmc / assault / marksman 等普通 AI 不画）
-      if (!isBtr && !isBossRole(role)) continue
+      // BTR 是移动载具：日志里的激活坐标只是某一刻的位置，画在地图上会误导，
+      // 一律不画（BTR 状态看「战局 Boss」浮窗与工具页）
+      if (role === 'shooterbtr') continue
+      // 只画真 Boss（日志里的 pmc / assault / marksman 等普通 AI 不画）
+      if (!isBossRole(role)) continue
       // 只画确认刷新的（已死亡用死亡坐标画「✕」）。
       // 「预计刷新 / 本局不刷」阶段日志里没有坐标，不在地图上占位：
       // 这两种状态看地图页的「战局 Boss」浮窗 / 工具页列表。
@@ -1243,8 +1245,7 @@ export function MapPage() {
       // 坐标不在这张图的世界范围内（旧战局数据 / 解析异常）就不画
       if (bounds && !bounds.contains(ll)) continue
       const name =
-        bossDoc?.maps?.[imap.key]?.find((x) => x.id.toLowerCase() === role)?.nameZh ||
-        (isBtr ? 'BTR' : b.role)
+        bossDoc?.maps?.[imap.key]?.find((x) => x.id.toLowerCase() === role)?.nameZh || b.role
       const img = bossImage(b.role)
       // 状态不只靠颜色：图标下方挂一个文字小标签
       const tag = dead ? '已死亡' : '已刷新'
@@ -1255,16 +1256,14 @@ export function MapPage() {
         ? `<img src="${img}" alt="" draggable="false" />${
             xBadge ? '<span class="map-boss-x-badge">✕</span>' : ''
           }`
-        : isBtr
-          ? `<span class="map-boss-live-btr">BTR</span>`
-          : `<span class="map-boss-live-fallback">?</span>`
+        : `<span class="map-boss-live-fallback">?</span>`
       layer.addLayer(
         L.marker(ll, {
           zIndexOffset: 9000,
           icon: L.divIcon({
             className: `map-boss-live${dead ? ' is-dead' : ''}${
               xBadge ? ' is-dead-x' : ''
-            }${isBtr ? ' is-btr' : ''}`,
+            }`,
             html: `${iconHtml}<span class="map-boss-live-tag">${tag}</span>`,
             iconSize: [34, 34],
             iconAnchor: [17, 17],

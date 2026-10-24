@@ -60,11 +60,12 @@ export const STATUS_STYLE: Record<SpawnStatus, StatusStyle> = {
 /** 有 BTR 的地图（normalizedName） */
 export const BTR_MAPS = ['woods', 'streets-of-tarkov', 'lighthouse']
 
-/** BTR 的状态文案（与 Boss 共用样式，但「已刷新」对装甲车读起来别扭） */
+/**
+ * BTR 的状态文案：除「死亡」一列换成「离场 / 被毁」（装甲车不会「死亡」）外，
+ * 其余与 Boss 完全一致 —— 统一说「刷新」，避免出现「已出现 / 预计出现」这类
+ * 与日志判定口径不符的说法。
+ */
 export const BTR_STATUS: Record<SpawnStatus, StatusStyle> = {
-  confirmed: { ...STATUS_STYLE.confirmed, label: '已出现', short: '已出现' },
-  planned: { ...STATUS_STYLE.planned, label: '预计出现', short: '预计' },
-  not_planned: { ...STATUS_STYLE.not_planned, label: '本局不刷', short: '不刷' },
+  ...STATUS_STYLE,
   dead: { ...STATUS_STYLE.dead, label: '已离场 / 被毁', short: '离场' },
-  unknown: { ...STATUS_STYLE.unknown, label: '未检测', short: '未知' },
 }

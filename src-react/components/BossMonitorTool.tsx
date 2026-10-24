@@ -391,7 +391,7 @@ export function BossMonitorTool() {
             onChange={() => setBossMarkers(!bossMarkers)}
             label="地图标注"
             hint={bossMarkers ? '已开启' : '已关闭'}
-            title="把日志里确认刷新的 Boss / BTR 按坐标画在地图上（图标下方带「已刷新 / 已死亡」文字小标签）；「预计刷新」没有坐标，不画在地图上，状态看地图页的「战局 Boss」浮窗"
+            title="把日志里确认刷新的 Boss 按坐标画在地图上（图标下方带「已刷新 / 已死亡」文字小标签）；「预计刷新」没有坐标，不画在地图上，状态看地图页的「战局 Boss」浮窗。BTR 是移动载具、日志坐标不准，不在地图上画"
             icon={<IconPin />}
           />
           <ToggleChip
@@ -400,7 +400,7 @@ export function BossMonitorTool() {
             onChange={() => setBossDeathMarkers(!bossDeathMarkers)}
             label="阵亡标记"
             hint={!bossMarkers ? '随地图标注' : bossDeathMarkers ? '已开启' : '已关闭'}
-            title="已死亡的 Boss 按日志里的阵亡坐标（BotDied）画：红色 ✕ 为主体、头像缩小叠在右下角。关闭后退回原来的样子：在首次激活坐标画淡显头像 +「已死亡」标签"
+            title="已死亡的 Boss 按日志里的阵亡坐标（BotDied）画：Boss 头像淡显 + 右下角红色 ✕ 小徽标。关闭后退回原来的样子：在首次激活坐标画淡显头像 +「已死亡」标签"
             icon={<IconCross />}
           />
           <ToggleChip
