@@ -121,7 +121,12 @@ export function BossMonitorTool() {
     return out
   }, [skeleton])
 
-  const enabled = !!monitor?.enabled
+  // 开关的「意图」状态（存在 boss-monitor.json 里）与「真正生效」的状态分开：
+  // 只有 Logging.config 里 aiData 已是 Trace，日志里才会有 Boss / BTR 细节，
+  // 所以级别不对时永远不显示为已启用（开关仍保持用户打开的样子，方便一键改配置）。
+  const wantOn = !!monitor?.enabled
+  const logReady = monitor?.logReady ?? !!cfg?.patched
+  const enabled = wantOn && logReady
   const map = monitor?.map ?? ''
   const mapLabel = monitor?.mapName || mapNames[map] || map
 
@@ -366,14 +371,25 @@ export function BossMonitorTool() {
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-3">
             <div className="text-right">
-              <div className={`text-[11px] ${enabled ? 'text-[#3fb950]' : 'text-muted/70'}`}>
-                {enabled ? '已启用' : '已关闭'}
+              <div
+                className={`text-[11px] ${
+                  enabled ? 'text-[#3fb950]' : wantOn ? 'text-amber' : 'text-muted/70'
+                }`}
+              >
+                {enabled ? '已启用' : wantOn ? '未生效' : '已关闭'}
               </div>
               <div className="text-[10px] text-muted/50">
-                {monitor?.hasAiData ? '详细 AI 日志已生效' : '等待详细 AI 日志'}
+                {enabled
+                  ? monitor?.hasAiData
+                    ? '详细 AI 日志已生效'
+                    : '等待详细 AI 日志'
+                  : wantOn
+                    ? 'aiData 日志级别不是 Trace'
+                    : '等待详细 AI 日志'}
               </div>
             </div>
-            <Switch checked={enabled} disabled={busy === 'toggle'} onChange={toggleMonitor} />
+            {/* 开关跟随「用户意图」：配置没写成时仍可一键关掉或去下方改配置 */}
+            <Switch checked={wantOn} disabled={busy === 'toggle'} onChange={toggleMonitor} />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 border-t border-line/50 bg-[#0f141b]/40 px-3.5 py-2.5">
@@ -464,11 +480,13 @@ export function BossMonitorTool() {
             <span className={monitor?.inRaid ? 'text-[#3fb950]' : 'text-muted/70'}>
               {monitor?.inRaid
                 ? '战局进行中'
-                : !enabled
+                : !wantOn
                   ? '监控已关闭'
-                  : monitor?.ended
-                    ? '最近一局已结束'
-                    : '待机'}
+                  : !logReady
+                    ? '日志配置未生效'
+                    : monitor?.ended
+                      ? '最近一局已结束'
+                      : '待机'}
             </span>
           </span>
           {monitor?.startedAt && (
@@ -481,8 +499,12 @@ export function BossMonitorTool() {
         </div>
 
         {!enabled ? (
-          <div className="px-4 py-8 text-center text-[12px] text-muted/70">
-            打开上方开关后开始读取日志（需要先在设置里配置日志目录）。
+          <div className="px-4 py-8 text-center text-[12px] leading-relaxed text-muted/70">
+            {!wantOn
+              ? '打开上方开关后开始读取日志（需要先在设置里配置日志目录）。'
+              : '监控开关已打开，但游戏 Logging.config 里 aiData 的日志级别不是 Trace，' +
+                '读不到 Boss / BTR 的细节。请点下方「游戏日志配置」里的「一键修改」，' +
+                '改完重启游戏即可生效。'}
           </div>
         ) : rows.length === 0 ? (
           <div className="px-4 py-8 text-center text-[12px] leading-relaxed text-muted/70">
@@ -701,6 +723,11 @@ export function BossMonitorTool() {
             关掉则在首次激活坐标画淡显头像。
           </li>
           <li>开启监控会自动把 <Code>aiData</Code> 调到 <Code>Trace</Code>，关闭时自动改回 <Code>Error</Code>（都需重启游戏生效）；下方配置卡的两个按钮可手动补做。</li>
+          <li>
+            顶部的「已启用」与日志配置联动：只有 <Code>aiData</Code> 的级别确实是 <Code>Trace</Code>{' '}
+            才算启用。开关打开但配置没写成（没权限 / 没定位到游戏目录 / 被手动改回去）时显示
+            「未生效」，此时读不到任何 Boss 与 BTR 细节。
+          </li>
           <li>日志目录取自「设置」里配置的路径（通常为 <Code>%LOCALAPPDATA%\Temp\Battlestate Games\EscapeFromTarkov\Logs</Code>）。</li>
           <li>
             开启「自动清理 AI 日志」后，每轮解析完成时若 <Code>aiData</Code> 日志超过 16 MB 就把它截断为 0

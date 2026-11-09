@@ -29,17 +29,8 @@ import { QuestCard } from '../components/QuestCard'
 import { MapIconPanel } from '../components/MapIconPanel'
 import { GameClock } from '../components/GameClock'
 import { BossMonitorMapPanel } from '../components/BossMonitorMapPanel'
-import { BtrPanel, BtrIcon, type BtrLayerState } from '../components/BtrPanel'
-import {
-  btrColor,
-  btrKeyOf,
-  btrSnapshot,
-  fmtClock,
-  loadBtrRoutes,
-  type BtrDoc,
-  type BtrMapData,
-  type BtrRoute,
-} from '../btr'
+import { BtrPanel, BtrIcon } from '../components/BtrPanel'
+import { btrColor, btrKeyOf, loadBtrRoutes, type BtrDoc, type BtrMapData } from '../btr'
 import {
   buildIconGroups,
   resolveChipOn,
@@ -63,15 +54,6 @@ const ICON_BASE = 'maps/interactive/'
  *   就会整片空白。
  */
 const assetUrl = (p: string) => (/^(?:https?:)?\/\//i.test(p) ? p : `/${p}`)
-
-/** BTR 车辆图标（divIcon 的 HTML；填色由外层 style 的 color + currentColor 控制） */
-const BTR_VEHICLE_SVG =
-  '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden>' +
-  '<path d="M3 14V9.5c0-.6.4-1 1-1h2l2-2.5h6L16 8.5h4c.6 0 1 .4 1 1V14c0 .6-.4 1-1 1h-1.2a2.3 2.3 0 0 1-4.6 0H9.8a2.3 2.3 0 0 1-4.6 0H4c-.6 0-1-.4-1-1Z" fill="currentColor" stroke="rgba(0,0,0,0.55)" stroke-width="1" stroke-linejoin="round"/>' +
-  '<circle cx="7.5" cy="15" r="1.9" fill="rgba(0,0,0,0.55)"/>' +
-  '<circle cx="16.5" cy="15" r="1.9" fill="rgba(0,0,0,0.55)"/>' +
-  '<path d="M9 8.5h6" stroke="rgba(0,0,0,0.45)" stroke-width="1.2" stroke-linecap="round"/>' +
-  '</svg>'
 
 // 常见英文楼层名的中文显示
 const FLOOR_NAME_ZH: Record<string, string> = {
@@ -478,6 +460,9 @@ export function MapPage() {
   const [btrArmed, setBtrArmed] = useState(false)
   const [btrOpen, setBtrOpen] = useState(false)
   const [btrFilter, setBtrFilter] = useState('all')
+  // 是否在地图上画候选路线轨迹。默认关闭：轨迹是社区实测坐标，灯塔图会明显偏离，
+  // 站点名称 + 面板里的检查点进度才是可靠信息
+  const [btrShowPath, setBtrShowPath] = useState(false)
   const raid = useStore((s) => s.raid)
 
   const [cursorCoord, setCursorCoord] = useState<{ x: number; z: number } | null>(null)
@@ -625,11 +610,8 @@ export function MapPage() {
   const questLayerRef = useRef<L.LayerGroup | null>(null)
   // 本地战局 Boss 刷新位置图层（与图标筛选独立，由「绘制刷新位置」开关控制）
   const bossLayerRef = useRef<L.LayerGroup | null>(null)
-  // BTR 图层与「每秒位置更新」函数（面板通过回调驱动，不触发本组件重渲染）
+  // BTR 候选路线轨迹图层（只画静态轨迹，不再画「实时位置」：坐标是估算，偏差会误导）
   const btrLayerRef = useRef<L.LayerGroup | null>(null)
-  const btrUpdateRef = useRef<((s: BtrLayerState) => void) | null>(null)
-  // 面板最近一次上报的状态：图层重建（换图 / 改筛选）后立即套用，不必等下一次 tick
-  const btrStateRef = useRef<BtrLayerState>({ remain: null, filter: 'all' })
   // 自动缩放 / 自动居中 / 任务跟踪 ref：地图构建 effect 与跟随 effect 通过 ref 读最新值
   const autoZoomRef = useRef(false)
   autoZoomRef.current = autoZoomMap
@@ -1138,6 +1120,31 @@ export function MapPage() {
         s.zIndex = () => 400
       }
     }
+    // BTR 站点：名称常显（蓝色小字，比转移点再小一号）。
+    // 站点坐标来自 tarkov.dev，是准确的；常显名字才能直接读「当前在哪个检查点」。
+    const BTR_STOP_COLOR = '#58a6ff'
+    const btrStopLabel = (en: MarkerEntry): HTMLElement => {
+      const raw = en.nameZh ?? en.name ?? ''
+      // 上游未本地化的站点名是 `Trading/Dialog/PlayerTaxi/.../Name` 这种 key，别直接怼到地图上
+      const name = raw.includes('/') ? 'BTR 站点' : raw
+      const wrap = document.createElement('div')
+      wrap.className = 'extract-label'
+      const nameEl = document.createElement('div')
+      nameEl.className = 'extract-name btr-stop-name'
+      nameEl.textContent = name
+      nameEl.style.color = BTR_STOP_COLOR
+      nameEl.style.setProperty('--req-outline', BTR_STOP_COLOR)
+      wrap.appendChild(nameEl)
+      return wrap
+    }
+    for (const g of groups) {
+      if (g.key !== 'btr') continue
+      for (const s of g.subs) {
+        s.tooltip = btrStopLabel
+        // 压在撤离点 / 转移点之下，避免挡住这些更常用的信息
+        s.zIndex = () => 200
+      }
+    }
     // Boss 出生点：标题已是 Boss 名，弹窗补刷新率与所在区域
     for (const g of groups) {
       if (g.key !== 'spawns') continue
@@ -1563,7 +1570,7 @@ export function MapPage() {
     refreshObjectiveMarkers(map, objectivesDoneMap)
   }, [objectivesDoneMap, qzDoc, imap, chips, inProgressIds])
 
-  /* ---------- BTR 路线图层（候选路线轨迹 + BTR 当前位置） ---------- */
+  /* ---------- BTR 路线图层（只画候选路线轨迹，不再画「实时位置」） ---------- */
 
   useEffect(() => {
     const map = mapRef.current
@@ -1573,86 +1580,45 @@ export function MapPage() {
       if (map.hasLayer(btrLayerRef.current)) map.removeLayer(btrLayerRef.current)
       btrLayerRef.current = null
     }
-    btrUpdateRef.current = null
-    // 收起面板（btrOpen=false）不拆图层：只有「停止跟踪」才结束绘制
-    if (!btrArmed || !btrMap) return
+    // 收起面板（btrOpen=false）不拆图层：只有「停止跟踪」或关掉「地图轨迹」才不画
+    if (!btrArmed || !btrMap || !btrShowPath) return
 
     const lg = L.layerGroup()
-    const rows: { route: BtrRoute; marker: L.Marker }[] = []
+    // 站点由地图自带的「BTR 站点」标记图层绘制（启用跟踪时会自动勾选，并常显站名），
+    // 这里只画轨迹：不再按推算坐标放「车辆」图标——那只是插值估算，
+    // 本地/在线战局的车速差异会让它明显偏出路面（灯塔图直接画到山上）。
     const routes = btrMap.routes.filter(
       (r) => btrFilter === 'all' || r.group === btrFilter || btrFilter === `route:${r.id}`,
     )
     for (const route of routes) {
       const color = btrColor(btrMap.routes.indexOf(route))
       const focused = btrFilter === `route:${route.id}`
-      L.polyline(
+      const line = L.polyline(
         route.path.map(([x, z]) => [z, x] as [number, number]),
         {
           color,
           weight: focused ? 3.5 : 2.5,
           opacity: btrFilter === 'all' ? 0.45 : 0.8,
-          interactive: false,
         },
       ).addTo(lg)
-      // 站点由地图自带的「BTR 站点」标记图层绘制（启用跟踪时会自动勾选），这里不再重复画点
-      const marker = L.marker([route.path[0][1], route.path[0][0]], {
-        icon: L.divIcon({
-          className: 'btr-vehicle',
-          html: `<div class="btr-vehicle-box" style="color:${color}">${BTR_VEHICLE_SVG}</div>`,
-          iconSize: [45, 45],
-          iconAnchor: [22, 22],
-        }),
-        zIndexOffset: 9000,
-        opacity: 0,
-      }).addTo(lg)
-      marker.bindTooltip(route.nameZh, {
+      // 点轨迹即可只看这一条（再点一次回全部在面板里操作）
+      line.on('click', () => setBtrFilter(`route:${route.id}`))
+      line.bindTooltip(route.nameZh, {
         direction: 'top',
         className: 'marker-hover-tip',
-        offset: [0, -25],
       })
-      // 点车/点候选路线即可只看这一条（再点一次回全部在面板里操作）
-      marker.on('click', () => setBtrFilter(`route:${route.id}`))
-      rows.push({ route, marker })
     }
     lg.addTo(map)
     btrLayerRef.current = lg
 
-    // 面板每 0.5s 调一次：只动 Leaflet 标记，不触发 React 重渲染
-    btrUpdateRef.current = ({ remain }) => {
-      for (const row of rows) {
-        if (remain == null) {
-          row.marker.setOpacity(0)
-          continue
-        }
-        const snap = btrSnapshot(btrMap, row.route, remain)
-        if (snap.x == null || snap.z == null || snap.kind === 'waiting') {
-          row.marker.setOpacity(0)
-          continue
-        }
-        row.marker.setLatLng([snap.z, snap.x])
-        row.marker.setOpacity(1)
-        const eta = snap.eta == null ? '' : ` · ${fmtClock(snap.eta)}`
-        const txt =
-          snap.kind === 'stop'
-            ? `${row.route.nameZh} · 停靠 ${btrMap.stops[snap.stopId ?? '']?.nameZh ?? ''}${eta}`
-            : snap.kind === 'travel'
-              ? `${row.route.nameZh} · 前往 ${snap.nextStopName}${eta}`
-              : `${row.route.nameZh} · 已跑完`
-        row.marker.setTooltipContent(txt)
-      }
-    }
-    // 立即套用面板当前状态（子组件 effect 先于父组件，首次上报时图层还没建好）
-    btrUpdateRef.current?.(btrStateRef.current)
-
     return () => {
-      btrUpdateRef.current = null
       if (btrLayerRef.current && map.hasLayer(btrLayerRef.current)) {
         map.removeLayer(btrLayerRef.current)
       }
       btrLayerRef.current = null
     }
     // markers 变化会重建 Leaflet 地图实例，BTR 图层要跟着重建
-  }, [imap, markers, btrMap, btrArmed, btrFilter])
+  }, [imap, markers, btrMap, btrArmed, btrFilter, btrShowPath])
 
   /* ---------- 渲染 ---------- */
 
@@ -2023,10 +1989,8 @@ export function MapPage() {
                   filter={btrFilter}
                   visible={btrOpen}
                   onFilter={setBtrFilter}
-                  onState={(s) => {
-                    btrStateRef.current = s
-                    btrUpdateRef.current?.(s)
-                  }}
+                  showPath={btrShowPath}
+                  onTogglePath={() => setBtrShowPath((v) => !v)}
                   onClose={() => setBtrOpen(false)}
                   onStop={() => {
                     setBtrArmed(false)

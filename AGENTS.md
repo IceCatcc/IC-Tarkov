@@ -91,6 +91,15 @@ git push origin v<version>
 - 绿点只在 `isNewer(latest, current)` 为真时显示；当前版本为空（开发环境）时不提示。
 - 即使已是最新版本，点击版本标签仍展示最新 release 的说明。
 
+## 游戏数据自动更新
+
+- **调度**：`lib.rs::spawn_auto_update`（`setup` 里随应用启动）每 60 秒醒一次，读 `settings.json` 的 `autoUpdate` / `autoUpdateHours`（默认 `true` / `6`），到点就与 json.tarkov.dev 核对一次版本（带 ETag，内容没变只收 304）。关闭后**完全不联网**，只有设置页的「更新数据」会拉取；启动时的静默更新（`load_in_background`）同样受这个开关控制。
+- **开关命令**：`set_auto_update(enabled, hours?)` → 写 settings.json 并返回完整 `AppSettings`（设置页用它即时落盘，不走「保存」按钮；间隔可选 1/3/6/12/24 小时，后端 clamp 到 1~168）。Web 端 `web-impl.ts` 里是空实现（数据由服务端维护），界面在 `isWeb()` 时不渲染这块。
+- **不丢缓存（`.bak` 回退）**：`apidata::do_sync` 在覆盖任何缓存文件前先把旧的复制成同目录的 `<文件名>.bak`；新响应还必须能通过 `serde_json` 解析才落盘（截断 / 伪装成 200 的错误页直接丢掉并记一条 `failed`）。`ensure_cache` 发现目标文件缺失而 `.bak` 存在时会先拿备份恢复，再考虑用随包种子。
+- **重建失败整体回滚**：新数据写完后 `dataset::rebuild` 若失败（上游改了结构、本项目解析不了），`apidata::rollback` 把所有 `.bak` 覆盖回去、重建一次，并 `emit("data-rollback", {restored, message})`。目的就一条：宁可停在上一版可用数据，也不要卡在用不了的数据上。
+- **前台通知（Toasts）**：`SyncReport.auto` 标记这次是不是后台自动更新。`tauri-impl.ts` 监听 `data-synced`，只有 `auto` 才弹通知（有更新才提示「已自动更新 n 份文件」，无变化静默；失败提示「已保留原有缓存」），`data-rollback` 一律提示。手动更新有设置页自己的进度与结果，不重复弹。通知样式是 Toast 的 `data` kind（绿色）。
+- 过期判定 `DataStatus.stale` 跟着自动更新间隔走（关闭时退回 7 天，仅作展示）。
+
 ## UI 约定
 
 - 浮层层级：`SettingsModal` 为 `z-[2000]`，帮助窗口 `z-[1200]`，「关于」弹窗 `z-[1300]`，版本/更新窗口 `z-[1500]`；帮助与关于从设置页打开时分别抬到 `z-[2100]` / `z-[2200]`（`HelpModal` / `AboutModal` 的 `z` prop）。
@@ -137,6 +146,7 @@ git push origin v<version>
   - **BTR**：`shooterBTR` 走同一套判定，另记 `OnReadyToDeparture(BtrReadyToDepartureEvent)`（发车准备，该行常无时间戳，用当前时间兜底）与 `Service PlayerTaxi has already been purchased!`（购车）。BTR 不在 `map-bosses` 数据里，所以界面单独一块显示，且只在森林 / 街区 / 灯塔或真有日志信号时出现。
   - 拉取地图中文名用 `dataset::store().skeleton` 的 `nameZh`（`map_zh()`），取不到退化 nn。
   - `Logging.config`（游戏安装目录，与 `EscapeFromTarkov.exe` 同级）：一键修改只把 `rules[].fileName == "aiData"` 的 `minLevel` 改成 `Trace`（先校验 JSON，再用正则只替换该值，保留原格式与其它规则）。**AI 数据的原始级别固定是 `Error`（`ORIGINAL_AI_LEVEL`），「恢复」就是把该值写回，不记录原值、不生成 `.bak` 备份**；为了不误伤手动设置，只有当前级别仍是 `Trace` 时才自动还原，否则报错让用户自行确认（参考实现 tarkov-boss 也拒绝自动恢复已被外部改动的配置）。**修改后需重启游戏生效**。
+  - **「已启用」必须与日志配置联动**：快照里带 `logReady` / `aiDataLevel`（`Runtime::refresh_log_ready` 每 3 秒最多读一次 `Logging.config`），前端把「已启用」算成 `enabled && logReady`——开关打开但 aiData 级别不是 `Trace`（没权限写、没定位到配置、被手动改回去）时显示琥珀色「未生效」，此时日志里读不到任何 Boss / BTR 细节。`boss_set_enabled` / `boss_apply_logging` / `boss_restore_logging` / `boss_set_game_root` 改完配置都会清掉缓存并立刻 `poll` 广播一次，徽标不用等下一轮。**`Switch` 仍然跟随 `enabled`（用户意图）**，否则「未生效」时就关不掉。
   - **开关与日志配置联动**：`boss_set_enabled(true)` 会顺手 `apply_logging_inner`（aiData → Trace），`false` 时 `restore_logging_inner`（→ Error）。两者都是 best-effort（找不到配置 / 没写权限时**不阻断开关**，前端在切换后重新拉 `boss_logging_status` 并按 `patched` 给出警告），配置卡里的两个按钮仍保留用于手动补做。目录定位顺序：存档里的 `configPath` → `gameRoot`（含向上 4 层）→ 日志目录向上 6 层 → 各固定盘常见安装路径；找不到就让用户选游戏目录。
   - 存档 `<数据根>/boss-monitor.json`（`enabled` / `notify` / `cleanAi` / `gameRoot` / `configPath`）；命令 `boss_get_state`（可选 `force`，见上）/ `boss_set_enabled` / `boss_set_notify` / `boss_set_clean` / `boss_logging_status` / `boss_set_game_root` / `boss_apply_logging` / `boss_restore_logging`，**只注册桌面端**，web 端 `web-impl.ts` 给空状态 / 抛不支持，手机端界面直接提示仅电脑端可用。
   - **自动清理 AI 日志**（`BossSettings.clean_ai` + `maybe_clean_ai`）：每轮 `poll` 解析完之后，若当前会话里 `aiData` 日志超过 `CLEAN_LIMIT`（16 MB）就 `set_len(0)` 截断，**只动 aiData，application / backend 一字不动**；截断后把该文件偏移归零、丢掉半行 `tails`。游戏以「追加 + 写共享」方式打开日志，所以运行中通常也能清；被独占锁住时 open 失败 → 只写 `cleanNote` 提示并下一轮重试，不阻断监控。快照里带 `cleanAi` / `cleanNote`（后者不随 `reset_scan` 清空），界面在开关行下方显示。`read_new_lines` 会抹掉 NUL，防止非追加写入留下的空洞污染解析。
@@ -161,11 +171,15 @@ git push origin v<version>
   - SVG 取不到时（文件缺失，`fetch` 非 2xx 显式抛错）**回退瓦片**，不让地图空着；SVG 异步加载完成后按 `floorSelRef.current` 复位当前楼层（不能直接 `showSvgMain()`，会把用户已选的楼层顶掉）。
 - **地图「游戏时间」显示**：组件 `src-react/components/GameClock.tsx`，**固定显示在地图页右上角**（常驻徽标，不随「地图信息」面板收起；原先放在右下角面板里，已移出，面板的 `title` 也不再提游戏时间）。**纯本地计算，不依赖任何后端接口**（历史上基于 tarkov.dev `time` 接口的版本已因长期无数据被移除）：`游戏秒 = (UTC 秒 × 7 + 3h) % 86400`，现实 1 秒 = 游戏 7 秒，故以 `1000/7 ≈ 143ms` 定时刷新让游戏秒逐秒跳动。UI 是右上角两行的小徽标：上行「游戏时间」（11px 淡灰），下行为两个时间用 ` / ` 隔开（`g1 / g2`，同一字号同一颜色，**不分主次、不做强调**），无按钮、无弹窗、不显示 UTC。地图页 keepAlive 隐藏（`display:none`）时按 store 的 `page` 停表，切回立即刷新一次。
 - **地图页浮窗排布**：左上角一行依次是「任务 → 地图选单（双列）→ 层级 → 聚焦 → BTR」；右上角只有游戏时间徽标。层级 / 聚焦原在右上角，为给时钟让位已并入左上角一行（`items-start`，各自的展开面板 `left-0` 向左对齐）。层级外层带 `z-[620]`，高于右下角「地图信息」浮窗（`z-600`），否则展开的楼层选单会被它盖住。
-- **BTR 路线跟踪**：数据在 `public/data/btr-routes.json`（路线轨迹 + 到站时序，坐标已按 tarkov.dev 底图线性校准；来源与误差写在文件内 `source` 字段），推算逻辑在 `src-react/btr.ts`（`btrSnapshot`，时间轴统一为「战局剩余秒数」，与上游 `raidDuration` 一致），面板 `src-react/components/BtrPanel.tsx`，仅森林 / 街区 / 灯塔显示（`btrKeyOf`）。
+- **BTR 路线跟踪**：数据在 `public/data/btr-routes.json`（路线轨迹 + 到站时序，坐标已按 tarkov.dev 底图线性校准；来源与误差写在文件内 `source` 字段），推算逻辑在 `src-react/btr.ts`（时间轴统一为「战局剩余秒数」，与上游 `raidDuration` 一致），面板 `src-react/components/BtrPanel.tsx`，仅森林 / 街区 / 灯塔显示（`btrKeyOf`）。
+  - **不再画「实时位置」**：`btrSnapshot` 的坐标是按 `pathIndex` + 停留时长线性插值的估算，本地/在线战局的车速差异会让它明显偏离路面（灯塔图直接画到山上），车辆 divIcon 已删除。改成 `btrLeg()` 的检查点列表：每条路线一行「停靠/前往 + 倒计时（距发车 / 距到站 / 距部署）」加一行「下一站 · 再下一站」。**改 BTR 相关 UI 时不要再引入按坐标定位的推算绘制**，除非拿到准确采样。
+  - **站点名称常显**：`MapPage` 给 `btr` 图标组的所有子项挂 `s.tooltip = btrStopLabel`（`extract-name btr-stop-name`，蓝色 13px，`.extract-name` 的 19px 要用双类选择器覆盖）、`zIndex: 200` 压在撤离点 / 转移点之下。站点名来自 `regular_maps_zh` 的 `Trading/Dialog/PlayerTaxi/.../Name`，未本地化时（含 `/` 的 key）显示「BTR 站点」。灯塔图上游没有 `btrStops`，因此那张图只有轨迹没有站点。
+  - **地图轨迹默认关闭**：面板里的「地图轨迹」开关（`MapPage` 的 `btrShowPath`，不进 store）默认 off，只画站点图标与名字；打开才画候选路线 polyline。原因同上：轨迹坐标是社区实测，个别图会偏。
+  - **开局时间对齐**：日志里的进图行到真正落地之间有加载时间，所以 `autoRemain` 算出来的值与游戏内倒计时常差几十秒。面板提供「开局校准」（`store.btrOffset`，随 `mapPrefs` 持久化，±300 秒）：`剩余 = raidDuration - 已过时间 - offset`，正数让显示更少。另外日志时间戳不可信时（时区 / 系统时钟被改，算出负数或超过战局时长 + 5 分钟）会退回用 `raid.recvAt`（前端收到进图事件的本地时刻，`tauri-impl.ts` 打的戳）起算。
   - **数据生成必须保证 `schedule.pathIndex` 与 `path` 点列一一对应**。参考站有两套几何：`map.routes[].path`（官方采样，索引指向它）与 `manualGeometry.routes`（手工路径，坐标可与游戏坐标对齐，但点数/圈数不同）。直接拿手工路径套官方索引会让到站瞬间跳变（森林 R5 曾出现「先正常移动、然后突然跳到 USEC 检查点」）。当前做法：森林按站点锚点把手索引映射到手工路径（站点误差 0m）；街区 / 灯塔的手工路径圈数不全，改用站点样本拟合的仿射变换直接转换官方采样点（残差约 6 / 18m）。生成脚本在 `quest_analysis/btr_gen.cjs`（该目录被 gitignore），改数据后务必跑一遍并检查输出的 `worstStopGap`。
   - **计时基准**来自后端 `raid-changed` 事件（`store::RaidState`，全局且不落盘）：进图（`RaidId` / `Locations:` 行）置 `active=true` 并记录 `startedAt`，出图（`CompleteSelectedProfile` 行）置 `false` 并记录 `endedAt`；同一张图连打两局时 `map-changed` 不 emit，但 `raid-changed` 每次都发，否则第二局没有计时基准。转场到新图同样重置计时（新战局）。
   - **进程退出兜底**：崩溃 / 强退写不出出图行，watcher 的 3 秒轮询在 `raid.active` 时用 `tasklist` 检查 `EscapeFromTarkov.exe`，进程不在则结束战局（`endedAt` 取检测时刻，最多晚 3 秒）。
-  - **交互**：出图后倒计时冻结在出图时刻；面板提供「继续追踪 / 暂停 / 复位」、参考站同款快捷时间点（战局剩余 35:00 / 30:00 / … / 01:00）与自定义剩余时间。路线每局随机，默认把所有候选路线都画在地图上（颜色区分、点车辆或筛选可只看一条），无需先确定路线。
+  - **交互**：出图后倒计时冻结在出图时刻；面板提供「继续追踪 / 暂停 / 复位」、参考站同款快捷时间点（战局剩余 35:00 / 30:00 / … / 01:00）与自定义剩余时间。路线每局随机，候选路线的检查点进度都在列表里（颜色区分，点列表项或轨迹可只看一条），无需先确定路线。
   - **收起 ≠ 停止**：`MapPage` 用 `btrArmed`（已启用跟踪）与 `btrOpen`（面板展开）两个状态区分——面板的 × 只把 `btrOpen` 置 false，`BtrPanel` 仍然挂载（`visible` 传 false 时返回 null），计时、手动跳转状态与地图图层都不中断；只有面板里的「停止」按钮才清 `btrArmed` 并移除图层。BTR 图层 effect 依赖 `btrArmed` 而不是 `btrOpen`。
   - **「精简日志」必须保留 `RaidId` 与 `CompleteSelectedProfile` 行**，否则精简后 BTR 会失去计时基准与出图信号。web 端没有日志监控，`getRaidState` 返回 `null`，BTR 退化为手动开始 / 手动跳时间。
 - **启动：资料读取与界面进程分离 + 「读取中 xx」提示**。`setup` 只做轻量初始化（装配 `AppState`、同步载入体量很小的三套任务进度、局域网服务），最耗时的游戏数据集构建（约 17MB 原始 JSON 的解析与派生索引重建）放到后台线程（`src-tauri/src/lib.rs::load_in_background`），进度写入 `src-tauri/src/startup.rs::StartupTracker`，经 `startup-step` 事件与 `get_startup_state` 命令下发；数据集构建的各子阶段（读各文件 / 建索引）通过 `dataset::*_with(progress)` 回调上报同一步骤键，前端就地更新文案而不新增行。前端 `src-react/boot.ts` 把后端步骤与自身步骤（读取界面设置 / 扫描日志 / 加载任务列表）汇成一条时间线，由 `StartupSplash`（`z-[3000]`，见 `src-react/components/StartupSplash.tsx`）渲染遮罩。**约定：`bootReady()` resolve 之前不得调用依赖数据集的命令**（任务/地图/物品），否则会读到空数据集；`bootReady` 用「事件 + 轮询」双保险并带 120s 兜底，后端异常也不会把界面卡在遮罩上。另外 `start_watching` / `reset_and_rescan` 声明为 async：非 async 命令跑在 Tauri 主线程，全量日志扫描会把界面冻住。

@@ -2,8 +2,8 @@
 /** 任务状态：进行中 / 已完成 / 已失败（互斥任务多选一，别人交了本任务即失败） */
 export type QuestStatus = 'in_progress' | 'completed' | 'failed'
 
-/** 全局通知（顶部居中堆叠，3s 自动关闭） */
-export type ToastKind = 'info' | 'accept' | 'done' | 'map' | 'boss'
+/** 全局通知（窗口底部居中堆叠，3s 自动关闭）；data = 后台数据任务（自动更新等） */
+export type ToastKind = 'info' | 'accept' | 'done' | 'map' | 'boss' | 'data'
 export interface Toast {
   id: string
   text: string
@@ -66,6 +66,10 @@ export interface AppSettings {
   deleteScreenshots: boolean
   /** 移动端屏幕常亮（Android FLAG_KEEP_SCREEN_ON）；桌面端不生效，仅持久化 */
   keepScreenOn: boolean
+  /** 是否定时自动与 json.tarkov.dev 核对游戏数据（默认开启） */
+  autoUpdate?: boolean
+  /** 自动更新间隔（小时，默认 6） */
+  autoUpdateHours?: number
   /** UI 偏好（图谱筛选/模式切换/侧边栏等），持久化于后端 settings.json */
   uiPrefs?: Record<string, unknown>
 }
@@ -211,6 +215,11 @@ export interface BossMonitorPayload {
   inRaid: boolean
   ended: boolean
   startedAt: string | null
+  /** 游戏 Logging.config 里 aiData 的 minLevel 是否为 Trace（缓存值，最多 3 秒刷新一次）。
+   *  界面的「已启用」= enabled && logReady：级别不是 Trace 时读不到 AI 细节，不算启用 */
+  logReady: boolean
+  /** aiData 当前日志级别原文（找不到配置时为空） */
+  aiDataLevel: string
   /** 读到过 aiData 行 = 详细 AI 日志已生效 */
   hasAiData: boolean
   /** 会话目录里存在 aiData 日志文件 */
@@ -516,6 +525,12 @@ export interface RaidStatePayload {
   startedAt: string | null
   /** 出图时间（出图后到此刻为止的倒计时冻结） */
   endedAt: string | null
+  /**
+   * 前端收到这条状态的本地时刻（ms），仅前端填写、不落盘。
+   * 日志时间戳与系统时钟不一致（时区 / 时钟被改）时用它将就着计时：
+   * 进图事件是实时的，收到时刻距真正进图只差几秒。
+   */
+  recvAt?: number
 }
 
 // ===== 地图页数据（后端由 tarkov.dev 原始 API JSON 派生，非本地预处理文件） =====
@@ -699,6 +714,14 @@ export interface DataSyncReport {
   /** 内容未变化（服务端 304）而跳过下载的端点数 */
   unchanged: number
   updatedAt: number
+  message: string
+  /** 是否由后台自动更新触发（手动更新有设置页自己的进度与结果，不弹前台通知） */
+  auto: boolean
+}
+
+/** data-rollback 事件：新数据无法解析，已用 .bak 回退到上一版 */
+export interface DataRollback {
+  restored: number
   message: string
 }
 

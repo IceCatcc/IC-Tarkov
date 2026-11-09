@@ -249,8 +249,13 @@ function interpVirtual(
 }
 
 /**
- * 某条路线在「战局剩余 remain 秒」时的 BTR 状态与位置。
+ * 某条路线在「战局剩余 remain 秒」时的 BTR 状态与**推算坐标**。
  * remain 越大越早（战局刚开始），与游戏内倒计时一致。
+ *
+ * 注意：坐标只是按「路径点索引 + 停留时长」线性插值出来的估算，本地/在线战局、
+ * 实际车速与地图底图的差异都会让它明显偏离（灯塔图会直接画到山体上）。
+ * **地图已不再绘制它**，界面改用 `btrLeg` 的检查点列表；这里保留推算逻辑，
+ * 供以后拿到准确的路径采样数据时复用。
  */
 export function btrSnapshot(map: BtrMapData, route: BtrRoute, remain: number): BtrSnapshot {
   const { items, loopStart } = virtualSchedule(route)
@@ -334,6 +339,103 @@ export function btrSnapshot(map: BtrMapData, route: BtrRoute, remain: number): B
     stopId: last.stopId,
     nextStopId: null,
     nextStopName: '',
+    eta: null,
+  }
+}
+
+/**
+ * 某条路线在「战局剩余 remain 秒」时的**检查点进度**（不含坐标）。
+ *
+ * 面板列表用它，而不是 `btrSnapshot` 的实时坐标：日志/时序只能推算「大概跑到哪一段」，
+ * 精确到米的位置容易画到山体或地图外（尤其灯塔图），列表里说清「现在停在哪 / 正在去哪，
+ * 多久发车或到站，下一站是什么」对玩家更有用，也不会因为坐标偏差而误导。
+ */
+export interface BtrLeg {
+  /** waiting（还没出现）/ stop（停靠中）/ travel（在途）/ finished（本局跑完） */
+  kind: BtrSnapshot['kind']
+  /** 上/当前检查点 id（waiting 时为空） */
+  fromStopId: string | null
+  /** 下一个检查点 id（跑完时为空） */
+  toStopId: string | null
+  toName: string
+  /** 再下一个检查点名称（用于「再下一个」提示） */
+  afterName: string
+  /**
+   * 倒计时含义随 kind 变化：
+   * waiting = 距出现；travel = 距到站；stop = 距发车；finished = null
+   */
+  eta: number | null
+}
+
+export function btrLeg(map: BtrMapData, route: BtrRoute, remain: number): BtrLeg {
+  const { items } = virtualSchedule(route)
+  const usable = items.filter((s) => s.idx >= 0)
+  const nm = (id: string | null | undefined): string => (id ? map.stops[id]?.nameZh ?? id : '')
+  const empty = (kind: BtrLeg['kind']): BtrLeg => ({
+    kind,
+    fromStopId: null,
+    toStopId: null,
+    toName: '',
+    afterName: '',
+    eta: null,
+  })
+  if (!route.path.length || !usable.length) return empty('finished')
+  const [first, second] = usable
+  // 还没出现：BTR 在战局剩余 spawnTime 秒时部署
+  if (remain > route.spawnTime) {
+    return {
+      kind: 'waiting',
+      fromStopId: null,
+      toStopId: first.stopId,
+      toName: nm(first.stopId),
+      afterName: nm(second?.stopId),
+      eta: remain - route.spawnTime,
+    }
+  }
+  // 从部署点开去首站
+  if (remain > first.arrival) {
+    return {
+      kind: 'travel',
+      fromStopId: null,
+      toStopId: first.stopId,
+      toName: nm(first.stopId),
+      afterName: nm(second?.stopId),
+      eta: remain - first.arrival,
+    }
+  }
+  for (let i = 0; i < usable.length; i++) {
+    const cur = usable[i]
+    const next = usable[i + 1]
+    const after = usable[i + 2]
+    // 停靠中：arrival >= remain > departure
+    if (remain <= cur.arrival && remain > cur.departure) {
+      return {
+        kind: 'stop',
+        fromStopId: cur.stopId,
+        toStopId: next?.stopId ?? null,
+        toName: nm(next?.stopId),
+        afterName: nm(after?.stopId),
+        eta: remain - cur.departure,
+      }
+    }
+    if (next && remain <= cur.departure && remain > next.arrival) {
+      return {
+        kind: 'travel',
+        fromStopId: cur.stopId,
+        toStopId: next.stopId,
+        toName: nm(next.stopId),
+        afterName: nm(after?.stopId),
+        eta: remain - next.arrival,
+      }
+    }
+  }
+  const last = usable[usable.length - 1]
+  return {
+    kind: 'finished',
+    fromStopId: last.stopId,
+    toStopId: null,
+    toName: '',
+    afterName: '',
     eta: null,
   }
 }

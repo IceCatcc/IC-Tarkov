@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { confirm, open, save } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { useStore } from '../store'
-import { isMobile, isAndroid } from '../platform'
+import { isMobile, isAndroid, isWeb } from '../platform'
 import { WIKI_TEMPLATES, type WikiSite } from '../wiki'
 import { HelpModal } from './HelpModal'
 import AboutModal from './AboutModal'
@@ -19,6 +19,7 @@ import {
   openDataDir,
   getDataStatus,
   refreshGameData,
+  setAutoUpdate,
   getDataLocation,
   setDataLocation,
   getSettings,
@@ -172,6 +173,14 @@ export default function SettingsModal() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [syncResult, setSyncResult] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
+  // 自动更新：默认开启、每 6 小时检查一次（与后端 AppSettings 的默认值一致）
+  const [autoOn, setAutoOn] = useState(settings.autoUpdate ?? true)
+  const [autoHours, setAutoHours] = useState(settings.autoUpdateHours ?? 6)
+  // 设置可能由启动恢复 / 局域网同步改写：跟随 store 走，避免显示过期值
+  useEffect(() => {
+    setAutoOn(settings.autoUpdate ?? true)
+    setAutoHours(settings.autoUpdateHours ?? 6)
+  }, [settings.autoUpdate, settings.autoUpdateHours])
 
   const loadDataStatus = useCallback(() => {
     getDataStatus()
@@ -227,6 +236,32 @@ export default function SettingsModal() {
       await refreshGameData(false)
     } catch (e) {
       setSyncing(false)
+      setError(String(e))
+    }
+  }
+
+  // 自动更新：开关 / 间隔都即时落盘，后端调度线程每分钟重新读取（无需重启）
+  const onToggleAutoUpdate = async (v: boolean) => {
+    setError(null)
+    setFeedback(null)
+    setAutoOn(v)
+    try {
+      setSettings(await setAutoUpdate(v, autoHours))
+    } catch (e) {
+      setAutoOn(!v)
+      setError(String(e))
+    }
+  }
+
+  const onChangeAutoHours = async (h: number) => {
+    setError(null)
+    setFeedback(null)
+    const prev = autoHours
+    setAutoHours(h)
+    try {
+      setSettings(await setAutoUpdate(autoOn, h))
+    } catch (e) {
+      setAutoHours(prev)
       setError(String(e))
     }
   }
@@ -601,6 +636,49 @@ export default function SettingsModal() {
             {dataStatus && !dataStatus.cached && (
               <div className="text-[14px] text-amber mt-2">
                 缓存为空或不完整：请点击上方「更新数据」联网获取（首次使用需联网）。
+              </div>
+            )}
+
+            {/* 自动更新：默认每 6 小时与上游核对一次，可关闭。
+                Web 端的数据由服务端维护，浏览器侧没有后台线程，因此不展示。 */}
+            {!isWeb() && (
+              <div className="mt-3 pt-3 border-t border-line/60">
+                <label className="flex items-center gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={autoOn}
+                    onChange={(e) => onToggleAutoUpdate(e.target.checked)}
+                    className="w-4 h-4 accent-amber"
+                  />
+                  <span className="text-[15px] text-[#e6edf3]">自动更新游戏数据</span>
+                  <span className={`text-[13px] ${autoOn ? 'text-[#3fb950]' : 'text-muted'}`}>
+                    {autoOn ? '已开启' : '已关闭'}
+                  </span>
+                </label>
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <span className={DESC_CLS}>检查间隔</span>
+                  <select
+                    value={autoHours}
+                    disabled={!autoOn}
+                    onChange={(e) => onChangeAutoHours(Number(e.target.value))}
+                    className="bg-ink-700 border border-line rounded px-2 py-1 text-[13px] text-[#e6edf3] disabled:opacity-50"
+                  >
+                    {[1, 3, 6, 12, 24].map((h) => (
+                      <option key={h} value={h}>
+                        每 {h} 小时
+                      </option>
+                    ))}
+                  </select>
+                  <span className={DESC_CLS}>
+                    {autoOn
+                      ? '后台与 json.tarkov.dev 核对版本，有变化才下载；更新结果会在窗口底部提示。'
+                      : '已关闭：只有点上方「更新数据」时才会联网。'}
+                  </span>
+                </div>
+                <div className={`${DESC_CLS} mt-1`}>
+                  更新失败不会影响已有数据：每个文件覆盖前都会留一份{' '}
+                  <span className="font-mono">.bak</span>，新数据解析失败会自动回退到上一版。
+                </div>
               </div>
             )}
           </div>

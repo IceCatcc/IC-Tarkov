@@ -81,6 +81,10 @@ pub struct AppSettings {
     pub delete_screenshots: bool,
     /// 移动端屏幕常亮（Android FLAG_KEEP_SCREEN_ON，默认 true）；桌面端不生效，仅持久化
     pub keep_screen_on: bool,
+    /// 是否每隔 `auto_update_hours` 小时自动与 json.tarkov.dev 核对一次游戏数据（默认开启）
+    pub auto_update: bool,
+    /// 自动更新间隔（小时，默认 6）
+    pub auto_update_hours: u32,
     /// UI 偏好（图谱筛选/模式切换/侧边栏等），宽松 schema：前端自行定义键值
     #[serde(default)]
     pub ui_prefs: std::collections::HashMap<String, serde_json::Value>,
@@ -101,6 +105,9 @@ impl Default for AppSettings {
             delete_screenshots: true,
             // 手机端常作第二屏：默认常亮；旧版 settings.json 无该字段时按 true 处理
             keep_screen_on: true,
+            // 默认每 6 小时自动与上游核对一次数据（可在设置里关闭）
+            auto_update: true,
+            auto_update_hours: apidata::DEFAULT_AUTO_UPDATE_HOURS,
             ui_prefs: std::collections::HashMap::new(),
         }
     }
@@ -310,7 +317,7 @@ fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(data_root(app)?.join("settings.json"))
 }
 
-fn read_settings(app: &tauri::AppHandle) -> AppSettings {
+pub(crate) fn read_settings(app: &tauri::AppHandle) -> AppSettings {
     match settings_path(app) {
         Ok(p) => std::fs::read_to_string(p)
             .ok()
@@ -1199,7 +1206,7 @@ fn load_in_background(app: tauri::AppHandle) {
                 &format!("正在下载游戏数据 {}/{}：{label}", done + 1, total),
             );
         };
-        match apidata::sync_with(&app, false, &mut report) {
+        match apidata::sync_with(&app, false, true, &mut report) {
             Ok(r) => println!("[data] 首次数据下载完成：{}", r.message),
             Err(e) => {
                 eprintln!("[data] 首次数据下载失败：{e}");
@@ -1218,30 +1225,92 @@ fn load_in_background(app: tauri::AppHandle) {
             .map(|e| format!("游戏数据读取失败，界面将以空数据启动：{e}"))
     };
 
-    // 已有部分数据且已过期时才后台静默拉取（一份数据都没有的首次启动已在上一步处理）
+    // 已有部分数据且已过期时才后台静默拉取（一份数据都没有的首次启动已在上一步处理）。
+    // 关闭自动更新后这里也不联网：只在用户手动点「更新数据」时拉取。
     tracker.step(&app, "update", "正在检查数据更新…");
     let st = apidata::status(&app);
-    if st.stale && st.files.iter().any(|f| f.bytes > 0) {
-        spawn_sync(app.clone(), false);
+    if st.stale && st.files.iter().any(|f| f.bytes > 0) && apidata::auto_update_conf(&app).0 {
+        spawn_sync(app.clone(), false, true);
     }
 
     // 下载失败的原因优先于「数据集为空」的报错：后者正是前者导致的
     tracker.finish(&app, download_err.or(dataset_err));
 }
 
-/// 后台同步：拉取全部端点 -> 重建派生索引 -> 通知前端刷新
-fn spawn_sync(app: tauri::AppHandle, force: bool) {
-    std::thread::spawn(move || match apidata::sync(&app, force) {
+/// 后台同步：拉取全部端点 -> 重建派生索引 -> 通知前端刷新。
+///
+/// 新数据重建失败（新版本改了结构、本项目解析不了）时先用 `.bak` 回退本轮更新的文件、
+/// 并广播 `data-rollback`——宁可停留在上一版可用数据，也不要卡在一份用不了的数据上。
+fn spawn_sync(app: tauri::AppHandle, force: bool, auto: bool) {
+    std::thread::spawn(move || match apidata::sync(&app, force, auto) {
         Ok(report) => {
-            if !report.updated.is_empty() {
-                match dataset::rebuild(&app) {
-                    Ok((q, m)) => println!("[data] 数据集已刷新：{q} 个任务 / {m} 张地图"),
-                    Err(e) => eprintln!("[data] 刷新后重建数据集失败：{e}"),
+            if report.updated.is_empty() {
+                return;
+            }
+            match dataset::rebuild(&app) {
+                Ok((q, m)) => {
+                    println!("[data] 数据集已刷新：{q} 个任务 / {m} 张地图");
+                    let _ = app.emit("data-reloaded", report.updated_at);
                 }
-                let _ = app.emit("data-reloaded", report.updated_at);
+                Err(e) => {
+                    eprintln!("[data] 刷新后重建数据集失败：{e}");
+                    // 先只回退本轮更新过的文件（无关数据不动）；还不行再整份回退
+                    let mut restored = apidata::rollback(&app, Some(&report.updated)).unwrap_or(0);
+                    let mut ok = dataset::rebuild(&app).is_ok();
+                    if !ok {
+                        restored += apidata::rollback(&app, None).unwrap_or(0);
+                        ok = dataset::rebuild(&app).is_ok();
+                    }
+                    let message = if restored > 0 {
+                        // 重建已在上面的两次尝试里跑过：成功则索引回到上一版，失败只能留着旧索引
+                        if ok {
+                            println!("[data] 已回退到上一版数据：{restored} 份文件");
+                        } else {
+                            eprintln!("[data] 回退后重建仍失败，索引保持为回退前的版本");
+                        }
+                        let _ = app.emit("data-reloaded", apidata::status(&app).updated_at);
+                        format!("新数据无法解析（{e}），已回退到上一版缓存（{restored} 份文件）")
+                    } else {
+                        format!("新数据无法解析（{e}），且没有可用的备份，请到设置页手动更新数据")
+                    };
+                    eprintln!("[data] {message}");
+                    let _ = app.emit(
+                        "data-rollback",
+                        serde_json::json!({ "restored": restored, "message": message }),
+                    );
+                }
             }
         }
         Err(e) => eprintln!("[apidata] 数据更新失败：{e}"),
+    });
+}
+
+/// 自动更新调度：每 60 秒醒一次，到期（默认每 6 小时）就与上游核对一次数据。
+///
+/// - 关闭自动更新（`autoUpdate=false`）时完全不联网；
+/// - 与手动更新共用 `SYNCING` 防重入，正在更新时直接跳过；
+/// - 两次尝试之间至少间隔 10 分钟，避免断网时每分钟重试一次。
+fn spawn_auto_update(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        let mut last_try: Option<std::time::Instant> = None;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            let (enabled, interval) = apidata::auto_update_conf(&app);
+            if !enabled {
+                continue;
+            }
+            if let Some(t) = last_try {
+                if t.elapsed() < std::time::Duration::from_secs(600) {
+                    continue;
+                }
+            }
+            if !apidata::due(&app, interval) {
+                continue;
+            }
+            last_try = Some(std::time::Instant::now());
+            println!("[data] 自动更新：距上次核对已超过 {} 小时", interval / 3600);
+            spawn_sync(app.clone(), false, true);
+        }
     });
 }
 
@@ -1261,8 +1330,25 @@ fn refresh_game_data(app: tauri::AppHandle, force: Option<bool>) -> Result<(), S
     if apidata::status(&app).syncing {
         return Err("数据更新正在进行中".to_string());
     }
-    spawn_sync(app, force.unwrap_or(false));
+    spawn_sync(app, force.unwrap_or(false), false);
     Ok(())
+}
+
+/// 自动更新设置：开关 + 间隔（小时）。立即落盘，调度线程每分钟重新读取，无需重启。
+#[tauri::command]
+fn set_auto_update(
+    app: tauri::AppHandle,
+    enabled: bool,
+    hours: Option<u32>,
+) -> Result<AppSettings, String> {
+    let mut s = read_settings(&app);
+    s.auto_update = enabled;
+    if let Some(h) = hours {
+        // 1 小时 ~ 7 天，避免被传成 0（会被当成默认值）或离谱的大数
+        s.auto_update_hours = h.clamp(1, 168);
+    }
+    write_settings(&app, &s)?;
+    Ok(s)
 }
 
 /// 地图标记（原 public/data/map-markers.json，现由原始 API 数据派生）
@@ -1491,6 +1577,8 @@ pub fn run() {
             // 本地战局 Boss 监控：常驻线程每秒增量读一次日志（关闭时直接空转）
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             crate::boss::init(app.handle());
+            // 游戏数据自动更新：默认每 6 小时与上游核对一次（可在设置里关闭）
+            spawn_auto_update(app.handle().clone());
             Ok(())
         })
         .invoke_handler({
@@ -1535,6 +1623,7 @@ pub fn run() {
                     set_objective_status,
                     get_data_status,
                     refresh_game_data,
+                    set_auto_update,
                     get_map_markers,
                     get_quest_zones,
                     get_map_bosses,
@@ -1608,6 +1697,7 @@ pub fn run() {
                     set_objective_status,
                     get_data_status,
                     refresh_game_data,
+                    set_auto_update,
                     get_map_markers,
                     get_quest_zones,
                     get_map_bosses,

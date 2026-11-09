@@ -30,6 +30,8 @@ import type {
   MapBossesDoc,
   SkeletonDoc,
   DataStatus,
+  DataSyncReport,
+  DataRollback,
   ItemInfo,
   CraftInfo,
   SimplifyLogResult,
@@ -98,15 +100,19 @@ export async function initTauri(): Promise<UnlistenFn> {
       pushToast(`进入地图：${name ?? e.payload.locationId}`, 'map')
     }),
   )
-  // 进图 / 出图：战局计时（地图页 BTR 跟踪用）。手机端由电脑端经局域网转发同一事件
+  // 进图 / 出图：战局计时（地图页 BTR 跟踪用）。手机端由电脑端经局域网转发同一事件。
+  // recvAt 记「本机收到这条状态的时刻」：日志时间戳因时区/系统时钟偏差不可信时，
+  // BTR 面板退回用它计时（进图事件是实时的，与真正进图只差几秒）。
+  const stampRaid = (r: RaidStatePayload | null): RaidStatePayload | null =>
+    r ? { ...r, recvAt: Date.now() } : null
   track(
     await listen<RaidStatePayload>('raid-changed', (e) => {
-      useStore.getState().setRaid(e.payload)
+      useStore.getState().setRaid(stampRaid(e.payload))
     }),
   )
   getRaidState()
     .then((r) => {
-      if (r) useStore.getState().setRaid(r)
+      if (r) useStore.getState().setRaid(stampRaid(r))
     })
     .catch(() => {})
 
@@ -212,6 +218,32 @@ export async function initTauri(): Promise<UnlistenFn> {
     }),
   )
 
+  // —— 后台数据任务的前台通知 ——
+  // 自动更新（每 6 小时 / 启动时）不打断用户，但结果要看得见：成功才提示更新了几份，
+  // 没变化就静默；失败与回退一律提示。手动更新（设置页）有它自己的进度与结果，不重复弹。
+  track(
+    await listen<DataSyncReport>('data-synced', (e) => {
+      const p = e.payload
+      if (!p.auto) return
+      if (p.ok) {
+        if (p.updated.length) {
+          pushToast(`游戏数据已自动更新：${p.updated.length} 份文件`, 'data')
+        }
+      } else {
+        const head = p.failed.slice(0, 2).join('；')
+        pushToast(
+          `游戏数据自动更新失败（已保留原有缓存）：${head}${p.failed.length > 2 ? ' 等' : ''}`,
+          'data',
+        )
+      }
+    }),
+  )
+  track(
+    await listen<DataRollback>('data-rollback', (e) => {
+      pushToast(e.payload.message, 'data')
+    }),
+  )
+
   // —— UI 偏好统一持久化到后端 settings.json（localStorage 仅作首帧缓存）——
   // 启动恢复在 App.tsx 拿到 getSettings 结果后调用 applyUiPrefs；
   // 这里订阅偏好字段变化，防抖写回后端。
@@ -228,6 +260,8 @@ export async function initTauri(): Promise<UnlistenFn> {
     'untrackedQuests',
     'mapChips',
     'bossMarkers',
+    'bossDeathMarkers',
+    'btrOffset',
     'uiScale',
     'wikiWidth',
     'wikiSite',
@@ -629,6 +663,14 @@ export async function getDataStatus(): Promise<DataStatus> {
  */
 export async function refreshGameData(force = false): Promise<void> {
   await invoke('refresh_game_data', { force })
+}
+
+/**
+ * 自动更新开关 / 间隔（小时）：立即落盘，后端的调度线程每分钟重新读取，无需重启。
+ * 返回更新后的完整设置（与 getSettings 同结构）。
+ */
+export async function setAutoUpdate(enabled: boolean, hours?: number): Promise<AppSettings> {
+  return await invoke<AppSettings>('set_auto_update', { enabled, hours })
 }
 
 export async function getMapMarkers(): Promise<MapMarkersDoc> {

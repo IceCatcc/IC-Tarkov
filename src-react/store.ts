@@ -87,6 +87,13 @@ interface AppState {
    */
   bossDeathMarkers: boolean
   setBossDeathMarkers: (v: boolean) => void
+  /**
+   * 地图：BTR 路线跟踪的开局偏移（秒），随 mapPrefs 持久化。
+   * 日志里的进图时间到真正「落地开打」之间还有加载时间，与游戏内倒计时对不上时用它微调：
+   * 正数 = 认为开打更晚（面板显示的剩余时间会更少），范围 ±300 秒。
+   */
+  btrOffset: number
+  setBtrOffset: (v: number) => void
 
   /** 地图图标显隐（含任务目标），随 mapPrefs 一起持久化。键见 mapIconGroups.ts */
   mapChips: Record<string, boolean>
@@ -384,6 +391,7 @@ export function collectUiPrefs(): Record<string, unknown> {
       chips: s.mapChips,
       bossMarkers: s.bossMarkers,
       bossDeathMarkers: s.bossDeathMarkers,
+      btrOffset: s.btrOffset,
     },
     uiScale: s.uiScale,
     wikiWidth: s.wikiWidth,
@@ -402,6 +410,7 @@ interface UiPrefsShape {
     chips?: Record<string, boolean>
     bossMarkers?: boolean
     bossDeathMarkers?: boolean
+    btrOffset?: number
   }
   /** 界面缩放（类显示器缩放）：1 / 1.25 / 1.5 / 2 */
   uiScale?: number
@@ -465,6 +474,8 @@ export const useStore = create<AppState>((set, get) => ({
   setBossMarkers: (v) => set({ bossMarkers: v }),
   bossDeathMarkers: true,
   setBossDeathMarkers: (v) => set({ bossDeathMarkers: v }),
+  btrOffset: 0,
+  setBtrOffset: (v) => set({ btrOffset: Math.round(Math.min(300, Math.max(-300, v))) }),
   mapChips: { ...ICON_DEFAULTS },
   setMapChip: (key, on) => set((s) => ({ mapChips: { ...s.mapChips, [key]: on } })),
   setMapChips: (patch) => set((s) => ({ mapChips: { ...s.mapChips, ...patch } })),
@@ -812,6 +823,8 @@ export const useStore = create<AppState>((set, get) => ({
       if (typeof mp.bossMarkers === 'boolean') patch.bossMarkers = mp.bossMarkers
       if (typeof mp.bossDeathMarkers === 'boolean')
         patch.bossDeathMarkers = mp.bossDeathMarkers
+      if (typeof mp.btrOffset === 'number' && Number.isFinite(mp.btrOffset))
+        patch.btrOffset = Math.round(Math.min(300, Math.max(-300, mp.btrOffset)))
       if (Array.isArray(mp.untrackedQuests))
         patch.untrackedQuests = mp.untrackedQuests.filter((x) => typeof x === 'string')
       if (mp.chips && typeof mp.chips === 'object') {

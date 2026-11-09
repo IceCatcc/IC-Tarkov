@@ -171,6 +171,12 @@ pub struct BossMonitorPayload {
     pub in_raid: bool,
     pub ended: bool,
     pub started_at: Option<String>,
+    /// 游戏 `Logging.config` 里 aiData 的 minLevel 是否已经是 Trace。
+    /// 界面据此判定「是否真的启用」：级别不是 Trace 时永远不会显示为已启用
+    /// （开了开关但配置没生效 / 被手动改回去时，读日志其实读不到 AI 细节）。
+    pub log_ready: bool,
+    /// aiData 当前的日志级别原文（找不到配置时为空）
+    pub ai_data_level: String,
     /// 是否读到过 aiData 行（说明详细 AI 日志已生效）
     pub has_ai_data: bool,
     /// 会话目录里是否存在 aiData 日志文件
@@ -274,6 +280,12 @@ struct Runtime {
     fallback_at: Option<Instant>,
     /// 最近一次自动清理 aiData 日志的结果（给界面看；不随 reset_scan 清空）
     clean_note: String,
+    /// Logging.config 里 aiData 的 minLevel 是否为 Trace（缓存值，见 `refresh_log_ready`）
+    log_ready: bool,
+    /// aiData 当前级别原文（同上，给界面展示）
+    ai_level: String,
+    /// 上次读取 Logging.config 的时间（节流，不必每秒读一次文件）
+    log_checked: Option<Instant>,
 }
 
 impl Default for Runtime {
@@ -301,6 +313,9 @@ impl Default for Runtime {
             fallback_sig: String::new(),
             fallback_at: None,
             clean_note: String::new(),
+            log_ready: false,
+            ai_level: String::new(),
+            log_checked: None,
         }
     }
 }
@@ -323,6 +338,26 @@ impl Runtime {
         self.last_entry_ts.clear();
         self.fallback_sig.clear();
         self.fallback_at = None;
+    }
+
+    /// 刷新「aiData 是不是 Trace」的缓存（最多每 3 秒读一次 Logging.config）。
+    ///
+    /// 界面的「已启用」= 开关打开 **且** 该级别为 Trace：只开开关但配置没写成（没权限 /
+    /// 没定位到游戏目录），或者被手动改回别的级别时，日志里根本读不到 AI 细节，
+    /// 这时候显示「已启用」会误导用户。
+    fn refresh_log_ready(&mut self, app: &AppHandle) {
+        if let Some(t) = self.log_checked {
+            if t.elapsed() < Duration::from_secs(3) {
+                return;
+            }
+        }
+        self.log_checked = Some(Instant::now());
+        let level = resolve_config(app, &self.settings)
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|t| ai_level(&t))
+            .unwrap_or_default();
+        self.log_ready = level.eq_ignore_ascii_case("Trace");
+        self.ai_level = level;
     }
 
     /// 记下已处理的进图行时间（只增不减，兜底检查靠它避免重复 / 回退）
@@ -706,6 +741,8 @@ impl Runtime {
             in_raid: self.raid.in_raid,
             ended: self.raid.ended,
             started_at: self.raid.started_at.clone(),
+            log_ready: self.log_ready,
+            ai_data_level: self.ai_level.clone(),
             has_ai_data: self.has_ai_data,
             ai_log_found: self.ai_log_found,
             diagnostic: self.diagnostic.clone(),
@@ -772,6 +809,8 @@ pub fn init(app: &AppHandle) {
 }
 
 fn poll(app: &AppHandle, rt: &mut Runtime) {
+    // 日志配置的生效状态（aiData 是否为 Trace）：界面「已启用」必须同时满足它
+    rt.refresh_log_ready(app);
     rt.log_dir = {
         let st = app.state::<AppState>();
         let w = st.watch.lock().unwrap();
@@ -1337,6 +1376,9 @@ pub fn boss_set_enabled(app: AppHandle, enabled: bool) -> Result<BossMonitorPayl
         // 关闭监控 = 不再需要详细日志：把 aiData 改回原始级别 Error
         let _ = restore_logging_inner(&app, &mut g.settings);
     }
+    // 开关会改 Logging.config：立刻重读一次级别，界面上的「已启用」才跟得上
+    g.log_checked = None;
+    g.refresh_log_ready(&app);
     g.last_emit.clear();
     save_settings(&app, &g.settings)?;
     poll(&app, &mut g);
@@ -1403,6 +1445,9 @@ pub fn boss_set_game_root(app: AppHandle, path: String) -> Result<LoggingStatus,
     save_settings(&app, &g.settings)?;
     let st = build_status(&app, &g.settings);
     remember_config(&app, &mut g.settings, &st);
+    // 换目录后配置路径变了：重读一次级别，避免「已启用」的判断停在旧文件上
+    g.log_checked = None;
+    g.refresh_log_ready(&app);
     g.last_emit.clear();
     Ok(st)
 }
@@ -1413,6 +1458,11 @@ pub fn boss_apply_logging(app: AppHandle) -> Result<LoggingStatus, String> {
     let rt = runtime();
     let mut g = rt.lock().unwrap();
     apply_logging_inner(&app, &mut g.settings)?;
+    // 级别变了：立刻重读并广播一次，界面徽标才能从「未生效」变「已启用」
+    g.log_checked = None;
+    g.refresh_log_ready(&app);
+    g.last_emit.clear();
+    poll(&app, &mut g);
     Ok(build_status(&app, &g.settings))
 }
 
@@ -1422,6 +1472,10 @@ pub fn boss_restore_logging(app: AppHandle) -> Result<LoggingStatus, String> {
     let rt = runtime();
     let mut g = rt.lock().unwrap();
     restore_logging_inner(&app, &mut g.settings)?;
+    g.log_checked = None;
+    g.refresh_log_ready(&app);
+    g.last_emit.clear();
+    poll(&app, &mut g);
     Ok(build_status(&app, &g.settings))
 }
 

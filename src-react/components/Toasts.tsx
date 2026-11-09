@@ -7,6 +7,7 @@ const BAR_COLOR: Record<ToastKind, string> = {
   done: 'bg-[#2ea043]', // 完成
   map: 'bg-amber', // 进入地图
   boss: 'bg-[#f85149]', // 战局内 Boss 刷新
+  data: 'bg-[#2ea043]', // 后台数据任务（游戏数据自动更新 / 回退）
   info: 'bg-[#6b7682]',
 }
 

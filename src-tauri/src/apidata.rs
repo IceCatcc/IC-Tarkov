@@ -4,9 +4,13 @@
 //! 原始响应原样落盘，不做任何加工；派生索引由 dataset 模块在运行时构建。
 //!
 //! 目录约定：
-//!   resources/api/*.json          随安装包分发的种子（由 scripts/fetch_api_data.py 抓取）
+//!   resources/api/*.json          随安装包分发的种子（由 scripts/fetch-api-data.mjs 抓取）
 //!   <data_root>/tarkov-api/       运行时缓存，软件端联网刷新时直接覆盖这里的文件
 //!                                    （data_root 由数据目录位置决定：AppData 或程序目录/data）
+//!
+//! 写入安全：每个文件覆盖前先把旧的复制成 `<文件名>.bak`，新响应还必须是合法 JSON 才落盘；
+//! 落盘后若派生索引重建失败，`rollback` 会用 `.bak` 整体回退。因此「更新失败」永远不会
+//! 让缓存变成不可用状态（最差也只是停留在上一版）。
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -17,8 +21,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
-/// 缓存过期时间：超过这个秒数就认为数据可能过期（启动时的静默自动更新会触发）
-pub const SYNC_INTERVAL_SECS: i64 = 7 * 24 * 3600;
+/// 自动更新的默认间隔（小时）。用户可在设置里改成 1 / 3 / 6 / 12 / 24 小时，或整体关闭。
+pub const DEFAULT_AUTO_UPDATE_HOURS: u32 = 6;
+
+/// 关闭自动更新时的「过期」阈值：只用于界面提示，不会再触发任何联网
+pub const STALE_FALLBACK_SECS: i64 = 7 * 24 * 3600;
 
 pub struct Endpoint {
     /// 缓存文件名（同时也是种子文件名）
@@ -90,6 +97,41 @@ fn now_secs() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// 自动更新配置：(是否开启, 间隔秒数)。间隔非法（0）时退回默认 6 小时。
+pub fn auto_update_conf(app: &tauri::AppHandle) -> (bool, i64) {
+    let s = crate::read_settings(app);
+    let hours = if s.auto_update_hours == 0 {
+        DEFAULT_AUTO_UPDATE_HOURS
+    } else {
+        s.auto_update_hours
+    };
+    (s.auto_update, hours as i64 * 3600)
+}
+
+/// 「数据可能过期」的阈值：开启自动更新时按配置的间隔算，关闭时退回 7 天
+fn stale_secs(app: &tauri::AppHandle) -> i64 {
+    let (on, interval) = auto_update_conf(app);
+    if on {
+        interval
+    } else {
+        STALE_FALLBACK_SECS
+    }
+}
+
+/// 距离上次「已与远端核对过版本」是否已经超过 interval（自动更新的调度依据）。
+/// 缓存不完整（缺文件 / 空文件）时也算到期，让自动更新能把缺的补回来。
+pub fn due(app: &tauri::AppHandle, interval_secs: i64) -> bool {
+    let st = status(app);
+    if st.syncing {
+        return false;
+    }
+    if !st.cached {
+        return true;
+    }
+    let last = st.checked_at.max(st.updated_at);
+    last == 0 || now_secs() - last >= interval_secs
 }
 
 // ---------------- 路径 ----------------
@@ -182,6 +224,12 @@ pub fn ensure_cache(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         if dst.is_file() {
             return;
         }
+        // 目标缺失但有上次的备份：优先用备份（比随包种子新，也不需要联网）
+        let bak = backup_path(dst);
+        if bak.is_file() && std::fs::copy(&bak, dst).is_ok() {
+            eprintln!("[apidata] 已从备份恢复：{}", dst.display());
+            return;
+        }
         match read_bundled_bytes(app, rel) {
             Some(bytes) => {
                 if let Err(e) = std::fs::write(dst, &bytes) {
@@ -268,7 +316,7 @@ pub struct DataStatus {
     pub updated_at: i64,
     /// 最近一次与服务端核对版本的时间（含「已是最新」的情况，epoch 秒）
     pub checked_at: i64,
-    /// 是否过期（缺失，或距上次核对已超过 SYNC_INTERVAL_SECS）
+    /// 是否过期（缺失，或距上次核对已超过自动更新间隔；关闭自动更新时为 7 天）
     pub stale: bool,
     pub syncing: bool,
     pub files: Vec<DataFileStat>,
@@ -306,13 +354,14 @@ pub fn status(app: &tauri::AppHandle) -> DataStatus {
         }
     }
     let updated_at = manifest.updated_at;
-    // 过期看「上次核对时间」：数据长期没变化时也不会每次启动都重复联网
+    // 过期看「上次核对时间」：数据长期没变化时也不会每次启动都重复联网。
+    // 阈值跟着自动更新间隔走（默认 6 小时；关闭自动更新时退回 7 天，只作展示用）
     let last_check = manifest.checked_at.max(updated_at);
     DataStatus {
         cached: missing == 0,
         updated_at,
         checked_at: manifest.checked_at,
-        stale: missing > 0 || now_secs() - last_check > SYNC_INTERVAL_SECS,
+        stale: missing > 0 || now_secs() - last_check > stale_secs(app),
         syncing: SYNCING.load(Ordering::SeqCst),
         files,
     }
@@ -342,6 +391,8 @@ pub struct SyncReport {
     pub unchanged: usize,
     pub updated_at: i64,
     pub message: String,
+    /// 是否由后台自动更新触发（前端据此只在自动更新时弹前台通知，手动更新有设置页自己的界面）
+    pub auto: bool,
 }
 
 fn build_agent() -> Result<ureq::Agent, String> {
@@ -423,9 +474,75 @@ fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
     }
 }
 
+/// 备份文件路径：同目录下的 `<原文件名>.bak`（只保留最近一份「上一次写成功」的内容）
+fn backup_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    path.with_file_name(format!("{name}.bak"))
+}
+
+/// 覆盖前把现有文件备份一份。备份失败不阻塞更新（只是少了回退能力），但要留日志。
+fn backup_existing(path: &Path) {
+    if !path.is_file() {
+        return;
+    }
+    let bak = backup_path(path);
+    if let Err(e) = std::fs::copy(path, &bak) {
+        eprintln!("[apidata] 备份 {} 失败：{e}", path.display());
+    }
+}
+
+/// 回退：把端点的 `.bak` 覆盖回正式文件（没有备份的端点不动），返回恢复的文件数。
+///
+/// 用在「新数据写进去了，但派生索引重建失败」的场景：说明这版数据本项目解析不了，
+/// 与其让用户停在一个用不了的数据包上，不如退回上一版。
+/// `labels` 为 `Some(本轮更新过的端点名)` 时只回退这几个文件（定向回退，不动无关数据）；
+/// 传 `None` 则整份回退。
+pub fn rollback(app: &tauri::AppHandle, labels: Option<&[String]>) -> Result<usize, String> {
+    let dir = cache_dir(app)?;
+    let mut manifest = read_manifest(&dir);
+    let mut restored = 0usize;
+    for ep in ENDPOINTS {
+        if let Some(ls) = labels {
+            if !ls.iter().any(|l| l == ep.label) {
+                continue;
+            }
+        }
+        let path = dir.join(ep.file);
+        let bak = backup_path(&path);
+        if !bak.is_file() {
+            continue;
+        }
+        match std::fs::copy(&bak, &path) {
+            Ok(_) => {
+                let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                manifest.files.insert(
+                    ep.file.to_string(),
+                    FileInfo {
+                        bytes,
+                        updated_at: mtime_secs(&path),
+                        // 回退后本地内容与远端又可能不一致：清掉 ETag，下次全量核对
+                        etag: String::new(),
+                    },
+                );
+                restored += 1;
+            }
+            Err(e) => eprintln!("[apidata] 回退 {} 失败：{e}", ep.file),
+        }
+    }
+    if restored > 0 {
+        manifest.updated_at = manifest.files.values().map(|f| f.updated_at).max().unwrap_or(0);
+        write_manifest(&dir, &manifest);
+    }
+    Ok(restored)
+}
+
 /// 从 API 拉取全部端点并写入缓存（阻塞）。force=true 时忽略过期判断，全部重下。
-pub fn sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
-    sync_with(app, force, &mut |_, _, _| {})
+/// auto=true 表示由后台自动更新触发（结果会带进 SyncReport，供前端弹前台通知）。
+pub fn sync(app: &tauri::AppHandle, force: bool, auto: bool) -> Result<SyncReport, String> {
+    sync_with(app, force, auto, &mut |_, _, _| {})
 }
 
 /// 带进度回调的同步：每开始一个端点前回调 `(已完成数, 总数, 端点名)`。
@@ -434,6 +551,7 @@ pub fn sync(app: &tauri::AppHandle, force: bool) -> Result<SyncReport, String> {
 pub fn sync_with<F>(
     app: &tauri::AppHandle,
     force: bool,
+    auto: bool,
     progress: &mut F,
 ) -> Result<SyncReport, String>
 where
@@ -442,12 +560,17 @@ where
     if SYNCING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return Err("数据更新正在进行中".to_string());
     }
-    let result = do_sync(app, force, progress);
+    let result = do_sync(app, force, auto, progress);
     SYNCING.store(false, Ordering::SeqCst);
     result
 }
 
-fn do_sync<F>(app: &tauri::AppHandle, force: bool, progress: &mut F) -> Result<SyncReport, String>
+fn do_sync<F>(
+    app: &tauri::AppHandle,
+    force: bool,
+    auto: bool,
+    progress: &mut F,
+) -> Result<SyncReport, String>
 where
     F: FnMut(usize, usize, &str),
 {
@@ -478,6 +601,13 @@ where
         match fetch_one(&agent, ep, known.as_deref()) {
             Ok(Fetched::Unchanged) => unchanged += 1,
             Ok(Fetched::Fresh(bytes, etag)) => {
+                // 落盘前验证是合法 JSON：截断的响应 / 伪装成 200 的错误页不能覆盖本地缓存
+                if serde_json::from_slice::<serde::de::IgnoredAny>(&bytes).is_err() {
+                    failed.push(format!("{} 响应不是合法 JSON（已保留原缓存）", ep.label));
+                    continue;
+                }
+                // 覆盖前留一份 .bak：这一步之后即使新数据有问题也能整体回退
+                backup_existing(&path);
                 match write_atomic(&path, &bytes) {
                     Ok(()) => {
                         let ts = now_secs();
@@ -533,6 +663,7 @@ where
         unchanged,
         updated_at: manifest.updated_at,
         message,
+        auto,
     };
     let _ = app.emit("data-synced", report.clone());
     Ok(report)

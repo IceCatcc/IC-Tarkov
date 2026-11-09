@@ -1,12 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { fmtClock, btrColor, btrSnapshot, type BtrMapData, type BtrRoute } from '../btr'
+import { fmtClock, btrColor, btrLeg, type BtrMapData, type BtrRoute, type BtrLeg } from '../btr'
+import { useStore } from '../store'
 import type { RaidStatePayload } from '../types'
-
-/** 面板上报给地图图层的最小状态：图层只认「当前剩余秒数 + 筛选」，不参与 React 渲染 */
-export interface BtrLayerState {
-  remain: number | null
-  filter: string
-}
 
 interface Props {
   map: BtrMapData
@@ -17,13 +12,15 @@ interface Props {
   /** 路线筛选：'all' / 分组 key / 'route:<id>' */
   filter: string
   onFilter: (f: string) => void
-  onState: (s: BtrLayerState) => void
-  /** 面板是否展开；收起时组件继续挂载（计时与地图绘制不中断） */
+  /** 面板是否展开；收起时组件继续挂载（计时继续） */
   visible: boolean
   /** 收起面板（只隐藏 UI，继续跟踪） */
   onClose: () => void
-  /** 停止跟踪：结束计时并移除地图上的路线 / 车辆 */
+  /** 停止跟踪：结束计时并移除地图上的路线 */
   onStop: () => void
+  /** 是否在地图上绘制候选路线轨迹（默认关闭：坐标是社区实测，灯塔图会偏） */
+  showPath: boolean
+  onTogglePath: () => void
 }
 
 /** 日志时间戳（本地时间 `YYYY-MM-DD HH:mm:ss`）-> 毫秒 */
@@ -55,11 +52,15 @@ export function BtrPanel({
   raidHere,
   filter,
   onFilter,
-  onState,
   visible,
   onClose,
   onStop,
+  showPath,
+  onTogglePath,
 }: Props) {
+  // 开局偏移（秒）：日志进图 → 真正落地之间的加载时间，用它对不齐游戏倒计时时手动校准
+  const offset = useStore((s) => s.btrOffset)
+  const setOffset = useStore((s) => s.setBtrOffset)
   // 时钟：auto = 跟随进图时间；manual = 用户暂停 / 跳转后本地倒计时
   const [manual, setManual] = useState<{
     base: number
@@ -84,17 +85,31 @@ export function BtrPanel({
     if (startedAt) setManual(null)
   }, [startedAt])
 
-  /** 自动模式：战局剩余 = 时长 - (now - 进图时间)；出图后冻结在出图时刻 */
+  /**
+   * 自动模式：战局剩余 = 时长 - 已过时间 - 校准偏移；出图后冻结在出图时刻。
+   *
+   * 已过时间优先按日志里的进图时间算；但如果那个时间戳明显不可信（时区和系统不一致 /
+   * 时钟被改过，算出来是负数或远超战局时长），就退回「本机收到进图状态的时刻」——
+   * 进图事件是实时的，与真正进图只差几秒，比一个差几小时的绝对值靠谱。
+   */
   const autoRemain = useMemo(() => {
     if (!raid || !raidHere) return null
-    const start = parseTs(raid.startedAt)
-    if (start == null) return null
     // 已出图但没有出图时间（数据缺失）：不猜，交给手动模式
     if (!raid.active && !raid.endedAt) return null
-    const end = raid.active ? null : parseTs(raid.endedAt)
-    const at = end ?? nowMs
-    return map.raidDuration - (at - start) / 1000
-  }, [raid, raidHere, nowMs, map.raidDuration])
+    const duration = map.raidDuration
+    const stopAt = raid.active ? nowMs : parseTs(raid.endedAt) ?? nowMs
+    let elapsed: number | null = null
+    const start = parseTs(raid.startedAt)
+    if (start != null) {
+      const e = (stopAt - start) / 1000
+      // 合理的「已过时间」区间：允许略微提前（时钟误差）到战局结束后 5 分钟
+      if (e >= -60 && e <= duration + 300) elapsed = e
+    }
+    if (elapsed == null) {
+      elapsed = raid.active && raid.recvAt ? (nowMs - raid.recvAt) / 1000 : 0
+    }
+    return duration - elapsed - offset
+  }, [raid, raidHere, nowMs, map.raidDuration, offset])
 
   const rawRemain = manual
     ? manual.running
@@ -111,13 +126,6 @@ export function BtrPanel({
       ),
     [map.routes, filter],
   )
-
-  // 上报给地图图层（每 0.5s 一次；父组件只更新 Leaflet 图层，不 setState）
-  const onStateRef = useRef(onState)
-  onStateRef.current = onState
-  useEffect(() => {
-    onStateRef.current({ remain, filter })
-  }, [remain, filter])
 
   const autoActive = !manual && raid?.active === true && raidHere && remain != null
   const running = manual ? manual.running : autoActive && !ended
@@ -157,14 +165,14 @@ export function BtrPanel({
         <div className="flex items-center gap-1">
           <button
             onClick={onStop}
-            title="停止跟踪：结束计时并隐藏地图上的路线与车辆"
+            title="停止跟踪：结束计时并隐藏地图上的候选路线"
             className="px-1.5 text-[11px] leading-5 rounded border border-line text-muted hover:border-amber/70 hover:text-[#d4a174]"
           >
             停止
           </button>
           <button
             onClick={onClose}
-            title="收起面板（继续计时与绘制）"
+            title="收起面板（继续计时；地图上的站点名与轨迹不受影响）"
             className="px-1 text-[15px] leading-none text-muted hover:text-[#e6edf3]"
           >
             ×
@@ -253,6 +261,46 @@ export function BtrPanel({
         </button>
       </div>
 
+      {/* 开局校准：日志「进图」到真正落地之间还有加载时间，与游戏倒计时差几十秒时用它对齐 */}
+      <div className="flex items-center gap-1" title="日志里的进图时间到真正落地之间还有加载时间：和游戏内倒计时对不上时调整这里。+ 让显示的剩余时间更少，- 让它更多。">
+        <span className="text-[11px] text-muted">开局校准</span>
+        <button
+          onClick={() => setOffset(offset - 15)}
+          className="px-1.5 py-0.5 rounded border border-line text-[11px] tabular-nums text-muted hover:border-amber/70 hover:text-[#d4a174]"
+        >
+          -15s
+        </button>
+        <span
+          className={`min-w-[46px] text-center text-[11px] tabular-nums ${
+            offset ? 'text-[#d4a174]' : 'text-muted'
+          }`}
+        >
+          {offset > 0 ? '+' : ''}
+          {offset}s
+        </span>
+        <button
+          onClick={() => setOffset(offset + 15)}
+          className="px-1.5 py-0.5 rounded border border-line text-[11px] tabular-nums text-muted hover:border-amber/70 hover:text-[#d4a174]"
+        >
+          +15s
+        </button>
+        <button
+          onClick={() => setOffset(0)}
+          disabled={!offset}
+          className="px-1.5 py-0.5 rounded border border-line text-[11px] text-muted hover:border-amber/70 disabled:opacity-40"
+        >
+          归零
+        </button>
+        <span className="flex-1" />
+        <button
+          onClick={onTogglePath}
+          title="在地图上画出候选路线的轨迹（社区实测坐标，灯塔图可能与实际路线有偏差；站点名称与图标始终显示）"
+          className={chipCls(showPath)}
+        >
+          地图轨迹
+        </button>
+      </div>
+
       <div className="flex flex-wrap gap-1 pt-1 border-t border-line">
         <button
           onClick={() => onFilter('all')}
@@ -287,7 +335,7 @@ export function BtrPanel({
           : !raid?.startedAt
             ? '未检测到进图：可直接点「继续追踪」或选择时间点手动推算。'
             : raidHere
-              ? '按进图时间自动推算；出图（或游戏进程退出）后停止。路线每局随机，可看下方候选。'
+              ? '按进图时间自动推算（本地/在线战局的实际时序可能有偏差，用「开局校准」对齐）。路线每局随机，看下方各线路的当前检查点。'
               : '当前战局不在本图，自动计时不生效。'}
       </div>
     </div>
@@ -302,6 +350,7 @@ function chipCls(on: boolean): string {
   }`
 }
 
+/** 一条路线的检查点进度：第一行「现在在哪 / 正在去哪 + 倒计时」，第二行「下一站 / 再下一站」 */
 function RouteRow({
   map,
   route,
@@ -315,27 +364,55 @@ function RouteRow({
   active: boolean
   onClick: () => void
 }) {
-  const snap = remain == null ? null : btrSnapshot(map, route, remain)
+  const leg: BtrLeg | null = remain == null ? null : btrLeg(map, route, remain)
   const color = btrColor(map.routes.indexOf(route))
-  let text = '等待开始'
-  if (snap) {
-    if (snap.kind === 'waiting') text = `尚未出现（${fmtClock(snap.eta ?? 0)} 后）`
-    else if (snap.kind === 'stop') text = `停靠 ${map.stops[snap.stopId ?? '']?.nameZh ?? '站点'} · ${fmtClock(snap.eta ?? 0)} 后发车`
-    else if (snap.kind === 'travel')
-      text = `前往 ${snap.nextStopName || '下一站'} · ${fmtClock(snap.eta ?? 0)}`
-    else text = '本局路线已跑完'
+  const stopName = (id: string | null) => (id ? map.stops[id]?.nameZh ?? id : '')
+
+  let head = '等待开始'
+  let tail = ''
+  if (leg) {
+    if (leg.kind === 'waiting') {
+      head = `尚未出现 · ${fmtClock(leg.eta ?? 0)} 后部署`
+      tail = leg.toName ? `首站 ${leg.toName}` : ''
+    } else if (leg.kind === 'stop') {
+      head = `停靠 ${stopName(leg.fromStopId)} · ${fmtClock(leg.eta ?? 0)} 后发车`
+      tail = [leg.toName && `下一站 ${leg.toName}`, leg.afterName && `再下一站 ${leg.afterName}`]
+        .filter(Boolean)
+        .join(' · ')
+    } else if (leg.kind === 'travel') {
+      head = `前往 ${leg.toName || '下一站'} · ${fmtClock(leg.eta ?? 0)} 后到`
+      tail = [leg.fromStopId && `离开 ${stopName(leg.fromStopId)}`, leg.afterName && `再下一站 ${leg.afterName}`]
+        .filter(Boolean)
+        .join(' · ')
+    } else {
+      head = '本局路线已跑完'
+      tail = leg.fromStopId ? `终点 ${stopName(leg.fromStopId)}` : ''
+    }
   }
   return (
     <button
       onClick={onClick}
       title="点击只看这条路线"
-      className={`w-full flex items-center gap-2 px-1.5 py-1 rounded text-left ${
+      className={`w-full px-1.5 py-1 rounded text-left ${
         active ? 'bg-ink-700/70' : 'hover:bg-ink-700/40'
       }`}
     >
-      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-      <span className="shrink-0">{route.nameZh}</span>
-      <span className="flex-1 text-right text-[11px] text-muted truncate">{text}</span>
+      <span className="flex items-center gap-2">
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+        <span className="shrink-0">{route.nameZh}</span>
+        <span
+          className={`flex-1 text-right text-[11px] truncate ${
+            leg?.kind === 'waiting' || !leg ? 'text-muted' : 'text-[#e6edf3]'
+          }`}
+        >
+          {head}
+        </span>
+      </span>
+      {tail && (
+        <span className="mt-0.5 flex items-center gap-2 pl-4">
+          <span className="flex-1 text-right text-[10.5px] text-muted/70 truncate">{tail}</span>
+        </span>
+      )}
     </button>
   )
 }

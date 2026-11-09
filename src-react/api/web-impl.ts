@@ -237,6 +237,8 @@ export async function initTauri(): Promise<UnlistenFn> {
     'untrackedQuests',
     'mapChips',
     'bossMarkers',
+    'bossDeathMarkers',
+    'btrOffset',
     'uiScale',
     'wikiWidth',
     'wikiSite',
@@ -506,6 +508,8 @@ const EMPTY_BOSS_MONITOR: BossMonitorPayload = {
   inRaid: false,
   ended: false,
   startedAt: null,
+  logReady: false,
+  aiDataLevel: '',
   hasAiData: false,
   aiLogFound: false,
   diagnostic: '浏览器端无法读取本机游戏日志',
@@ -615,6 +619,14 @@ export async function getDataStatus(): Promise<DataStatus> {
 
 export async function refreshGameData(force = false): Promise<void> {
   await request('POST', '/api/data/refresh', { force })
+}
+
+/**
+ * 自动更新开关：Web 端的数据由服务端（server/）统一维护与刷新，
+ * 浏览器侧没有后台线程可以调度，这里只做兼容实现（不改变任何状态）。
+ */
+export async function setAutoUpdate(_enabled: boolean, _hours?: number): Promise<AppSettings> {
+  return await getSettings()
 }
 
 /**
